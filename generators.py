@@ -3,12 +3,14 @@ import itertools
 import logging
 import copy
 from utils import *
-from constructs import *
+from datarawparse import *
+from linearconstructs import *
 
 def generate_fuel_vectors_depreciated(complex_type, data):
     """
     makes vectors for standardizaiton of fuel to its use
     """
+    raise DeprecationWarning
     result = []
     if complex_type in ['electric', 'heat', 'void']:
         result = [] #there are no specific types for these energies
@@ -25,58 +27,163 @@ def generate_fuel_vectors_depreciated(complex_type, data):
 
     return result
 
-def solid_ingredient_count(recipe):
-    if COST_MODE in recipe.keys():
-        count = 0
-        for ingred in recipe[COST_MODE]['ingredients']:
-            if type(ingred)==type([]) or ingred['type']=='solid':
-                count += 1
-        return count
-    else:
-        count = 0
-        for ingred in recipe['ingredients']:
-            if type(ingred)==type([]) or ingred['type']=='solid':
-                count += 1
-        return count
+def recipe_element_count(recipe, recipe_key, key_type):
+    """
+    Calculates how many recipe_key's with a key_type type a recipe uses.
 
-def liquid_ingredient_count(recipe):
+    Parameters
+    ----------
+    recipe:
+        A recipe. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
+    recipe_key:
+        A key for the recipe. (usually 'ingredients', 'results', or 'result')
+    key_type:
+        A 'type' that dict elements of of the recipe key needs to be.
+    
+    Returns
+    -------
+    count:
+        Number of liquid ingredients
+    """
     if COST_MODE in recipe.keys():
-        count = 0
-        for ingred in recipe[COST_MODE]['ingredients']:
-            if type(ingred)==type({}) and ingred['type']=='fluid':
-                count += 1
-        return count
+        if not recipe_key in recipe[COST_MODE].keys():
+            return 0
+        elements = recipe[COST_MODE][recipe_key]
     else:
-        count = 0
-        for ingred in recipe['ingredients']:
-            if type(ingred)==type({}) and ingred['type']=='fluid':
-                count += 1
-        return count
+        if not recipe_key in recipe.keys():
+            return 0
+        elements = recipe[recipe_key]
+
+    if not isinstance(elements, list):
+        elements = [elements]
+
+    return count_via_lambda(elements, lambda ingred: (isinstance(ingred, dict) and ingred['type']==key_type) or (key_type=='solid' and isinstance(ingred, list)))
 
 def valid_crafting_machine(machine, recipe):
-    if ('category' in recipe.keys() and recipe['category'] in machine['crafting_categories']) or (not 'category' in recipe.keys() and 'crafting' in machine['crafting_categories']):
-        if (not 'ingredient_count' in machine.keys() or machine['ingredient_count'] >= solid_ingredient_count(recipe)):
-            if liquid_ingredient_count(recipe)==0:
-                return True
-            if not 'fluid_boxes' in machine.keys():
-                return False
-            else:
-                boxes = None
-                if type(machine['fluid_boxes'])==type({}):
-                    boxes = machine['fluid_boxes'].values()
-                else:
-                    boxes = machine['fluid_boxes']
-                if len([x for x in boxes if 
-                               (type(x)==type({}) and 
-                                ('production_type' in x.keys()) and 
-                                x['production_type']=="input")])>=\
-                    liquid_ingredient_count(recipe):
-                    return True
-    return False
+    """
+    Calculates if a crafting machine is able to complete a recipe.
+
+    Parameters
+    ----------
+    machine:
+        A crafting machine. https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
+    recipe:
+        A recipe. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
+    
+    Returns
+    -------
+    True if the crafting machine can craft the recipe, otherwise False
+    """
+    if not all([(recipe['category'] if 'category' in recipe.keys() else 'crafting') in machine['crafting_categories'],
+                (machine['ingredient_count'] if 'ingredient_count' in machine.keys() else 255) >= recipe_element_count(recipe, 'ingredients', 'solid')]):
+        return False
+    
+    if (recipe_element_count(recipe, 'ingredients', 'fluid') != 0 or recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid') != 0) and (not 'fluid_boxes' in machine.keys()):
+        return False
+    
+    machine_fluid_inputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input"))
+    machine_fluid_input_outputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input-output"))
+    machine_fluid_outputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "output"))
+    recipe_fluid_inputs = recipe_element_count(recipe, 'ingredients', 'fluid')
+    recipe_fluid_outputs = recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid')
+    return machine_fluid_inputs + machine_fluid_input_outputs >= recipe_fluid_inputs and \
+           machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_outputs and \
+           machine_fluid_inputs + machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_inputs + recipe_fluid_outputs
+
+def generate_crafting_construct_helper(machine, recipe, fuel_name, fuel_value, data, temperature_settings={}):
+    """
+    Generate a UncompiledConstruct given the machine, recipe, fuel, and ingredient temperatures.
+
+    Parameters
+    ----------
+    machine:
+        A crafting machine. https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
+    recipe:
+        A recipe. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
+    fuel_name:
+        Name of fuel being used.
+    fuel_value:
+        Energy density of fuel being used.
+    data:
+        Entire data.raw. https://wiki.factorio.com/Data.raw
+    
+    Returns
+    -------
+    The UncompiledConstruct.
+    """
+    ident = recipe['name']+" in "+machine['name']+" with "+" & ".join([fuel_name]+[k+'@'+str(v) for k, v in temperature_settings.items()])
+    
+    if 'drain' in machine['energy_source']: #https://lua-api.factorio.com/latest/types/ElectricEnergySource.html#drain
+        drain = {fuel_name: machine['energy_source']['drain_raw']/fuel_value}
+    elif fuel_name=='electric': #electric sources have a default 1/30th drain
+        drain = {fuel_name: (machine['energy_usage_raw']/30.0)/fuel_value}
+    else:
+        drain = {}
+    
+    vector = copy.deepcopy(recipe['vector'])
+    vector = multi_dict(machine['crafting_speed'], vector)
+
+    for k, v in vector.items(): #fixing temperature settings
+        if k in temperature_settings:
+            vector.update({k+'@'+str(temperature_settings[k]): v})
+            del vector[k]
+    
+    effect_effects = {'speed': [], 'productivity': [], 'consumption': []}#, 'pollution': []}
+    if 'allowed_effects' in machine.keys():
+        if 'speed' in machine['allowed_effects']:
+            effect_effects['speed'] = [e for e in vector.keys()]
+        if 'productivity' in machine['allowed_effects']:
+            effect_effects['productivity'] = [k for k, v in vector.items() if v > 0]
+        if 'consumption' in machine['allowed_effects']:
+            effect_effects['consumption'] = [fuel_name]
+        #if 'pollution' in machine['allowed_effects']:
+        #    effect_effects.update({'pollution': []})
+    
+    #add fuel in after so it doesn't mess with speed effects
+    if fuel_name in vector.keys():
+        vector[fuel_name] += -1.0*machine['energy_usage_raw']/fuel_value
+    else:
+        vector[fuel_name] = -1.0*machine['energy_usage_raw']/fuel_value 
+    
+    max_mods = 0
+    if 'module_specification' in machine.keys() and 'module_slots' in machine['module_specification'].keys():
+        max_mods = machine['module_specification']['module_slots']
+    if max_mods==0:
+        logging.warning("Didn't detect any module slots in %s this will disable beacon effects too.", machine['name'])
+        allowed_modules = []
+    else:
+        allowed_modules = [(module, max_mods) for module in recipe['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
+        logging.debug("Found a total of %d allowed modules.", len(allowed_modules))
+        
+    base_inputs = copy.deepcopy(recipe['base_inputs'])
+    base_inputs.update({fuel_name: (-1.0*machine['energy_usage_raw']/fuel_value)*recipe['energy_required']/machine['crafting_speed']})
+    for k, v in base_inputs.items(): #fixing temperature settings
+        if k in temperature_settings:
+            base_inputs.update({k+'@'+str(temperature_settings[k]): v})
+            del base_inputs[k]
+    
+    cost = {machine['name']: 1}
+    
+    limit = machine['limit'] + recipe['limit']
+
+    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, base_inputs, cost, limit)
 
 def generate_crafting_construct(machine, recipe, data):
     """
     Gnerates UncompiledConstructs of a machine that does recipe crafting.
+
+    Parameters
+    ----------
+    machine:
+        A crafting machine. https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
+    recipe:
+        A recipe. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
+    data:
+        Entire data.raw. https://wiki.factorio.com/Data.raw
+    
+    Yields
+    ------
+    UncompiledConstructs 
     """
     assert machine['type']=='assembling-machine' or machine['type']=='rocket-silo' or machine['type']=='furnace'
     logging.debug("Generating construct family for: %s in %s", recipe['name'], machine['name'])
@@ -107,64 +214,6 @@ def generate_crafting_construct(machine, recipe, data):
         else:
             yield generate_crafting_construct_helper(machine, recipe, fuel_name, fuel_value, data)
 
-def generate_crafting_construct_helper(machine, recipe, fuel_name, fuel_value, data, temperature_settings={}):
-    ident = recipe['name']+" in "+machine['name']+" with "+" & ".join([fuel_name]+[k+'@'+str(v) for k, v in temperature_settings.items()])
-    
-    if 'drain' in machine['energy_source']:
-        drain = {fuel_name: machine['energy_source']['drain_raw']/fuel_value}
-        logging.debug("Found a drain value of %d", drain[fuel_name])
-    elif fuel_name=='electric':
-        drain = {fuel_name: (machine['energy_usage_raw']/30.0)/fuel_value}
-        logging.debug("Machine is electrical so we assume drain has value of %d", drain[fuel_name])
-    else:
-        drain = {}
-    
-    def apply_temperature_settings(vec):
-        fixed = {}
-        for k, v in vec.items():
-            if k in temperature_settings:
-                fixed.update({k+'@'+str(temperature_settings[k]): v})
-            else:
-                fixed.update({k: v})
-        return fixed
-    
-    vector = copy.deepcopy(recipe['vector'])
-    vector = multi_dict(machine['crafting_speed'], vector)
-    vector = apply_temperature_settings(vector)
-    
-    effect_effects = {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}
-    if 'allowed_effects' in machine.keys():
-        if 'speed' in machine['allowed_effects']:
-            effect_effects.update({'speed': [e for e in vector.keys()]})
-        if 'productivity' in machine['allowed_effects']:
-            effect_effects.update({'productivity': [k for k, v in vector.items() if v > 0]})
-        if 'consumption' in machine['allowed_effects']:
-            effect_effects.update({'consumption': [fuel_name]})
-        if 'pollution' in machine['allowed_effects']:
-            effect_effects.update({'pollution': []})
-    
-    vector.update({fuel_name: -1.0*machine['energy_usage_raw']/fuel_value})#add this in after so it doesn't mess with 'speed'
-    
-    max_mods = 0
-    if 'module_specification' in machine.keys() and 'module_slots' in machine['module_specification'].keys():
-        max_mods = machine['module_specification']['module_slots']
-    if max_mods==0:
-        logging.warning("Didn't detect any module slots in %s this will disable beacon effects too.", machine['name'])
-        allowed_modules = []
-    else:
-        allowed_modules = [(module, max_mods) for module in recipe['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
-        logging.debug("Found a total of %d allowed modules.", len(allowed_modules))
-        
-    base_inputs = copy.deepcopy(recipe['base_inputs'])
-    base_inputs.update({fuel_name: (-1.0*machine['energy_usage_raw']/fuel_value)*recipe['energy_required']/machine['crafting_speed']})
-    base_inputs = apply_temperature_settings(base_inputs)
-    
-    cost = {machine['name']: 1}
-    
-    limit = machine['limit'] + recipe['limit']
-
-    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, base_inputs, cost, limit)
-
 def generate_boiler_machine_constructs(machine, data):
     """
     Generates UncompiledConstructs for a boiler.
@@ -189,7 +238,7 @@ def generate_boiler_machine_constructs(machine, data):
         logging.debug("Found a non 1 effectivity of %d", effectivity)
     units_per_second = effectivity*machine['energy_consumption_raw']/joules_per_unit
 
-    if fluid not in RELEVENT_FLUID_TEMPERATURES.keys():
+    if not fluid in RELEVENT_FLUID_TEMPERATURES.keys():
         RELEVENT_FLUID_TEMPERATURES.update({fluid: {}})
     RELEVENT_FLUID_TEMPERATURES[fluid].update({machine['target_temperature']: joules_per_unit})
     

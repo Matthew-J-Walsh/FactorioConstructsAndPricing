@@ -1,13 +1,7 @@
 from utils import *
 from sparsetensors import *
 import functools
-
-MODULE_EFFECTS = ['consumption', 'speed', 'productivity']
-MODULE_EFFECT_MINIMUMS = {'consumption': .2, 'speed': .2, 'productivity': 1}
-MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in MODULE_EFFECTS])
-FALSE_CATALYST_METHODS = [['fill', 'empty'], ['barrel']] #This is a list of terms that can be found in a catalyst name that indicate it might link to itself accidently. Classic example is fluid -> barrel -> fluid. Currently set to require 'fill' or 'empty' and 'barrel'
-FALSE_CATALYST_LINKS = ['empty-barrel'] #nothing in this list is allowed to be used as a link for something being a catalyst
-
+from globalvalues import *
 
 class Module:
     """

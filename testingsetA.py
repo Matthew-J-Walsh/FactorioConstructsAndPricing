@@ -3,7 +3,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 from utils import *
 from generators import *
-from constructs import *
+from linearconstructs import *
 from depressionsolvers import *
 
 data = None

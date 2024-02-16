@@ -3,8 +3,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 from utils import *
 from generators import *
-from constructs import *
-from solver import *
+from linearconstructs import *
+from linearsolvers import *
+from datarawparse import *
 
 data = None
 
@@ -25,7 +26,7 @@ print("=/=/=/=/=/==\=\=\=\=\=")
 
 method_to_use = "ipopt"
 
-tech_limit = tech_objection_via_spec({"fully_automated": ['automation-science-pack']}, data)
+tech_limit = technological_limitation_from_specification({"fully_automated": ['automation-science-pack']}, data)
 #goals = {'automation-science-pack': 1}
 goals = {'automation-science-pack': 1, 'logistic-science-pack': 1}#, 'chemical-science-pack': 1, 'production-science-pack': 1, 'utility-science-pack': 1
 pricing_model = {}

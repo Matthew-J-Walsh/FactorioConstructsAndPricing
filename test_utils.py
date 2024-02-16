@@ -19,7 +19,7 @@ def dnf_addition_test_1():
     added = [["A", "B", "-B"], ["A", "B", "C", "-D"], ["A", "B", "E", "F", "-G"],
              ["A", "C", "-B"], ["A", "C", "B", "-D"], ["A", "C", "E", "F", "-G"],
              ["-C", "D", "-B"], ["-C", "D", "B", "C", "-D"], ["-C", "D", "E", "F", "-G"]]
-    via_func = dnf_addition(form1, form2)
+    via_func = dnf_and(form1, form2)
 
     added_set = set()
     for form in added:
@@ -37,7 +37,7 @@ def numericalize_standard_forms_test_1(): #placeholder test, not sure how to tes
 def neg_standard_form_test_1():
     form1 = [["A", "B"], ["A", "C"], ["-C", "D"]]
     form2 = [["-B"], ["B", "C", "-D"], ["E", "F", "-G"]]
-    form1, form2 = numericalize_standard_forms(form1, form2)
+    form1, form2 = numericalize_standard_expressions(form1, form2)
     negative_form1 = neg_standard_form(form1)
     assert True
 
@@ -78,6 +78,23 @@ def tech_limit_test_1(tech_limit_testing_limits):
     assert base_limits[11] <= advanced_limits[2] and advanced_limits[2] > base_limits[11]
     assert base_limits[9] <= advanced_limits[5] and advanced_limits[5] > base_limits[9]
     assert advanced_limits[1] == advanced_limits[1] and advanced_limits[1] >= advanced_limits[1] and advanced_limits[1] <= advanced_limits[1]
+
+
+def list_union_test():
+    l1 = ["A", "B", "C", "D"]
+    l2 = ["E", "F", "A", "B", "G"]
+    actual = ["A", "B", "C", "D", "E", "F", "G"]
+    via_func = list_union(l1, l2)
+
+    assert set(actual)==set(via_func)
+    
+
+def convert_value_to_base_units_test():
+    values = ["112k", "132K", "12M", "1.4M", "3.22E", "4Z"]
+    real_values = [112000, 132000, 12000000, 1400000000, 3220000000000000000, 4000000000000000000000]
+    via_func = [convert_value_to_base_units(val) for val in values]
+
+    assert all([rv==vf for rv, vf in zip(real_values, via_func)])
 
 
 
