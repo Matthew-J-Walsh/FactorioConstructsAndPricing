@@ -1,17 +1,6 @@
 from utils import *
 import pytest
 
-def add_dicts_test_1():
-    d1 = {0: 1, 1: 3, 2: 7}
-    d2 = {1: -1, 2: 3, 5: 2}
-    assert add_dicts(d1, d2)=={5: 2, 1: 2, 2: 10, 0: 1}
-
-
-def multi_dict_test_1():
-    d = {0: 1, 1: 3, 2: 7}
-    m = 3
-    assert multi_dict(m, d)=={0: 3, 1: 9, 2: 21}
-
 
 def dnf_addition_test_1():
     form1 = [["A", "B"], ["A", "C"], ["-C", "D"]]
@@ -97,7 +86,18 @@ def convert_value_to_base_units_test():
     assert all([rv==vf for rv, vf in zip(real_values, via_func)])
 
 
-
-
-
+def list_of_dicts_by_key_test():
+    list_of_dicts = [{"A": 1, "B": 2, "C": 3, "D": 4},
+                     {"A": 2, "E": 1, "C": 4, "D": 3},
+                     {"E": 1, "B": 2, "C": 3, "D": 4},
+                     {"A": 2, "B": 1, "E": 4, "F": 3},
+                     {"A": 1, "F": 2, "C": 3, "E": 4},]
+    filtered_A_1 = list_of_dicts_by_key(list_of_dicts, "A", 1)
+    filtered_E_4 = list_of_dicts_by_key(list_of_dicts, "E", 4)
+    assert len(filtered_A_1) == 2
+    for d in filtered_A_1:
+        assert d["A"] == 1
+    assert len(filtered_E_4) == 2
+    for d in filtered_E_4:
+        assert d["E"] == 4
 

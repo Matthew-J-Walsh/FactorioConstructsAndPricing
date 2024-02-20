@@ -1,5 +1,5 @@
 from utils import *
-from sparsetensors import *
+from oldstuff.sparsetensors import *
 import functools
 from globalvalues import *
 
