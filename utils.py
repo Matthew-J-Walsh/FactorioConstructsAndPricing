@@ -31,21 +31,24 @@ class CompressedVector(dict):
         for k, v in self.items():
             dn.update({k: multiplier * v})
         return dn
+    
+    def __rmul__(self, multiplier: Fraction) -> CompressedVector:
+        return self.__mul__(multiplier)
 
 def count_via_lambda(l: list[T], func: Callable[[T], bool] = lambda x: True) -> int:
     """
-    Counting helper for lists. Counts how many elements in the list return true from func.
+    Counting helper for lists. Counts how many elements in the list return true when passed to function func.
 
     Parameters
     ----------
     l:
-        A list
+        The list.
     func:
         A function with 1 list element as input.
     
     Returns
     -------
-    Number of instances where func returned Truthy on list elements
+    Number of instances where func returned Truthy on list elements.
     """
     return sum([1 if func(e) else 0 for e in l])
 

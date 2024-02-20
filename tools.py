@@ -36,15 +36,15 @@ class FactorioInstance():
 
         complete_premanagement(self.data_raw)
         constructs = generate_all_constructs(self.data_raw)
-        self.families, self.reference_list = generate_all_construct_families(constructs)
+        self.families, self.reference_list, self.catalyst_list = generate_all_construct_families(constructs)
     
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[sp.sparray, sp.sparray]:
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[sp.sparse.sparray, sp.sparse.sparray]:
         """
         Wrapper for optimize_for_outputs_via_reference_model that feeds info about the Factorio instance where needed.
         """
         return optimize_for_outputs_via_reference_model(self.families, self.reference_list, targets, known_technologies, reference_model)
     
-    def solve_looped_pricing_model(self, targets: CompressedVector, known_technologies: TechnologicalLimitation) -> tuple[sp.sparray, sp.sparray]:
+    def solve_looped_pricing_model(self, targets: CompressedVector, known_technologies: TechnologicalLimitation) -> tuple[sp.sparse.sparray, sp.sparse.sparray]:
         """
         Wrapper for calculate_pricing_model_via_prebuilt that feeds info about the Factorio instance where needed.
         """

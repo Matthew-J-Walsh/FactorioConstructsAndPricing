@@ -36,8 +36,11 @@ def recipe_element_count(recipe: dict, recipe_key: str, key_type: str) -> int:
 
     if not isinstance(elements, list):
         elements = [elements]
-
-    return count_via_lambda(elements, lambda ingred: (isinstance(ingred, dict) and ingred['type']==key_type) or (key_type=='solid' and isinstance(ingred, list)))
+    
+    return count_via_lambda(elements, lambda ingred: (isinstance(ingred, dict) and \
+                                                      ((not 'type' in ingred.keys() and key_type=='solid') or \
+                                                       ('type' in ingred.keys() and ingred['type']==key_type))) or \
+                                                     (key_type=='solid'))
 
 def valid_crafting_machine(machine: dict, recipe: dict) -> bool:
     """
@@ -66,15 +69,21 @@ def valid_crafting_machine(machine: dict, recipe: dict) -> bool:
     
     if (recipe_element_count(recipe, 'ingredients', 'fluid') != 0 or recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid') != 0) and (not 'fluid_boxes' in machine.keys()):
         return False
-    
-    machine_fluid_inputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input"))
-    machine_fluid_input_outputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input-output"))
-    machine_fluid_outputs = count_via_lambda(machine['fluid_boxes'], lambda box: ('production_type' in box.keys()) and (box['production_type'] == "output"))
+
+    if 'fluid_boxes' in machine.keys():
+        fluid_boxes = machine['fluid_boxes']
+        if isinstance(fluid_boxes, dict):
+            fluid_boxes = [fluid_boxes]
+        machine_fluid_inputs = count_via_lambda(fluid_boxes, lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input"))
+        machine_fluid_input_outputs = count_via_lambda(fluid_boxes, lambda box: ('production_type' in box.keys()) and (box['production_type'] == "input-output"))
+        machine_fluid_outputs = count_via_lambda(fluid_boxes, lambda box: ('production_type' in box.keys()) and (box['production_type'] == "output"))
+    else:
+        machine_fluid_inputs, machine_fluid_input_outputs, machine_fluid_outputs, = 0, 0, 0
     recipe_fluid_inputs = recipe_element_count(recipe, 'ingredients', 'fluid')
     recipe_fluid_outputs = recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid')
     return machine_fluid_inputs + machine_fluid_input_outputs >= recipe_fluid_inputs and \
-           machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_outputs and \
-           machine_fluid_inputs + machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_inputs + recipe_fluid_outputs
+        machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_outputs and \
+        machine_fluid_inputs + machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_inputs + recipe_fluid_outputs
 
 def temperature_setting_generator(recipe: dict) -> Generator[dict, None, None]:
     """
@@ -368,8 +377,8 @@ def generate_generator_constructs(machine: dict, data: dict) -> Generator[Uncomp
     fluid_usage = 60 * machine['fluid_usage_per_tick'] #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#fluid_usage_per_tick
     effectivity = machine['effectivity'] #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#effectivity
 
-    if 'burns_fluid' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#burns_fluid
-        fuel_name, fuel_value = machine['fluid_box']['filter'], data['fluid'][machine['fluid_box']['filter']]['energy_density_raw']
+    if 'burns_fluid' in machine.keys() and machine['burns_fluid']: #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#burns_fluid
+        fuel_name, fuel_value = machine['fluid_box']['filter'], data['fluid'][machine['fluid_box']['filter']]['fuel_value_raw']
         if 'max_power_output' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#max_power_output
             corrected_fluid_usage = min(fluid_usage, machine['max_power_output_raw'] / fuel_value / effectivity)
 
@@ -389,16 +398,18 @@ def generate_generator_constructs(machine: dict, data: dict) -> Generator[Uncomp
         for relevent_temp, energy_density in RELEVENT_FLUID_TEMPERATURES[machine['fluid_box']['filter']].items():
             if 'max_power_output' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#max_power_output
                 corrected_fluid_usage = min(fluid_usage, machine['max_power_output_raw'] / min(energy_density, max_energy_density) / effectivity)
+            else:
+                corrected_fluid_usage = fluid_usage
             
             yield UncompiledConstruct("electric from "+machine['name']+" via "+machine['fluid_box']['filter']+"@"+str(relevent_temp), 
-                                     {}, 
-                                     {machine['fluid_box']['filter']+"@"+str(relevent_temp): -1 * corrected_fluid_usage,
-                                     'electric': effectivity * corrected_fluid_usage * min(energy_density, max_energy_density)}, 
+                                     CompressedVector(), 
+                                     CompressedVector({machine['fluid_box']['filter']+"@"+str(relevent_temp): -1 * corrected_fluid_usage,
+                                                       'electric': effectivity * corrected_fluid_usage * min(energy_density, max_energy_density)}), 
                                      {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, 
                                      [], 
                                      0, 
-                                     {machine['fluid_box']['filter']+"@"+str(relevent_temp): -1 * corrected_fluid_usage}, 
-                                     {machine['name']: 1}, 
+                                     CompressedVector({machine['fluid_box']['filter']+"@"+str(relevent_temp): -1 * corrected_fluid_usage}), 
+                                     CompressedVector({machine['name']: 1}), 
                                      machine['limit'])
 
 def generate_reactor_constructs(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:

@@ -6,7 +6,7 @@ import scipy.optimize
 
 def optimize_for_outputs_via_reference_model(families: list[LinearConstructFamily], universal_reference_list: list[str], output_target: CompressedVector, 
                                              known_technologies: TechnologicalLimitation, ref_pricing_model: CompressedVector, method: str = "simplex", 
-                                             output_type: str = '>=') -> tuple[sp.sparray, np.ndarary]:
+                                             output_type: str = '>=') -> tuple[sp.sparse.sparray, np.ndarray]:
     """
     Runs optimization on a list of ConstructFamilies given a reference pricing model to find the optimal factory
     to build targeted outputs.

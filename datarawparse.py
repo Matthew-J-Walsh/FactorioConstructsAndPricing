@@ -138,15 +138,14 @@ def link_techs(data: dict) -> None:
 
     logging.debug("Linking of all recipes to their technologies.")
     for recipe in data['recipe'].values(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
-        if not 'enabled' in recipe.keys() or recipe['enabled']:
-            recipe_techs = []
-            for tech in enabled_technologies:
-                if 'effects' in tech.keys():
-                    for effect in tech['effects']: #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#effects
-                        if effect['type']=='unlock-recipe' and effect['recipe']==recipe['name']: #https://lua-api.factorio.com/latest/types/UnlockRecipeModifier.html
-                            recipe_techs.append(tech['all_prereq']) #each element of recipe_techs will be a list representing a combination of techs that lets the recipe be used
-                            tech['enabled_recipes'].append(recipe)
-            recipe.update({'limit': TechnologicalLimitation(recipe_techs)})
+        recipe_techs = []
+        for tech in enabled_technologies:
+            if 'effects' in tech.keys():
+                for effect in tech['effects']: #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#effects
+                    if effect['type']=='unlock-recipe' and effect['recipe']==recipe['name']: #https://lua-api.factorio.com/latest/types/UnlockRecipeModifier.html
+                        recipe_techs.append(tech['all_prereq']) #each element of recipe_techs will be a list representing a combination of techs that lets the recipe be used
+                        tech['enabled_recipes'].append(recipe)
+        recipe.update({'limit': TechnologicalLimitation(recipe_techs)})
 
     logging.debug("Linking of all machines to their technologies.")
     for cata in MACHINE_CATEGORIES: #https://lua-api.factorio.com/latest/prototypes/EntityWithOwnerPrototype.html
@@ -297,11 +296,11 @@ def vectorize_recipes(data: dict) -> None:
                 else: #shortened (item only) definition (a list)
                     changes.update({result[0]: result[1]})
         else: #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result
-            changes.update({recipe_definition['result']: recipe_definition['result_count']}) #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result_count
+            changes.update({recipe_definition['result']: recipe_definition['result_count'] if 'result_count' in recipe_definition.keys() else 1}) #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result_count
 
         base_inputs = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store singular run inputs for catalyst calculations.
 
-        recipe.update({'vector': (1.0 / recipe['energy_required']) * changes,
+        recipe.update({'vector': (1 / recipe['energy_required']) * changes,
                        'base_inputs': base_inputs})
 
 def vectorize_resources(data: dict) -> None:
@@ -353,7 +352,7 @@ def vectorize_resources(data: dict) -> None:
 
         base_inputs = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store singular run inputs for catalyst calculations.
 
-        resource.update({'vector': (1.0/resource['mining_time']) * changes,
+        resource.update({'vector': (1.0/mining_definition['mining_time']) * changes,
                          'base_inputs': base_inputs})
 
 def link_modules(data: dict) -> None:
@@ -435,4 +434,5 @@ def complete_premanagement(data: dict) -> None:
     standardize_power(data)
     prep_resources(data)
     vectorize_recipes(data)
+    vectorize_resources(data)
     link_modules(data)

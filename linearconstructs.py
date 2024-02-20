@@ -91,10 +91,10 @@ class LinearConstruct:
         The cost vector of the construct
     """
     ident: str
-    vector: sp.sparray
-    cost: sp.sparray
+    vector: sp.sparse.sparray
+    cost: sp.sparse.sparray
 
-    def __init__(self, ident: str, vector: sp.sparray, cost: sp.sparray) -> None:
+    def __init__(self, ident: str, vector: sp.sparse.sparray, cost: sp.sparse.sparray) -> None:
         self.ident = ident
         self.vector = vector
         self.cost = cost
