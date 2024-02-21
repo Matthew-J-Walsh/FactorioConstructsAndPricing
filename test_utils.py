@@ -2,6 +2,17 @@ from utils import *
 import pytest
 
 
+def compressed_vectors_test_1():
+    compA = CompressedVector({"A": 1, "B": 2, "C": 3, "D": 5, "E": 7})
+    compB = CompressedVector({"A": 2, "E": 1, "C": -1, "F": 2, "G": -4})
+    added = CompressedVector({"A": 1, "B": 2, "C": 2, "D": 5, "E": 8, "F": 2, "G": -4})
+    added_via_func = compA + compB
+    assert added==added_via_func
+    multiA = CompressedVector({"A": 2, "B": 4, "C": 6, "D": 10, "E": 14})
+    multiA_via_func = 2 * compA
+    assert multiA==multiA_via_func
+
+
 def dnf_addition_test_1():
     form1 = [["A", "B"], ["A", "C"], ["-C", "D"]]
     form2 = [["-B"], ["B", "C", "-D"], ["E", "F", "-G"]]
