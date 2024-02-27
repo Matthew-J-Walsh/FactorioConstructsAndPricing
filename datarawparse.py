@@ -241,7 +241,7 @@ def prep_resources(data: dict) -> None:
 
 def vectorize_recipes(data: dict) -> None:
     """
-    Adds a base_inputs and vector component to each recipe. The vector component represents how the recipe acts.
+    Adds a base_inputs and vector component to each recipe. The vector component represents how the recipe function.
     While the base_inputs are values stored for catalyst cost calculations.
 
     Parameters
@@ -355,6 +355,49 @@ def vectorize_resources(data: dict) -> None:
         resource.update({'vector': (1.0/mining_definition['mining_time']) * changes,
                          'base_inputs': base_inputs})
 
+def vectorize_technologies(data: dict) -> None:
+    """
+    Adds a vector component to each technology. The vector component represents how labs researching a technology function.
+
+    Parameters
+    ----------
+    data:
+        Entire data.raw. https://wiki.factorio.com/Data.raw
+    """
+    logging.debug("Beginning the vectorization of technologies.")
+    for technology in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+        changes = CompressedVector()
+
+        if COST_MODE in technology.keys(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#normal or https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#expensive
+            cost_definition = technology[COST_MODE]
+        else: #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#unit
+            cost_definition = technology
+
+        for ingred in cost_definition['unit']['ingredients']: #https://lua-api.factorio.com/latest/types/TechnologyData.html#unit 
+            #https://lua-api.factorio.com/latest/types/TechnologyUnit.html
+            #https://lua-api.factorio.com/latest/types/IngredientPrototype.html
+            if isinstance(ingred, dict): #full definition
+                fixed_name = ingred['name']
+
+                if 'minimum_temperature' in ingred.keys():
+                    fixed_name += '@'+str(ingred['minimum_temperature'])+'-'+str(ingred['maximum_temperature'])
+
+                changes.update({ingred['name']: -1*ingred['amount']})
+
+            else: #shortened (item only) definition (a list)
+                changes.update({ingred[0]: -1*ingred[1]})
+        
+        if 'count' in cost_definition['unit'].keys():
+            changes = Fraction(cost_definition['unit']['count']) * changes
+        else:
+            logging.warning("Formulaic technological counts aren't supported yet. TODO")
+
+        technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later.
+        
+        changes.update({technology['name']}) #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
+
+        technology['vector'] = changes / (Fraction(cost_definition['time']) * Fraction(cost_definition['unit']['count']))
+
 def link_modules(data: dict) -> None:
     """
     Adds the allowed_module component to each recipe and resource mining type representing which modules can be used in a machine running said operation.
@@ -393,13 +436,23 @@ def link_modules(data: dict) -> None:
 
         MODULE_REFERENCE[module['name']] = module
 
-def set_defaults(data: dict) -> None:
+def set_defaults_and_normalize(data: dict) -> None:
     """
     Sets the defaults of various optional elements that are called later. Including:
     recipe's energy_required (default: .5)
     recipe's result_count (default: 1)
     resource's minable count (default: 1)
     machine's energy_source effectivity (default: 1)
+
+    Additionally normalizes terms across machines:
+    furnace's, rocket-silo's, and assembling-machines's 'crafting_speed' is added to 'speed' term
+    mining-drill's 'mining_speed' is added to 'speed' term
+    lab's 'researching_speed' is added to 'speed' term
+
+    Additionally normalizes terms across recipe-likes:
+    recipe's 'energy_required' is added to 'time_multiplier' term
+    resources's 'minable' 'mining-time' is added to 'time_multiplier' term
+    technology's 'unit' 'time' is added to 'time_multiplier' term
 
     Parameters
     ----------
@@ -419,6 +472,27 @@ def set_defaults(data: dict) -> None:
             if ('energy_source' in machine.keys()) and (not 'effectivity' in machine['energy_source'].keys()):
                 machine['energy_source']['effectivity'] = 1
 
+    for ref in ['furnace', 'rocket-silo', 'assembling-machine']:
+        for machine in data[ref].values():
+            machine['speed'] = Fraction(machine['crafting_speed'])
+    for machine in data['mining-drill'].values():
+        machine['speed'] = Fraction(machine['mining_speed'])
+    for machine in data['lab'].values():
+        machine['speed'] = Fraction(machine['researching_speed'])
+
+    for recipe in data['recipe'].values():
+        if COST_MODE in recipe:
+            recipe['time_multiplier'] = Fraction(recipe[COST_MODE]['energy_required'])
+        else:
+            recipe['time_multiplier'] = Fraction(recipe['energy_required'])
+    for resource in data['resource'].values():
+        resource['time_multiplier'] = Fraction(resource['minable']['mining_time'])
+    for technology in data['technology'].values():
+        if COST_MODE in technology:
+            technology['time_multiplier'] = Fraction(technology[COST_MODE]['unit']['time'])
+        else:
+            technology['time_multiplier'] = Fraction(technology['unit']['time'])
+
 def complete_premanagement(data: dict) -> None:
     """
     Does all the premanagment steps on data.raw in an appropriate order.
@@ -429,10 +503,11 @@ def complete_premanagement(data: dict) -> None:
         Entire data.raw. https://wiki.factorio.com/Data.raw
     """
     logging.debug("Beginning the premanagement of the game data.raw object. This will link technologies, standardize power, recategorize resources, simplify recipes, and link modules.")
-    set_defaults(data)
+    set_defaults_and_normalize(data)
     link_techs(data)
     standardize_power(data)
     prep_resources(data)
     vectorize_recipes(data)
     vectorize_resources(data)
+    vectorize_technologies(data)
     link_modules(data)

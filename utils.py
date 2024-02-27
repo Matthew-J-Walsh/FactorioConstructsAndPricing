@@ -241,7 +241,13 @@ class TechnologicalLimitation:
         
     def __radd__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
         return TechnologicalLimitation(dnf_and(self.dnf, other.dnf))
-        
+
+    def __sub__(self, other: TechnologicalLimitation) -> list[T]:
+        """
+        Returns a list of technologies that are required to be added to other in order to cover self.
+        """
+        raise NotImplementedError
+
     def __lt__(self, other: TechnologicalLimitation) -> bool:
         return self <= other and not other <= self
         

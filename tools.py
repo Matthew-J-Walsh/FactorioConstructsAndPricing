@@ -5,9 +5,9 @@ logging.basicConfig(level=logging.INFO)
 from utils import *
 from generators import *
 from linearconstructs import *
-from linearsolvers import *
+from scipysolvers import *
 from datarawparse import *
-
+import Levenshtein
 
 
 class FactorioInstance():
@@ -26,7 +26,7 @@ class FactorioInstance():
         List of all catalytic item/fluids.
     """
     data_raw: dict
-    families: list[LinearConstructFamily]
+    uncompiled_constructs: list[UncompiledConstruct]
     reference_list: list[str]
     catalyst_list: list[str]
 
@@ -36,26 +36,108 @@ class FactorioInstance():
 
         complete_premanagement(self.data_raw)
         constructs = generate_all_constructs(self.data_raw)
-        self.families, self.reference_list, self.catalyst_list = generate_all_construct_families(constructs)
+        self.uncompiled_constructs, self.reference_list, self.catalyst_list = generate_all_construct_families(constructs)
     
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[sp.sparse.sparray, sp.sparse.sparray]:
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, np.ndarray]:
         """
-        Wrapper for optimize_for_outputs_via_reference_model that feeds info about the Factorio instance where needed.
+        Solves for a target output vector given a tech level and reference pricing model.
+
+        Parameters
+        ----------
+        targets:
+            CompressedVector representing what outputs the factory should have.
+        known_technologies:
+            TechnologicalLimitation representing what technologies are done.
+        reference_model:
+            CompressedVector of the reference to use to decide how much every component costs.
+        
+        Returns
+        -------
+        s:
+            CompressedVector of amount of each construct that should be used.
+        p_j:
+            Pricing model of resulting factory.
         """
-        return optimize_for_outputs_via_reference_model(self.families, self.reference_list, targets, known_technologies, reference_model)
+        n = len(self.reference_list)
+
+        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies) for f in self.uncompiled_constructs], [])
+        m = len(constructs)
+        R_i_j = sp.sparse.vstack([construct.vector for construct in constructs]).T
+
+        u_j = np.zeros(n)
+        for k, v in targets.items():
+            u_j[self.reference_list.index(k)] = v
+
+        p0_i = np.full(n, np.inf) #TODO: Fractional infinity?
+        for k, v in reference_model.items():
+            p0_i[self.reference_list.index(k)] = v
+
+        c_i = np.array([np.dot(p0_i, construct.cost) for construct in constructs])
+
+        s_i = solve_optimization_problem(R_i_j, u_j, c_i)
+        assert np.logical_or(np.isclose(R_i_j @ s_i, u_j), R_i_j @ s_i >= u_j).all(), "Somehow solution infeasible?"
+
+        p_j = calculate_pricing_model_via_optimal(R_i_j, s_i, u_j, c_i)
+
+        s = CompressedVector()
+        for i in range(m):
+            if s_i[i] != 0:
+                s[constructs[i].ident] = s_i[i]
+        
+        return s, p_j
     
-    def solve_looped_pricing_model(self, targets: CompressedVector, known_technologies: TechnologicalLimitation) -> tuple[sp.sparse.sparray, sp.sparse.sparray]:
+    def solve_looped_pricing_model(self, starter_base: CompressedVector, known_technologies: TechnologicalLimitation) -> sp.sparse.sparray:
         """
-        Wrapper for calculate_pricing_model_via_prebuilt that feeds info about the Factorio instance where needed.
+        Translate a starter base of just strings with values into something that makes a little more sense to the 
+        program using Levenshtein distance. https://en.wikipedia.org/wiki/Levenshtein_distance
+        Then calculates the pricing model from this factory.
+
+        Parameters
+        ----------
+        starter_base:
+            CompressedVector that describes what the factory should be.
+        known_technologies:
+            TechnologicalLimitation representing what technologies are done.
+        
+        Returns
+        -------
+        Pricing model of given factory.
         """
-        raise NotImplementedError
-        return calculate_pricing_model_via_prebuilt()
-    
-    def translate_starter_base(self, base: CompressedVector):
-        """
-        Attempts to translate a starter base of just strings with values into something that makes a little more sense to the program.
-        """
-        raise NotImplementedError
+        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies) for f in self.uncompiled_constructs], [])
+
+        translated_base = CompressedVector()
+        for k, v in starter_base.items():
+            best_matches = []
+            match_distance = Levenshtein.distance(k, constructs[0].ident)
+            for c in constructs:
+                dist = Levenshtein.distance(k, c.ident)
+                if dist < match_distance:
+                    best_matches = [c.ident]
+                elif dist == match_distance:
+                    best_matches.append(c.ident)
+            assert len(best_matches)==1, "Unable to determine which construct an input phrase is associated with.\nPhrase is: "+k+"\nPossible constructs were:\n\t"+"\n\t".join([m for m in best_matches])
+            translated_base[best_matches[0]] = v
+            logging.debug("Translated: \""+k+"\" to mean the construct: "+best_matches[0])
+        
+        n = len(self.reference_list)
+
+        R_i_j = sp.sparse.vstack([construct.vector for construct in constructs]).T
+        m = len(constructs)
+
+        s_i = np.zeros(m)
+        for k, v in translated_base:
+            s_i[next(c for c in constructs if c.ident==k)] = v
+
+        u_j = R_i_j @ s_i
+
+        C_i_j = sp.sparse.vstack([construct.cost for construct in constructs])
+
+        reference_index = np.argmax(u_j)[0]
+
+        p_j = calculate_pricing_model_via_prebuilt(R_i_j, C_i_j, s_i, u_j, reference_index)
+        
+        return p_j
+
 
 class FactorioFactory():
     """
@@ -69,6 +151,10 @@ class FactorioFactory():
         TechnologicalLimitation describing what recipes and buildings are avaiable.
     targets:
         CompressedVector of the target outputs.
+    optimal_factory:
+        Calculated optimal factory from last calculate_optimal_factory run.
+    optimal_pricing_model:
+        Calculated pricing model of the optimal_factory.
     """
     instance: FactorioInstance
     known_technologies: TechnologicalLimitation
@@ -82,30 +168,38 @@ class FactorioFactory():
         self.targets = targets
         self.optimal_pricing_model = CompressedVector()
 
-    def calculate_optimal_factory(self, reference_model: CompressedVector | FactorioFactory) -> bool:
+    def calculate_optimal_factory(self, input: CompressedVector, looped: bool = False) -> bool:
         """
         Calculates a optimal factory with the now avaiable reference model.
 
         Parameters
         ----------
-        reference_model:
-            CompressedVector of the reference to use to decide how much every component costs.
+        input:
+            If looped is false:
+                CompressedVector of the reference to use to decide how much every component costs.
+            If looped is true:
+                CompressedVector that describes what the factory should be.
+        looped:
+            Decider for input.
 
         Returns
         -------
         If pricing model has changed.
         """
-        if isinstance(reference_model, CompressedVector): #build it based on some other reference
-            s_i, p_j = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model)
+        if not looped: #build it based on some other reference
+            s, p_j = self.instance.solve_for_target(self.targets, self.known_technologies, input)
+            same = p_j==self.optimal_pricing_model
         else: #isinstance(reference_model, FactorioFactory): #build it based on itself
-            p_j = self.instance.solve_looped_pricing_model(self.targets, self.known_technologies, reference_model)
-        self.optimal_factory, self.optimal_pricing_model
-        raise NotImplementedError
+            p_j = self.instance.solve_looped_pricing_model(input, self.known_technologies)
+            same = False
+        self.optimal_factory, self.optimal_pricing_model = input, p_j
+
+        return same
     
     def time_estimate(self) -> Fraction:
         """
         Estimate how long it will take this factory to complete all the work assigned to it. Optimal factory must already be calculated.
-        NOTE: THIS IS A REALLY LOW ESTIMATE
+        TODO: Time estimate is going to be disaster
         """
         raise NotImplementedError
 
@@ -149,15 +243,25 @@ class FactorioMaterialFactory(FactorioFactory):
         self.last_material_factory = last_material_factory
     
     @classmethod
-    def startup_base(cls, instance: FactorioInstance, base_buildings: LinearConstruct, base_building_setup: CompressedVector, 
+    def startup_base(cls, instance: FactorioInstance, base_building_setup: CompressedVector, 
                      starting_techs: TechnologicalLimitation, material_targets: CompressedVector) -> FactorioMaterialFactory:
         """
         Alternative initialization from a prebuilt base.
+
+        Parameters
+        ----------
+        instance:
+            FactorioInstance associated with this factory.
+        base_building_setup:
+            CompressedVector that describes what the factory should be.
+        starting_techs:
+            Starting tech limitations if needed.
+        material_targets:
+            Target output of the factory.
         """
         inst = cls(instance, starting_techs, None, material_targets)
         inst.last_material_factory = inst
-        inst.optimal_pricing_model = inst.calculate_optimal_factory()
-
+        inst.optimal_pricing_model = inst.calculate_optimal_factory(base_building_setup, True)
 
         return inst
 
@@ -168,22 +272,38 @@ class FactorioScienceFactory(FactorioFactory):
 
     Added Members
     -------------
-    last_material_factory
-        Factory to base the pricing model of this factory on
+    last_material_factory:
+        Factory to base the pricing model of this factory on.
+    previous_science_factories:
+        List of previous science factories.
+    time_target:
+        How long it should take to complete all research.
     """
     last_material_factory: FactorioMaterialFactory
     previous_science_factories: list[FactorioScienceFactory]
+    time_taget: Fraction
 
-    def __init__(self, instance: FactorioInstance, previous_science_factories: list[FactorioScienceFactory], last_material_factory: FactorioMaterialFactory, science_target: CompressedVector):
-        super().__init__(instance, previous_science_factories[-1].get_technological_coverage(), science_target)
+    def __init__(self, instance: FactorioInstance, previous_science: list[FactorioScienceFactory] | TechnologicalLimitation, last_material_factory: FactorioMaterialFactory, 
+                 science_target: CompressedVector, time_taget: Fraction = Fraction(DEFAULT_TARGET_RESEARCH_TIME)) -> None:
+        if isinstance(previous_science, TechnologicalLimitation):
+            super().__init__(instance, previous_science, science_target)
+        else:
+            super().__init__(instance, previous_science[-1].get_technological_coverage(), science_target)
         self.last_material_factory = last_material_factory
-        self.previous_science_factories = previous_science_factories
+        self.previous_science_factories = previous_science
+        self.time_taget = time_taget
     
     def get_technological_coverage(self) -> TechnologicalLimitation:
         """
         Determine what technologies will be unlocked when this factory is done.
         """
-        return None
+        fully_automated_units = set()
+        for targets in [self.targets] + [fac.targets for fac in self.previous_science_factories]:
+            for target in targets.keys():
+                if target in self.instance.data_raw['tool'].keys():
+                    fully_automated_units.add(target)
+
+        return technological_limitation_from_specification(self.instance.data_raw, fully_automated=list(fully_automated_units))
 
 
 class FactorioFactoryChain():
@@ -199,37 +319,90 @@ class FactorioFactoryChain():
         self.instance = instance
         self.chain = []
 
-    def startup(self, base_buildings: LinearConstruct, base_building_setup: CompressedVector, 
-                starting_techs: TechnologicalLimitation, material_targets: CompressedVector) -> None:
+    def startup(self, base_building_setup: CompressedVector, starting_techs: TechnologicalLimitation, material_targets: CompressedVector) -> None:
         """
         Initialize the first factory of the chain from a prebuilt design.
+
+        Parameters
+        ----------
+        base_building_setup:
+            CompressedVector that describes what the starting factory should be.
+        starting_techs:
+            TechnologicalLimitation of techs unlocked before building a starting factory.
+        material_targets:
+            Target output of the starting factory.
         """
-        self.chain.append(FactorioMaterialFactory.startup_base(self.instance, base_buildings, base_building_setup, starting_techs, material_targets))
+        self.chain.append(FactorioMaterialFactory.startup_base(self.instance, base_building_setup, starting_techs, material_targets))
     
-    def add(self, target: CompressedVector):
+    def add(self, targets: CompressedVector) -> None:
         """
         Adds a factory to the chain.
-        """
-        #science vs non-science?
-        raise NotImplementedError
-        chain.append("???")
 
-    def compute(self) -> list[FactorioMaterialFactory | FactorioScienceFactory]:
+        Parameters
+        ----------
+        targets:
+            CompressedVector of target outputs for the factory. Must be either all science tools or building materials
         """
-        Computes all pricing models for chain iteratively and returns it.
+        factory_type = targets.keys()[0] in self.instance.data_raw['tool'].keys() #True if science, False if non-science
+        if factory_type:
+            for target in targets.keys():
+                assert target in self.instance.data_raw['tool'].keys(), "If a factory makes science tools it must only make science tools"
+            previous_sciences = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)]
+            last_material = [fac for fac in self.chain if isinstance(fac, FactorioMaterialFactory)][0]
+            self.chain.append(FactorioScienceFactory(self.instance, previous_sciences, last_material, targets))
+        else:
+            for target in targets.keys():
+                assert not target in self.instance.data_raw['tool'].keys(), "If a factory makes building materials it must only make building materials"
+            last_science = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)][0]
+            last_material = [fac for fac in self.chain if isinstance(fac, FactorioMaterialFactory)][0]
+            self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
+
+    def compute(self) -> bool:
         """
-        raise NotImplementedError
+        Computes all pricing models for chain iteratively and returns if the pricing models changed.
+        """
+        changed = False
+
+        last_reference_model = self.chain[0].optimal_pricing_model
+        for fac in self.chain[1:]:
+            changed = changed and fac.calculate_optimal_factory(last_reference_model)
+            if isinstance(fac, FactorioMaterialFactory):
+                last_reference_model = fac.optimal_pricing_model
+        
+        return changed
     
-    def compute_iteratively(self) -> list[FactorioMaterialFactory | FactorioScienceFactory]:
+    def compute_iteratively(self) -> None:
         """
         Computes the chain then iterates on it until pricing models no longer change.
         Completing this should generally reduce the time_estimate
         """
-        raise NotImplementedError
+        while not self.compute():
+            for i, fac in enumerate(self.chain):
+                if isinstance(fac, FactorioScienceFactory):
+                    target_factory = [sci_fac for sci_fac in self.chain[i+1:] if isinstance(sci_fac, FactorioScienceFactory)]
+                    if len(target_factory)>0:
+                        target_factory = target_factory[0]
+                    else:
+                        target_factory = self.chain[-1] #no more science factories to make, therefor we will target the final factory.
+                    techs_to_research = target_factory.known_technologies - fac.known_technologies
+                    new_target = CompressedVector({tech: 1 for tech in techs_to_research})
+
+                else: #if isinstance(fac, FactorioMaterialFactory):
+                    new_target = CompressedVector()
+                    for j in range(i+1, len(self.chain)):
+                        if isinstance(self.chain[j], FactorioMaterialFactory):
+                            break
+                        for const, count in self.chain[j].optimal_factory:
+                            new_target = new_target + count * const.cost
+
+                fac.retarget(new_target)
+            
     
     def time_estimate(self) -> Fraction:
         """
         Estimate how long it takes for this chain to complete.
+        G_n(x) = min(1, integral from 0 to x of rate * G_{n-1}(t) dt)
+        T = argmin(G_n(x)==1)
         """
         raise NotImplementedError
     

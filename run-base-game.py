@@ -4,7 +4,7 @@ logging.basicConfig(level=logging.INFO)
 from utils import *
 from generators import *
 from linearconstructs import *
-from linearsolvers import *
+from scipysolvers import *
 from datarawparse import *
 
 data = None

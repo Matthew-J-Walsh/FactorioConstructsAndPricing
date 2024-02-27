@@ -42,41 +42,6 @@ class Module:
         #https://lua-api.factorio.com/latest/types/Effect.html
         self.limit = module['limit']
 
-class LinearConstructFamily:#family of linear constructs (usually just have different modules allowed)
-    """
-    A family of linear constructs made from a single UncompiledConstruct. Each construct group in the family
-    represents a different research state. Currently doesn't have much of the functionality wanted.
-    
-    Members
-    -------
-    uncompiled_construct:
-        The base UncompiledConstruct of the construct family
-    universal_reference_list:
-        The universal reference list to use
-    catalyzing_deltas:
-        The catalyst list to use for added construct costs
-
-    TODO notes: basically we are going to make a DAG that when we run get_constructs will return a cover of the DAG
-    """
-    uncompiled_construct: UncompiledConstruct
-    universal_reference_list: list[str]
-    catalyzing_deltas: list[str]
-
-    def __init__(self, uncompiled_construct, universal_reference_list, catalyzing_deltas) -> None:
-        self.uncompiled_construct = uncompiled_construct
-        self.universal_reference_list = universal_reference_list
-        self.catalyzing_deltas = catalyzing_deltas
-    
-    def get_constructs(self, known_technologies: TechnologicalLimitation) -> list[LinearConstruct]:
-        allowed_modules = []
-        for mod, mcount in self.uncompiled_construct.allowed_modules:
-            if mod['limit'] < known_technologies:
-                allowed_modules.append((mod, mcount))
-        return self.uncompiled_construct.true_constructs(self.universal_reference_list, self.catalyzing_deltas, allowed_modules)
-        
-    def __repr__(self) -> str:
-        return self.uncompiled_construct.__repr__()
-
 class LinearConstruct:
     """
     A compiled construct. Simply having its identifier, vector, and cost
@@ -133,6 +98,10 @@ class UncompiledConstruct:
     base_productivity:
         https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
         https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
+    universal_reference_list:
+        The universal reference list to use
+    catalyzing_deltas:
+        The catalyst list to use for added construct costs
     """
     ident: str
     drain: CompressedVector
@@ -144,6 +113,8 @@ class UncompiledConstruct:
     cost: CompressedVector
     limit: TechnologicalLimitation
     base_productivity: Fraction
+    universal_reference_list: list[str]
+    catalyzing_deltas: list[str]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
@@ -169,22 +140,20 @@ class UncompiledConstruct:
                 "\n\tBase Inputs of: "+str(self.base_inputs)+\
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
-    
-    def true_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], permitted_modules: list[tuple[str, bool, bool]], 
-                        max_internal_mods: int, max_external_mods: int, beacon_multiplier: Fraction) -> list[LinearConstruct]:
+
+    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], known_technologies: TechnologicalLimitation, 
+                        max_external_mods: int = 0, beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
         """
         Returns a list of LinearConstructs for all possible module setups of this UncompiledConstruct
 
         Parameters
         ---------
         universal_reference_list:
-            The universal reference list for vector orderings
+            The universal reference list for vector orderings.
         catalyzing_deltas:
-            List of catalysts to count in the cost
-        permitted_modules:
-            List of allowed modules and if they are allow inside the construct or only beaconed
-        max_internal_mods:
-            Internal module limit.
+            List of catalysts to count in the cost.
+        known_technologies:
+            TechnologicalLimitation representing what technologies are unlocked.
         max_external_mods:
             External (beacon) module limit.
         beacon_multiplier:
@@ -195,10 +164,20 @@ class UncompiledConstruct:
         List of LinearConstructs
         """
         n = len(universal_reference_list)
+
+        if self.limit < known_technologies:
+            return []
+
+        permitted_modules = []
+        for mod, mcount in self.allowed_modules:
+            if mod['limit'] < known_technologies:
+                permitted_modules.append((mod, mcount))
         
         constructs = []
-        for mod_set in module_setup_generator(permitted_modules, max_internal_mods, max_external_mods):
+        for mod_set in module_setup_generator(permitted_modules, self.internal_module_limit, max_external_mods):
             logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
+            ident = self.ident + (" with module setup: " + module_setup_readable(mod_set) if len(mod_set) > 0 else "")
+
             effect_vector = np.zeros(len(MODULE_EFFECTS))
             for mod, count in mod_set.items():
                 mod_name, mod_region = mod.split("|")
@@ -231,7 +210,7 @@ class UncompiledConstruct:
 
             logging.debug("\tFound an vector of %s", effected_vector)
             logging.debug("\tFound an cost_vector of %s", effected_cost_vector)
-            constructs.append(LinearConstruct(self.ident, effected_vector, effected_cost_vector))
+            constructs.append(LinearConstruct(ident, effected_vector, effected_cost_vector))
 
         return constructs
 
@@ -267,6 +246,21 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
                     for mod in external_mod_setup:
                         vector += CompressedVector({mod+"|e": 1})
                     yield vector
+
+def module_setup_readable(module_setup: CompressedVector) -> str:
+    """
+    Turns a module setup into a readable string. Used to properly name constructs.
+
+    Parameters
+    ----------
+    module_setup:
+        Integral CompressedVector representing a module setup
+
+    Returns
+    -------
+    A human-readable string
+    """
+    return " & ".join([str(v)+"x "+k for k, v in module_setup.items()]) 
 
 def create_reference_list(uncompiled_construct_list: list[UncompiledConstruct]) -> list[str]:
     """
@@ -344,7 +338,7 @@ def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], un
     logging.debug("Catalysts found: %s", str(catalyst_list))
     return catalyst_list
 
-def generate_all_construct_families(uncompiled_construct_list: list[UncompiledConstruct]) -> tuple[list[LinearConstructFamily], list[str], list[str]]:
+def generate_all_construct_families(uncompiled_construct_list: list[UncompiledConstruct]) -> tuple[list[UncompiledConstruct], list[str], list[str]]:
     """
     Generates the reference list, catalyst list, and all the construct families for a list of uncompiled constructs.
 
@@ -365,5 +359,5 @@ def generate_all_construct_families(uncompiled_construct_list: list[UncompiledCo
     logging.debug("Generating linear construct families from an uncompiled construct list of length %d.", len(uncompiled_construct_list))
     reference_list = create_reference_list(uncompiled_construct_list)
     catalyst_list = determine_catalysts(uncompiled_construct_list, reference_list)
-    return [LinearConstructFamily(construct, reference_list, catalyst_list) for construct in uncompiled_construct_list], reference_list, catalyst_list
+    return uncompiled_construct_list, reference_list, catalyst_list
 
