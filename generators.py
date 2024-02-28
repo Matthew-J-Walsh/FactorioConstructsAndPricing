@@ -8,7 +8,7 @@ from linearconstructs import *
 import typing
 from typing import Generator
 
-def recipe_element_count(recipe: dict, recipe_key: str, key_type: str) -> int:
+def recipe_element_count(recipe: dict, recipe_key: str, key_type: str, COST_MODE: str = 'normal') -> int:
     """
     Calculates how many recipe_key's with a key_type type a recipe uses.
 
@@ -42,7 +42,7 @@ def recipe_element_count(recipe: dict, recipe_key: str, key_type: str) -> int:
                                                        ('type' in ingred.keys() and ingred['type']==key_type))) or \
                                                      (key_type=='solid'))
 
-def valid_crafting_machine(machine: dict, recipe: dict) -> bool:
+def valid_crafting_machine(machine: dict, recipe: dict, **kwargs: str | dict) -> bool:
     """
     Calculates if a crafting machine is able to complete a recipe.
 
@@ -64,10 +64,10 @@ def valid_crafting_machine(machine: dict, recipe: dict) -> bool:
         return False
 
     if not all([(recipe['category'] if 'category' in recipe.keys() else 'crafting') in machine['crafting_categories'],
-                (machine['ingredient_count'] if 'ingredient_count' in machine.keys() else 255) >= recipe_element_count(recipe, 'ingredients', 'solid')]):
+                (machine['ingredient_count'] if 'ingredient_count' in machine.keys() else 255) >= recipe_element_count(recipe, 'ingredients', 'solid', **kwargs)]):
         return False
     
-    if (recipe_element_count(recipe, 'ingredients', 'fluid') != 0 or recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid') != 0) and (not 'fluid_boxes' in machine.keys()):
+    if (recipe_element_count(recipe, 'ingredients', 'fluid', **kwargs) != 0 or recipe_element_count(recipe, 'results', 'fluid', **kwargs) + recipe_element_count(recipe, 'result', 'fluid', **kwargs) != 0) and (not 'fluid_boxes' in machine.keys()):
         return False
 
     if 'fluid_boxes' in machine.keys():
@@ -79,13 +79,13 @@ def valid_crafting_machine(machine: dict, recipe: dict) -> bool:
         machine_fluid_outputs = count_via_lambda(fluid_boxes, lambda box: ('production_type' in box.keys()) and (box['production_type'] == "output"))
     else:
         machine_fluid_inputs, machine_fluid_input_outputs, machine_fluid_outputs, = 0, 0, 0
-    recipe_fluid_inputs = recipe_element_count(recipe, 'ingredients', 'fluid')
-    recipe_fluid_outputs = recipe_element_count(recipe, 'results', 'fluid') + recipe_element_count(recipe, 'result', 'fluid')
+    recipe_fluid_inputs = recipe_element_count(recipe, 'ingredients', 'fluid', **kwargs)
+    recipe_fluid_outputs = recipe_element_count(recipe, 'results', 'fluid', **kwargs) + recipe_element_count(recipe, 'result', 'fluid', **kwargs)
     return machine_fluid_inputs + machine_fluid_input_outputs >= recipe_fluid_inputs and \
         machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_outputs and \
         machine_fluid_inputs + machine_fluid_outputs + machine_fluid_input_outputs >= recipe_fluid_inputs + recipe_fluid_outputs
 
-def temperature_setting_generator(vector_source: dict, fuel_name: str | None) -> Generator[dict, None, None]:
+def temperature_setting_generator(vector_source: dict, fuel_name: str | None, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[dict, None, None]:
     """
     Generates all potential temperature settings for a recipe.
 
@@ -179,7 +179,7 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
             allowed_modules = [(module['name'], True, True) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])] #TODO: unsure about this line
     
     base_inputs = copy.deepcopy(vector_source['base_inputs'])
-    base_inputs.update({fuel_name: (-1.0 * machine['energy_usage_raw'] / fuel_value) * (vector_source['time_multiplier'] / machine['speed'])}) #'time_multiplier' populated during normalization
+    base_inputs.update({fuel_name: (-1 * machine['energy_usage_raw'] / fuel_value) * (vector_source['time_multiplier'] / machine['speed'])}) #'time_multiplier' populated during normalization
     for k in list(vector_source['base_inputs'].keys()): #fixing temperature settings
         if k in temperature_settings.keys():
             base_inputs.update({k+'@'+str(temperature_settings[k]): base_inputs[k]})
@@ -187,12 +187,19 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
         
     cost = CompressedVector({machine['name']: 1})
     
-    limit = machine['limit'] + vector_source['limit']
+    try:
+        limit = machine['limit'] + vector_source['limit']
+    except:
+        print('limit' in machine.keys())
+        print('limit' in vector_source.keys())
+        print(vector_source)
+        raise ValueError(vector_source)
 
-    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, base_productivity = machine['base_productivity'] if 'base_productivity' in machine.keys() else 1)
+    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, 
+                               base_productivity = Fraction(machine['base_productivity']) if 'base_productivity' in machine.keys() else Fraction(1))
     #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
 
-def generate_crafting_constructs(machine: dict, recipe: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_crafting_constructs(machine: dict, recipe: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs of a machine that does recipe crafting.
 
@@ -211,11 +218,11 @@ def generate_crafting_constructs(machine: dict, recipe: dict, data: dict) -> Gen
     """
     logging.debug("Generating uncompiled constructs for: %s in %s", recipe['name'], machine['name'])
     
-    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data):
-        for temperature_setting in temperature_setting_generator(recipe, fuel_name):
+    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
+        for temperature_setting in temperature_setting_generator(recipe, fuel_name, RELEVENT_FLUID_TEMPERATURES):
             yield generate_fueled_construct_helper(machine, recipe, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting)
 
-def generate_boiler_machine_constructs(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_boiler_machine_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a boiler.
 
@@ -247,7 +254,7 @@ def generate_boiler_machine_constructs(machine: dict, data: dict) -> Generator[U
         RELEVENT_FLUID_TEMPERATURES.update({output_fluid: {}})
     RELEVENT_FLUID_TEMPERATURES[output_fluid][machine['target_temperature']] = joules_per_unit
     
-    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data):
+    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
         ident = input_fluid+" to "+output_fluid+"@"+str(machine['target_temperature'])+" in "+machine['name']+" using "+fuel_name
         
         drain = {}
@@ -270,7 +277,7 @@ def generate_boiler_machine_constructs(machine: dict, data: dict) -> Generator[U
         
         yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, 0, base_inputs, cost, limit)
 
-def generate_mining_drill_construct(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_mining_drill_construct(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a mining drill.
 
@@ -289,11 +296,11 @@ def generate_mining_drill_construct(machine: dict, data: dict) -> Generator[Unco
     
     for cata in machine['resource_categories']:
         for resource in data['resource-category'][cata]['resource_list']:
-            for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data):
-                for temperature_setting in temperature_setting_generator(resource, fuel_name):
+            for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
+                for temperature_setting in temperature_setting_generator(resource, fuel_name, RELEVENT_FLUID_TEMPERATURES):
                     yield generate_fueled_construct_helper(machine, resource, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting)
 
-def generate_burner_generator(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_burner_generator(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a burner generator.
 
@@ -308,7 +315,7 @@ def generate_burner_generator(machine: dict, data: dict) -> Generator[Uncompiled
     ------
     UncompiledConstructs
     """
-    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data):
+    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
         vector = CompressedVector({fuel_name: -1 * (machine['max_power_output_raw'] / fuel_value) / machine['energy_source']['effectivity'], #https://lua-api.factorio.com/latest/prototypes/BurnerGeneratorPrototype.html#max_power_output
                                    'electric': machine['max_power_output_raw']})
         if not fuel_burnt_result is None:
@@ -324,7 +331,7 @@ def generate_burner_generator(machine: dict, data: dict) -> Generator[Uncompiled
                                   CompressedVector({machine['name']: 1}), 
                                   machine['limit'])
 
-def generate_generator_constructs(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a generator.
 
@@ -380,7 +387,7 @@ def generate_generator_constructs(machine: dict, data: dict) -> Generator[Uncomp
                                      CompressedVector({machine['name']: 1}), 
                                      machine['limit'])
 
-def generate_reactor_constructs(machine: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_reactor_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a reactor.
 
@@ -399,7 +406,7 @@ def generate_reactor_constructs(machine: dict, data: dict) -> Generator[Uncompil
     if 'neighbour_bonus' in machine.keys():
         bonus = 1 + 3 * machine['neighbour_bonus']
     
-    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data): #https://lua-api.factorio.com/latest/prototypes/ReactorPrototype.html#energy_source
+    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES): #https://lua-api.factorio.com/latest/prototypes/ReactorPrototype.html#energy_source
         vector = CompressedVector({'heat': machine['energy_source']['effectivity'] * machine['consumption_raw'] * bonus, 
                                    fuel_name: -1 * machine['consumption_raw'] / fuel_value})
         if not fuel_burnt_result is None:
@@ -435,7 +442,7 @@ def valid_lab(machine: dict, technology: dict) -> bool:
             return False
     return True
 
-def generate_lab_construct(machine: dict, technology: dict, data: dict) -> Generator[UncompiledConstruct, None, None]:
+def generate_lab_construct(machine: dict, technology: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
     Generates UncompiledConstructs for a lab researching a technology.
 
@@ -454,11 +461,11 @@ def generate_lab_construct(machine: dict, technology: dict, data: dict) -> Gener
     """
     logging.debug("Generating uncompiled constructs for: %s in %s", technology['name'], machine['name'])
     
-    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data):
-        for temperature_setting in temperature_setting_generator(technology, fuel_name):
+    for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
+        for temperature_setting in temperature_setting_generator(technology, fuel_name, RELEVENT_FLUID_TEMPERATURES):
             yield generate_fueled_construct_helper(machine, technology, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting)
 
-def generate_all_constructs(data: dict) -> list[UncompiledConstruct]:
+def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, **kwargs: str | dict) -> list[UncompiledConstruct]:
     """
     Generates UncompiledConstructs for all machines in the version of the game represented in data.
 
@@ -475,7 +482,6 @@ def generate_all_constructs(data: dict) -> list[UncompiledConstruct]:
 
     all_uncompiled_constructs = []
 
-    #TODO: labs
     for ref in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']:
         logging.info("Starting construct generation of machines in category: %s", ref)
         for machine in data[ref].values():
@@ -489,34 +495,34 @@ def generate_all_constructs(data: dict) -> list[UncompiledConstruct]:
             if machine['type']=='assembling-machine' or machine['type']=='rocket-silo' or machine['type']=='furnace': #all children of https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
                 if 'fixed-recipe' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/AssemblingMachinePrototype.html#fixed_recipe
                     logging.debug("%s has a fixed recipe named %s", machine['name'], machine['fixed-recipe'])
-                    for construct in generate_crafting_constructs(machine, data['recipe'][machine['fixed-recipe']], data):
+                    for construct in generate_crafting_constructs(machine, data['recipe'][machine['fixed-recipe']], data, RELEVENT_FLUID_TEMPERATURES):
                         if construct:
                             all_uncompiled_constructs.append(construct)
 
                 for recipe in data['recipe'].values():
-                    if valid_crafting_machine(machine, recipe):
-                        for construct in generate_crafting_constructs(machine, recipe, data):
+                    if valid_crafting_machine(machine, recipe, **kwargs):
+                        for construct in generate_crafting_constructs(machine, recipe, data, RELEVENT_FLUID_TEMPERATURES):
                             if construct:
                                 all_uncompiled_constructs.append(construct)
             
 
             elif machine['type']=='boiler': #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html
-                for construct in generate_boiler_machine_constructs(machine, data):
+                for construct in generate_boiler_machine_constructs(machine, data, RELEVENT_FLUID_TEMPERATURES):
                     all_uncompiled_constructs.append(construct)
             
 
             elif machine['type']=='burner-generator': #https://lua-api.factorio.com/latest/prototypes/BurnerGeneratorPrototype.html
-                for construct in generate_burner_generator(machine, data):
+                for construct in generate_burner_generator(machine, data, RELEVENT_FLUID_TEMPERATURES):
                     all_uncompiled_constructs.append(construct)
             
 
             elif machine['type']=='generator': #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html
-                for construct in generate_generator_constructs(machine, data):
+                for construct in generate_generator_constructs(machine, data, RELEVENT_FLUID_TEMPERATURES):
                     all_uncompiled_constructs.append(construct)
             
 
             elif machine['type']=='mining-drill': #https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html
-                for fam in generate_mining_drill_construct(machine, data):
+                for fam in generate_mining_drill_construct(machine, data, RELEVENT_FLUID_TEMPERATURES):
                     all_uncompiled_constructs.append(fam)
             
 
@@ -533,7 +539,7 @@ def generate_all_constructs(data: dict) -> list[UncompiledConstruct]:
 
 
             elif machine['type']=='reactor': #https://lua-api.factorio.com/latest/prototypes/ReactorPrototype.html
-                for construct in generate_reactor_constructs(machine, data):
+                for construct in generate_reactor_constructs(machine, data, RELEVENT_FLUID_TEMPERATURES):
                     all_uncompiled_constructs.append(construct)
 
 
@@ -552,7 +558,7 @@ def generate_all_constructs(data: dict) -> list[UncompiledConstruct]:
             elif machine['type']=='lab': #https://lua-api.factorio.com/latest/prototypes/LabPrototype.html
                 for technology in data['technology'].values():
                     if valid_lab(machine, technology):
-                        for construct in generate_lab_construct(machine, technology, data):
+                        for construct in generate_lab_construct(machine, technology, data, RELEVENT_FLUID_TEMPERATURES):
                             if construct:
                                 all_uncompiled_constructs.append(construct)
 

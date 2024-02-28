@@ -37,7 +37,7 @@ class Module:
             A module instance. https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html
         """
         self.name = module['name']
-        self.cost = {module['name']: 1}
+        self.cost = {module['name']: Fraction(1)}
         self.effect_vector = np.array([(module['effect'][e] if e in module['effect'].keys() else 0) for e in MODULE_EFFECTS]) #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html#effect
         #https://lua-api.factorio.com/latest/types/Effect.html
         self.limit = module['limit']
@@ -118,7 +118,7 @@ class UncompiledConstruct:
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
-                 limit: TechnologicalLimitation, base_productivity: Fraction = 0) -> None:
+                 limit: TechnologicalLimitation, base_productivity: Fraction = Fraction(0)) -> None:
         self.ident = ident
         self.drain = drain
         self.deltas = deltas
@@ -135,13 +135,13 @@ class UncompiledConstruct:
                 "\n\tWith a vector of: "+str(self.deltas)+\
                 "\n\tAn added drain of: "+str(self.drain)+\
                 "\n\tAn effect matrix of: "+str(self.effect_effects)+\
-                "\n\tAllowed Modules: "+str([e[0]['name'] for e in self.allowed_modules])+\
+                "\n\tAllowed Modules: "+str(self.allowed_modules)+\
                 "\n\tBase Productivity: "+str(self.base_productivity)+\
                 "\n\tBase Inputs of: "+str(self.base_inputs)+\
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
 
-    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], known_technologies: TechnologicalLimitation, 
+    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], known_technologies: TechnologicalLimitation, MODULE_REFERENCE: dict,
                         max_external_mods: int = 0, beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
         """
         Returns a list of LinearConstructs for all possible module setups of this UncompiledConstruct
@@ -182,9 +182,9 @@ class UncompiledConstruct:
             for mod, count in mod_set.items():
                 mod_name, mod_region = mod.split("|")
                 if mod_region=="i":
-                    effect_vector += count * MODULE_REFERENCE[mod_name].effect_vector
+                    effect_vector += count * MODULE_REFERENCE[mod_name]['effect_vector']
                 if mod_region=="e":
-                    effect_vector += count * beacon_multiplier * MODULE_REFERENCE[mod_name].effect_vector
+                    effect_vector += count * beacon_multiplier * MODULE_REFERENCE[mod_name]['effect_vector']
             effect_vector[MODULE_EFFECTS.index('productivity')] += self.base_productivity
             
             effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY)
@@ -193,7 +193,7 @@ class UncompiledConstruct:
             for item, count in self.deltas.items():
                 for effect, effected in self.effect_effects.items():
                     if item in effected:
-                        count *= (1+effect_vector[MODULE_EFFECTS.index(effect)])
+                        count *= (1 + effect_vector[MODULE_EFFECTS.index(effect)])
                 effected_deltas.update({item: count})
             effected_deltas = effected_deltas + self.drain
             effected_vector = sp.sparse.csr_array((n, 1), dtype=Fraction)
@@ -316,9 +316,9 @@ def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], un
         
     for construct in uncompiled_construct_list:
         for k, v in list(construct.deltas.items()) + list(construct.base_inputs.items()):
-            if v>0:
+            if v > 0:
                 graph[construct.ident+"-construct"].add(k)
-            if v<0:
+            if v < 0:
                 graph[k].add(construct.ident+"-construct")
     
     def all_descendants(node):

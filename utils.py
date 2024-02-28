@@ -7,8 +7,10 @@ import numpy as np
 import scipy as sp
 import scipy.sparse
 from fractions import Fraction
+import numexpr
+import re
 from globalvalues import *
-from typing import TypeVar, Callable, Any
+from typing import TypeVar, Callable, Hashable, Iterable
 T = TypeVar('T')
 
 class CompressedVector(dict):
@@ -80,14 +82,14 @@ def dnf_and(dnf1: list[list[T]], dnf2: list[list[T]]) -> list[list[T]]:
             dnf1p2.append(tot)
     return dnf1p2
     
-def numericalize_standard_expressions(*std_forms: list[list[T]], reference: Callable[[T], Any] = lambda x: x['name']) -> tuple[list[list[T]]]:
+def numericalize_standard_expressions(std_forms: list[list[list[T]]], reference: Callable[[T], Hashable] = lambda x: x['name']) -> tuple[list[list[T]]]:
     """
     Replaces dicts in a standard logical expression with a reference number so that pycosat can be used. Each literal should return a unique result with the reference function
     Currently only support positive literals.
 
     Parameters
     ----------
-    *std_forms:
+    std_forms:
         DNF or CNF (both are lists of lists of literals) logical expressions.
     reference
         Function that returns a unique value for every literal. This is usually used on dicts with a 'name' key, so that is chosen as default.
@@ -105,6 +107,53 @@ def numericalize_standard_expressions(*std_forms: list[list[T]], reference: Call
                     universal_reference.update({reference(e): i})
                     i += 1
     return tuple([[[universal_reference[reference(e)] for e in junc] for junc in form] for form in std_forms])
+    
+def dnf_to_kmap(dnf: list[list[int]], size: int) -> np.array:
+    """
+    Takes a strictly positive dnf in numerical form (literals are from Z+) and turns it into its kmap.
+    TODO: this could be sped up if slow 
+
+    Parameters
+    ----------
+    dnf:
+        DNF logical expression.
+    size:
+        Largest literal to consider.
+
+    Returns
+    -------
+    The DNF's kmap.
+    """
+    kmap = np.zeros((size ** 2, size ** 2), dtype=bool)
+    for conj in dnf:
+        raise NotImplementedError
+
+    return kmap
+
+def dnfs_to_kmaps(dnfs: list[list[list[T]]], referencing_function: Callable[[T], Hashable] = lambda x: x['name']) -> tuple[list[np.array], Callable[[int], T]]:
+    """
+    Replaces dicts in a standard logical expressions with a reference index and then converts them to a kmap for easier manipulation.
+
+    Parameters
+    ----------
+    dnfs:
+        DNF logical expressions.
+    referencing_function:
+        Function that returns a hashable and unique value for every literal. This is usually used on dicts with a 'name' key, so that is chosen as default.
+    
+    Returns
+    -------
+    kmaps:
+        List with an element for each dnf given as a np.array representing their kmap instead.
+    inverse:
+        Function that takes a reference index and returns a literal
+    """
+    reference = list(set(sum(sum([[[referencing_function(e) for e in conj] for conj in dnf] for dnf in dnfs], []), [])))
+    numericalized = [[list(set([reference.index(referencing_function(e)) for e in conj])) for conj in dnf] for dnf in dnfs]
+    kmaps = [dnf_to_kmap(dnf) for dnf in numericalized]
+    def numericalize_inverse(i):
+        return reference[i]
+    return kmaps, numericalize_inverse
     
 def neg_standard_form(std_form: list[list[T]]) -> list[list[T]]:
     """
@@ -173,7 +222,7 @@ def simplify_dnf_helper(dnf: list[list[int]]) -> list[list[int]]:
                 break
             i += 1
         
-def simplified_dnf(dnf: list[list[T]], reference: Callable[[T], Any] = lambda x: x['name']) -> list[list[T]]:
+def simplified_dnf(dnf: list[list[T]], reference: Callable[[T], Hashable] = lambda x: x['name']) -> list[list[T]]:
     """
     Simplifies a logical expression in disjunctive normal form.
 
@@ -205,79 +254,62 @@ def simplified_dnf(dnf: list[list[T]], reference: Callable[[T], Any] = lambda x:
 class TechnologicalLimitation:
     """
     Shortened to a 'limit' elsewhere in the program. Represents the technologies that must be researched in order
-    to unlock the specific object (recipe, machine, module, etc.)
+    to unlock the specific object (recipe, machine, module, etc.).
 
     Members
     -------
-    dnf:
-        Disjunctive normal form of the limitation
-    cnf:
-        Conjunctive normal form of the limitation
+    canonical_form:
+        List of sets making up the canonical form.
     """
-    dnf: list[list[T]]
-    cnf: list[list[T]]
+    canonical_form: frozenset[frozenset[str]]
 
-    def __init__(self, dnf: list[list[T]]) -> None:
+    def __init__(self, list_of_nodes: Iterable[Iterable[str]] = []) -> None:
         """
         Parameters
         ----------
-        dnf:
-            Logical expression in disjunctive normal form. Literals should be dicts with at least a 'name' key. Only positive literals are supported (and needed).
+        list_of_nodes:
+            Iterable of iterable over nodes to make up this limitation.
         """
-        if len(dnf)==0:
-            self.dnf = [[]]
-        else:
-            self.dnf = simplified_dnf(dnf)
-        self.cnf = dnf_to_cnf(dnf)
+        self.canonical_form = set()
+        for nodes in list_of_nodes:
+            self.canonical_form.add(frozenset(nodes))
+        self.canonical_form = frozenset(self.canonical_form)
         
     def __repr__(self) -> str:
-        return ", or\n\t".join([" and ".join([tech['name'] for tech in disj]) for disj in self.dnf])
-        
+        return ", or\n\t".join([" and ".join(nodes) for nodes in self.canonical_form])
+
     def __add__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
         """
         Addition betwen two TechnologicalLimitations is an AND operation.
         """
-        return TechnologicalLimitation(dnf_and(self.dnf, other.dnf))
-        
-    def __radd__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
-        return TechnologicalLimitation(dnf_and(self.dnf, other.dnf))
+        return TechnologicalLimitation(self.canonical_form.union(other.canonical_form))
 
-    def __sub__(self, other: TechnologicalLimitation) -> list[T]:
+    def __sub__(self, other: Iterable[str]) -> list[frozenset[str]]:
         """
-        Returns a list of technologies that are required to be added to other in order to cover self.
+        Returns a list of possible additions to a set of researches that will result in the completion of limitation.
         """
-        raise NotImplementedError
-
-    def __lt__(self, other: TechnologicalLimitation) -> bool:
-        return self <= other and not other <= self
-        
-    def __le__(self, other: TechnologicalLimitation) -> bool:
-        """
-        Return True iff other->self is tautological. Done via boolean SAT of negation of other->self 
-        will return true if other->self is non-tautological.
-        
-        Napkin logic:
-        -(other->self)
-        -(-other v self)
-        (other ^ -self)
-        """
-        other_num_form, self_num_form = numericalize_standard_expressions(other.cnf, self.dnf)
-        problem = other_num_form + neg_standard_form(self_num_form)
-        for sol in pycosat.itersolve(problem):
-            return False
-        return True
+        return [frozenset(nodes.difference(other)) for nodes in self.canonical_form]
         
     def __eq__(self, other: TechnologicalLimitation) -> bool:
-        return self <= other and other <= self
+        return self.canonical_form == other.canonical_form
         
     def __ne__(self, other: TechnologicalLimitation) -> bool:
-        return NotImplemented
+        return self.canonical_form != other.canonical_form
+
+    def __lt__(self, other: TechnologicalLimitation) -> bool:
+        return self <= other and self != other
+        
+    def __le__(self, other: TechnologicalLimitation) -> bool:
+        return other >= self
         
     def __gt__(self, other: TechnologicalLimitation) -> bool:
-        return other < self
+        return self >= other and self != other
         
     def __ge__(self, other: TechnologicalLimitation) -> bool:
-        return other <= self
+        for nodes_self in self.canonical_form:
+            if not any([nodes_self >= nodes_other for nodes_other in other.canonical_form]):
+                return False
+        return True
 
 def list_union(l1: list[T], l2: list[T]) -> list[T]:
     """
@@ -342,7 +374,8 @@ def list_of_dicts_by_key(list_of_dicts: list[dict], key, value) -> list[dict]:
     """
     return filter(lambda d: key in d.keys() and d[key]==value, list_of_dicts)
 
-def technological_limitation_from_specification(data: dict, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
+def technological_limitation_from_specification(data: dict, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = [],
+                                                COST_MODE: str = 'normal') -> TechnologicalLimitation:
     """
     Generates a TechnologicalLimitation from a specification. Works as a more 'user' friendly way of getting useful TechnologicalLimitations.
 
@@ -361,7 +394,7 @@ def technological_limitation_from_specification(data: dict, fully_automated: lis
     -------
     Specified TechnologicalLimitations
     """
-    tech_obj = TechnologicalLimitation([[]])
+    tech_obj = TechnologicalLimitation()
     
     for pack in fully_automated:
         assert pack in data['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
@@ -377,7 +410,7 @@ def technological_limitation_from_specification(data: dict, fully_automated: lis
         else:
             unit = tech['unit'] #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#unit
         if all([ing_name in fully_automated for ing_name in [ingred['name'] if isinstance(ingred, dict) else ingred[0] for ingred in unit['ingredients']]]):
-            tech_obj = tech_obj + TechnologicalLimitation([[tech]])
+            tech_obj = tech_obj + tech['limit']
     
     for tech in extra_technologies:
         tech_obj = tech_obj + data['technology'][tech]['limit']
@@ -387,3 +420,22 @@ def technological_limitation_from_specification(data: dict, fully_automated: lis
     
     return tech_obj
 
+def evaluate_formulaic_count(expression: str, level: int) -> int:
+    """
+    Evaluates the count for a formulaic expression for a level.
+
+    Parameters
+    ----------
+    expression:
+        Expression for the formulaic count. https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count_formula
+    level:
+        What level to calculate at.
+    
+    Returns
+    -------
+    Count value.
+    """
+    fixed_expression = expression.replace("l", str(level)).replace("L", str(level)).replace("^", "**")
+    fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
+    logging.warning(fixed_expression)
+    return numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?

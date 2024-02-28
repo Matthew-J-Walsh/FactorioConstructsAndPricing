@@ -8,6 +8,7 @@ from linearconstructs import *
 from scipysolvers import *
 from datarawparse import *
 import Levenshtein
+from numbers import Real
 
 
 class FactorioInstance():
@@ -29,13 +30,22 @@ class FactorioInstance():
     uncompiled_constructs: list[UncompiledConstruct]
     reference_list: list[str]
     catalyst_list: list[str]
+    COST_MODE: str
+    DEFAULT_TARGET_RESEARCH_TIME: Fraction
+    RELEVENT_FLUID_TEMPERATURES: dict
+    MODULE_REFERENCE: dict
 
-    def __init__(self, filename: str) -> None:
+    def __init__(self, filename: str, COST_MODE: str = 'normal', DEFAULT_TARGET_RESEARCH_TIME: Real = 10000) -> None:
         with open(filename) as f:
             self.data_raw = json.load(f)
+        
+        self.COST_MODE = COST_MODE
+        self.DEFAULT_TARGET_RESEARCH_TIME = DEFAULT_TARGET_RESEARCH_TIME
+        self.RELEVENT_FLUID_TEMPERATURES = {} #keys are fluid names, values are a dict with keys of temperature and values of energy density
+        self.MODULE_REFERENCE = {} #Keys are names and values are Module class instances form linearconstructs.py
 
-        complete_premanagement(self.data_raw)
-        constructs = generate_all_constructs(self.data_raw)
+        complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.MODULE_REFERENCE, COST_MODE=self.COST_MODE)
+        constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, COST_MODE=self.COST_MODE)
         self.uncompiled_constructs, self.reference_list, self.catalyst_list = generate_all_construct_families(constructs)
     
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, np.ndarray]:
@@ -60,7 +70,7 @@ class FactorioInstance():
         """
         n = len(self.reference_list)
 
-        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies) for f in self.uncompiled_constructs], [])
+        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies, self.MODULE_REFERENCE) for f in self.uncompiled_constructs], [])
         m = len(constructs)
         R_i_j = sp.sparse.vstack([construct.vector for construct in constructs]).T
 
@@ -103,7 +113,7 @@ class FactorioInstance():
         -------
         Pricing model of given factory.
         """
-        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies) for f in self.uncompiled_constructs], [])
+        constructs = sum([f.get_constructs(self.reference_list, self.catalyst_list, known_technologies, self.MODULE_REFERENCE) for f in self.uncompiled_constructs], [])
 
         translated_base = CompressedVector()
         for k, v in starter_base.items():
@@ -281,17 +291,20 @@ class FactorioScienceFactory(FactorioFactory):
     """
     last_material_factory: FactorioMaterialFactory
     previous_science_factories: list[FactorioScienceFactory]
-    time_taget: Fraction
+    time_target: Fraction
 
     def __init__(self, instance: FactorioInstance, previous_science: list[FactorioScienceFactory] | TechnologicalLimitation, last_material_factory: FactorioMaterialFactory, 
-                 science_target: CompressedVector, time_taget: Fraction = Fraction(DEFAULT_TARGET_RESEARCH_TIME)) -> None:
+                 science_target: CompressedVector, time_target: Fraction | None = None) -> None:
         if isinstance(previous_science, TechnologicalLimitation):
             super().__init__(instance, previous_science, science_target)
         else:
             super().__init__(instance, previous_science[-1].get_technological_coverage(), science_target)
         self.last_material_factory = last_material_factory
         self.previous_science_factories = previous_science
-        self.time_taget = time_taget
+        if time_target is None:
+            self.time_target = self.instance.DEFAULT_TARGET_RESEARCH_TIME
+        else:
+            self.time_target = time_target
     
     def get_technological_coverage(self) -> TechnologicalLimitation:
         """
@@ -303,7 +316,7 @@ class FactorioScienceFactory(FactorioFactory):
                 if target in self.instance.data_raw['tool'].keys():
                     fully_automated_units.add(target)
 
-        return technological_limitation_from_specification(self.instance.data_raw, fully_automated=list(fully_automated_units))
+        return technological_limitation_from_specification(self.instance.data_raw, fully_automated=list(fully_automated_units), COST_MODE=self.instance.COST_MODE)
 
 
 class FactorioFactoryChain():
