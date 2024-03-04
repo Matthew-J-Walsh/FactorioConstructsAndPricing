@@ -1,12 +1,14 @@
 from __future__ import annotations
+
+import numpy as np
 import scipy as sp
 import scipy.sparse
-import numpy as np
 import copy
-from utils import *
-import functools
 import itertools
+
+from utils import *
 from globalvalues import *
+
 from typing import Generator
 
 class Module:
@@ -56,18 +58,67 @@ class LinearConstruct:
         The cost vector of the construct
     """
     ident: str
-    vector: sp.sparse.sparray
-    cost: sp.sparse.sparray
+    vector: CompressedVector
+    cost: CompressedVector
+    limit: TechnologicalLimitation
 
-    def __init__(self, ident: str, vector: sp.sparse.sparray, cost: sp.sparse.sparray) -> None:
+    def __init__(self, ident: str, vector: CompressedVector, cost: CompressedVector, limit: TechnologicalLimitation) -> None:
+        assert isinstance(ident, str)
+        assert isinstance(vector, CompressedVector)
+        assert isinstance(cost, CompressedVector)
+        assert isinstance(limit, TechnologicalLimitation)
         self.ident = ident
         self.vector = vector
         self.cost = cost
+        self.limit = limit
         
     def __repr__(self) -> str:
         return str(self.ident)+\
                 "\n\tWith a vector of: "+str(self.vector)+\
-                "\n\tA Cost of: "+str(self.cost)
+                "\n\tA Cost of: "+str(self.cost)+\
+                "\n\tLimit of: "+str(self.limit)
+
+class ConstructTransform:
+    """
+    
+    """
+    constructs: list[LinearConstruct]
+    reference_list: list[str]
+
+    def __init__(self, constructs: list[LinearConstruct], reference_list: list[str]) -> None:
+        self.constructs = constructs
+        self.reference_list = reference_list
+    
+    def to_sparse(self):
+        """
+        
+        """
+        raise NotImplementedError
+    
+    def to_dense(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        
+
+        Returns
+        -------
+        effect:
+            Linear transformation from amounts of constructs to total effect
+        cost:
+            Linear transformation from amounts of constructs to cost
+        """
+        effect = np.zeros((len(self.constructs), len(self.reference_list)), dtype=Fraction)
+        cost = np.zeros((len(self.constructs), len(self.reference_list)), dtype=Fraction)
+        for i in range(len(self.constructs)):
+            for k, v in self.constructs[i].vector.items():
+                effect[i, self.reference_list.index(k)] = v
+                assert effect[i, self.reference_list.index(k)]==v
+            for k, v in self.constructs[i].cost.items():
+                cost[i, self.reference_list.index(k)] = v
+                assert cost[i, self.reference_list.index(k)]==v
+
+        assert (effect != 0).any()
+        assert (cost != 0).any()
+        return effect, cost
 
 class UncompiledConstruct:
     """
@@ -106,7 +157,7 @@ class UncompiledConstruct:
     ident: str
     drain: CompressedVector
     deltas: CompressedVector
-    effect_effects: dict[str, list]
+    effect_effects: dict[str, list[str]]
     allowed_modules: list[tuple[str, bool, bool]]
     internal_module_limit: int
     base_inputs: CompressedVector
@@ -116,7 +167,7 @@ class UncompiledConstruct:
     universal_reference_list: list[str]
     catalyzing_deltas: list[str]
 
-    def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list], 
+    def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
                  limit: TechnologicalLimitation, base_productivity: Fraction = Fraction(0)) -> None:
         self.ident = ident
@@ -141,7 +192,7 @@ class UncompiledConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
 
-    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], known_technologies: TechnologicalLimitation, MODULE_REFERENCE: dict,
+    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], MODULE_REFERENCE: dict,
                         max_external_mods: int = 0, beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
         """
         Returns a list of LinearConstructs for all possible module setups of this UncompiledConstruct
@@ -152,8 +203,6 @@ class UncompiledConstruct:
             The universal reference list for vector orderings.
         catalyzing_deltas:
             List of catalysts to count in the cost.
-        known_technologies:
-            TechnologicalLimitation representing what technologies are unlocked.
         max_external_mods:
             External (beacon) module limit.
         beacon_multiplier:
@@ -164,53 +213,43 @@ class UncompiledConstruct:
         List of LinearConstructs
         """
         n = len(universal_reference_list)
-
-        if self.limit < known_technologies:
-            return []
-
-        permitted_modules = []
-        for mod, mcount in self.allowed_modules:
-            if mod['limit'] < known_technologies:
-                permitted_modules.append((mod, mcount))
         
         constructs = []
-        for mod_set in module_setup_generator(permitted_modules, self.internal_module_limit, max_external_mods):
+        logging.debug("\nFound a total of "+str(len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods))))+" mod setups")
+        for mod_set in module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods):
             logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
             ident = self.ident + (" with module setup: " + module_setup_readable(mod_set) if len(mod_set) > 0 else "")
+
+            limit = self.limit
 
             effect_vector = np.zeros(len(MODULE_EFFECTS))
             for mod, count in mod_set.items():
                 mod_name, mod_region = mod.split("|")
                 if mod_region=="i":
-                    effect_vector += count * MODULE_REFERENCE[mod_name]['effect_vector']
+                    effect_vector += count * MODULE_REFERENCE[mod_name]['effect_vector'].astype(float)
                 if mod_region=="e":
-                    effect_vector += count * beacon_multiplier * MODULE_REFERENCE[mod_name]['effect_vector']
-            effect_vector[MODULE_EFFECTS.index('productivity')] += self.base_productivity
+                    effect_vector += count * beacon_multiplier * MODULE_REFERENCE[mod_name]['effect_vector'].astype(float)
+                limit = limit + MODULE_REFERENCE[mod.split("|")[0]]['limit']
+            effect_vector[MODULE_EFFECTS.index('productivity')] += float(self.base_productivity)
             
-            effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY)
+            effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY.astype(float))
             
             effected_deltas = CompressedVector()
             for item, count in self.deltas.items():
                 for effect, effected in self.effect_effects.items():
                     if item in effected:
-                        count *= (1 + effect_vector[MODULE_EFFECTS.index(effect)])
-                effected_deltas.update({item: count})
+                        count *= 1 + effect_vector[MODULE_EFFECTS.index(effect)]
+                effected_deltas[item] = count
             effected_deltas = effected_deltas + self.drain
-            effected_vector = sp.sparse.csr_array((n, 1), dtype=Fraction)
-            for item, delta in effected_deltas.items():
-                effected_vector[universal_reference_list.index(item), 0] = delta
 
-            effected_cost = self.cost + CompressedVector({mod.name: count for mod, count in mod_set})
+            effected_cost = self.cost + CompressedVector({mod.split("|")[0]: count for mod, count in mod_set.items()})
             for item in catalyzing_deltas:
                 if item in self.base_inputs.keys():
-                    effected_cost = effected_cost + CompressedVector({item: self.base_inputs[item]})
-            effected_cost_vector = sp.sparse.csr_array((n, 1), dtype=Fraction)
-            for item, delta in effected_cost.items():
-                effected_cost_vector[universal_reference_list.index(item), 0] = delta
+                    effected_cost = effected_cost + CompressedVector({item: -1 * self.base_inputs[item]})
 
-            logging.debug("\tFound an vector of %s", effected_vector)
-            logging.debug("\tFound an cost_vector of %s", effected_cost_vector)
-            constructs.append(LinearConstruct(ident, effected_vector, effected_cost_vector))
+            logging.debug("\tFound an vector of %s", effected_deltas)
+            logging.debug("\tFound an cost_vector of %s", effected_cost)
+            constructs.append(LinearConstruct(ident, effected_deltas, effected_cost, limit))
 
         return constructs
 
@@ -233,19 +272,20 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
     """
     if len(modules)==0:
         yield CompressedVector()
-    internal_modules = [m for m, i, e in modules if i]
-    exteral_modules = [m for m, i, e in modules if e]
+    else: #TODO: Why can i not just return?
+        internal_modules = [m for m, i, e in modules if i]
+        exteral_modules = [m for m, i, e in modules if e]
 
-    for internal_mod_count in range(internal_limit+1):
-        for external_mod_count in range(external_limit+1):
-            for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
-                for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, external_mod_count):
-                    vector = CompressedVector()
-                    for mod in internal_mod_setup:
-                        vector += CompressedVector({mod+"|i": 1})
-                    for mod in external_mod_setup:
-                        vector += CompressedVector({mod+"|e": 1})
-                    yield vector
+        for internal_mod_count in range(internal_limit+1):
+            for external_mod_count in range(external_limit+1):
+                for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
+                    for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, external_mod_count):
+                        vector = CompressedVector()
+                        for mod in internal_mod_setup:
+                            vector += CompressedVector({mod+"|i": 1})
+                        for mod in external_mod_setup:
+                            vector += CompressedVector({mod+"|e": 1})
+                        yield vector
 
 def module_setup_readable(module_setup: CompressedVector) -> str:
     """

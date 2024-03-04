@@ -1,11 +1,11 @@
-
 import logging
-from oldstuff.sparsetensors import *
+import itertools
+
 from utils import *
 from globalvalues import *
+
 import typing
 from typing import Generator
-import numexpr
 
 def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[tuple[str, Fraction, typing.Optional[str]], None, None]:
     """
@@ -25,7 +25,7 @@ def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEM
     allowed_fuels:
         A list of tuples in the form (fuel name, energy density, burnt result)
     """
-    effectivity = Fraction(energy_source['effectivity'] if 'effectivity' in energy_source.keys() else 1)
+    effectivity = Fraction(energy_source['effectivity'] if 'effectivity' in energy_source.keys() else 1).limit_denominator()
 
     if energy_source['type']=='electric': #https://lua-api.factorio.com/latest/types/ElectricEnergySource.html
         return [('electric', Fraction(1), None)]
@@ -84,25 +84,26 @@ def calculate_drain(energy_source: dict, energy_usage: Fraction, fuel_name: str,
     """
     drain = CompressedVector()
     if 'drain' in energy_source: #https://lua-api.factorio.com/latest/types/ElectricEnergySource.html#drain some other sources have drain option too
-        drain[fuel_name] = energy_source['drain_raw'] / fuel_value
+        drain[fuel_name] = -1 * energy_source['drain_raw'] / fuel_value
     elif fuel_name=='electric': #electric sources have a default 1/30th drain
-        drain[fuel_name] = (energy_usage / 30) / fuel_value
+        drain[fuel_name] = -1 *(energy_usage / 30) / fuel_value
     return drain
 
-def link_techs(data: dict) -> None:
+def link_techs(data: dict, COST_MODE: str) -> None:
     """
     Links the technologies from data.raw to eachother to the recipes, to the machines, and to the modules and all inbetween in all the funs ways. 
     Modifies data.raw directly.
+    Additionally adds 'enableable' key to all recipes to filter recipes that are cheat mode only.
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
     """
-    enabled_technologies = filter(lambda tech: not 'enabled' in tech.keys() or tech['enabled'], data['technology'].values())
+    enabled_technologies = list(filter(lambda tech: not 'enabled' in tech.keys() or tech['enabled'], data['technology'].values()))
     #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#enabled
 
-    logging.debug("Beginning the linking of technologies.")
+    logging.warning("Beginning the linking of technologies. %d technologies found.", len(enabled_technologies))
     for tech in enabled_technologies:
         tech['prereq_set'] = [] #will eventually contain technologies that are direct requirements to unlocking this one
         tech['prereq_of'] = [] #will eventually contain technologies that this is a direct unlock requirement of
@@ -110,18 +111,6 @@ def link_techs(data: dict) -> None:
         tech['enabled_recipes'] = [] #will eventually contain all recipes that researching this technology will unlock
 
     logging.debug("Compiling first order prerequisite.")
-    """
-    #Old version:
-    for tech in data['technology'].values():
-        if not 'enabled' in tech.keys() or tech['enabled']:
-            if 'prerequisites' in tech.keys():
-                for prereq in tech['prerequisites']:
-                    for otech in data['technology'].values():
-                        if not 'enabled' in otech.keys() or otech['enabled']:
-                            if otech['name']==prereq:
-                                tech['prereq_set'].append(otech)
-                                otech['prereq_of'].append(tech)
-    """
     for tech1, tech2 in itertools.permutations(enabled_technologies, 2):
         if 'prerequisites' in tech1.keys(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#prerequisites
             if tech2['name'] in tech1['prerequisites']: #https://lua-api.factorio.com/latest/types/TechnologyID.html
@@ -137,30 +126,38 @@ def link_techs(data: dict) -> None:
     for tech in enabled_technologies:
         tech['all_prereq'] = recursive_prereqs(tech)
 
-    logging.debug("Linking of all recipes to their technologies.")
+    logging.info("Linking of all recipes to their technologies.")
     for recipe in data['recipe'].values(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
         recipe_techs = []
+        if COST_MODE in recipe.keys():
+            enableable = (not 'enabled' in recipe[COST_MODE].keys()) or recipe[COST_MODE]['enabled']
+        else:
+            enableable = (not 'enabled' in recipe.keys()) or recipe['enabled']
         for tech in enabled_technologies:
             if 'effects' in tech.keys():
                 for effect in tech['effects']: #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#effects
                     if effect['type']=='unlock-recipe' and effect['recipe']==recipe['name']: #https://lua-api.factorio.com/latest/types/UnlockRecipeModifier.html
+                        enableable = True
                         recipe_techs.append([t['name'] for t in tech['all_prereq']]) #each element of recipe_techs will be a list representing a combination of techs that lets the recipe be used
                         tech['enabled_recipes'].append(recipe)
+        recipe['enableable'] = enableable
         recipe['limit'] = TechnologicalLimitation(recipe_techs)
 
-    logging.debug("Linking of all machines to their technologies.")
+    logging.info("Linking of all machines to their technologies.")
     for cata in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']: #https://lua-api.factorio.com/latest/prototypes/EntityWithOwnerPrototype.html
         for machine in data[cata].values():
             machine['limit'] = TechnologicalLimitation()
             for recipe in data['recipe'].values():
-                if machine['name'] in recipe['base_inputs'].keys():
+                if any([k==machine["name"] and v > 0 for k, v in recipe['vector'].items()]):
+                    logging.info("Found machine "+machine['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                     machine['limit'] = machine['limit'] + recipe['limit']
                 
-    logging.debug("Linking of all modules to their technologies.")
+    logging.info("Linking of all modules to their technologies.")
     for module in data['module'].values(): #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html
         module['limit'] = TechnologicalLimitation()
         for recipe in data['recipe'].values():
-            if module['name'] in recipe['base_inputs'].keys():
+            if any([k==module["name"] and v > 0 for k, v in recipe['vector'].items()]):
+                logging.info("Found module "+module['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 module['limit'] = module['limit'] + recipe['limit']
     
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
@@ -185,6 +182,9 @@ def standardize_power(data: dict) -> None:
         for machine in data[crafting_machine_type].values(): #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
             machine['energy_usage_raw'] = convert_value_to_base_units(machine['energy_usage']) #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#energy_usage
     
+    for machine in data['rocket-silo'].values(): #https://lua-api.factorio.com/latest/prototypes/RocketSiloPrototype.html
+        machine['active_energy_usage_raw'] = convert_value_to_base_units(machine['active_energy_usage']) #https://lua-api.factorio.com/latest/prototypes/RocketSiloPrototype.html#active_energy_usage
+
     for machine in data['boiler'].values(): #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html
         machine['energy_consumption_raw'] = convert_value_to_base_units(machine['energy_consumption']) #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html#energy_consumption
     
@@ -197,9 +197,9 @@ def standardize_power(data: dict) -> None:
         if 'max_power_output' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#max_power_output
             machine['max_power_output_raw'] = convert_value_to_base_units(machine['max_power_output'])
         else: #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#fluid_box
-            machine['max_power_output_raw'] = Fraction(60*machine['fluid_usage_per_tick'])*\
-                                              ((100-Fraction(data['fluid']['water']['default_temperature']))*convert_value_to_base_units(data['fluid']['water']['heat_capacity'])+\
-                                               (Fraction(machine['maximum_temperature'])-100)*convert_value_to_base_units(data['fluid']['steam']['heat_capacity']))
+            machine['max_power_output_raw'] = Fraction(60*machine['fluid_usage_per_tick']).limit_denominator()*\
+                                              ((100-Fraction(data['fluid']['water']['default_temperature']).limit_denominator())*convert_value_to_base_units(data['fluid']['water']['heat_capacity'])+\
+                                               (Fraction(machine['maximum_temperature']).limit_denominator()-100)*convert_value_to_base_units(data['fluid']['steam']['heat_capacity']))
     
     for machine in data['mining-drill'].values(): #https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html
         machine['energy_usage_raw'] = convert_value_to_base_units(machine['energy_usage'])
@@ -243,7 +243,7 @@ def prep_resources(data: dict) -> None:
             if cata['name'] == resource['category']:
                 cata['resource_list'].append(resource)
 
-def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str = 'normal') -> None:
+def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """
     Adds a base_inputs and vector component to each recipe. The vector component represents how the recipe function.
     While the base_inputs are values stored for catalyst cost calculations.
@@ -261,50 +261,38 @@ def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: 
             recipe_definition = recipe[COST_MODE]
         else: #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#ingredients
             recipe_definition = recipe
-            
-
-        for ingred in recipe_definition['ingredients']: #https://lua-api.factorio.com/latest/types/IngredientPrototype.html both item and fluid have similar structure
-            if isinstance(ingred, dict): #full definition
-                fixed_name = ingred['name']
-
-                if 'minimum_temperature' in ingred.keys():
-                    fixed_name += '@'+str(ingred['minimum_temperature'])+'-'+str(ingred['maximum_temperature'])
-
-                changes[ingred['name']] = -1 * Fraction(ingred['amount'])
-
-            else: #shortened (item only) definition (a list)
-                changes[ingred[0]] = -1 * Fraction(ingred[1])
 
 
         if 'results' in recipe_definition.keys(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#results both item and fluid have similar structure
             for result in recipe_definition['results']: 
-                if isinstance(result, dict):
-                    fixed_name = result['name']
+                fixed_name = result['name']
 
-                    if 'temperature' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#temperature
-                        fluid = data['fluid'][result['name']]
-                        fixed_name += '@'+str(result['temperature'])
-                        if not result['name'] in RELEVENT_FLUID_TEMPERATURES.keys():
-                            RELEVENT_FLUID_TEMPERATURES[result['name']] = {}
-                        if not result['temperature'] in RELEVENT_FLUID_TEMPERATURES[result['name']].keys():
-                            RELEVENT_FLUID_TEMPERATURES[result['name']][result['temperature']] = Fraction(result['temperature'] - fluid['default_temperature']) * convert_value_to_base_units(fluid['heat_capacity']) #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html#heat_capacity
+                if 'temperature' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#temperature
+                    fluid = data['fluid'][result['name']]
+                    fixed_name += '@'+str(result['temperature'])
+                    if not result['name'] in RELEVENT_FLUID_TEMPERATURES.keys():
+                        RELEVENT_FLUID_TEMPERATURES[result['name']] = {}
+                    if not result['temperature'] in RELEVENT_FLUID_TEMPERATURES[result['name']].keys():
+                        RELEVENT_FLUID_TEMPERATURES[result['name']][result['temperature']] = Fraction(result['temperature'] - fluid['default_temperature']).limit_denominator() * convert_value_to_base_units(fluid['heat_capacity']) #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html#heat_capacity
 
-                    if 'amount' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount works the same for items
-                        changes[fixed_name] = Fraction(result['amount'])
-                    else: #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount_min works the same for items
-                        changes[fixed_name] = Fraction(1, 2)*Fraction(result['amount_max']+result['amount_min'])
-
-                    if 'probability' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#probability works the same for items
-                        changes[fixed_name] *= Fraction(result['probability'])
-
-                else: #shortened (item only) definition (a list)
-                    changes[result[0]] = Fraction(result[1])
+                changes[fixed_name] = average_result_amount(result)
         else: #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result
-            changes[recipe_definition['result']] = Fraction(recipe_definition['result_count']) if 'result_count' in recipe_definition.keys() else Fraction(1) #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result_count
+            changes[recipe_definition['result']] = Fraction(recipe_definition['result_count'] if 'result_count' in recipe_definition.keys() else 1).limit_denominator()  #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#result_count
+            
+        base_inputs = CompressedVector()
 
-        recipe['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store singular run inputs for catalyst calculations.
+        for ingred in recipe_definition['ingredients']: #https://lua-api.factorio.com/latest/types/IngredientPrototype.html both item and fluid have similar structure
+            fixed_name = ingred['name']
 
-        recipe['vector'] = (Fraction(1) / Fraction(recipe['energy_required'])) * changes
+            if 'minimum_temperature' in ingred.keys():
+                fixed_name += '@'+str(ingred['minimum_temperature'])+'-'+str(ingred['maximum_temperature'])
+
+            changes.key_addition(ingred['name'], -1 * Fraction(ingred['amount']).limit_denominator())
+            base_inputs.key_addition(ingred['name'], -1 * Fraction(ingred['amount']).limit_denominator())
+
+        recipe['base_inputs'] = base_inputs #store singular run inputs for catalyst calculations.
+
+        recipe['vector'] = (Fraction(1) / Fraction(recipe['energy_required']).limit_denominator()) * changes
 
 def vectorize_resources(data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> None:
     """
@@ -322,41 +310,35 @@ def vectorize_resources(data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> None:
 
         mining_definition = resource['minable']
 
-        if 'required_fluid' in mining_definition: #https://lua-api.factorio.com/latest/types/MinableProperties.html#required_fluid
-            changes[mining_definition['required_fluid']] = -1 * mining_definition['fluid_amount'] #https://lua-api.factorio.com/latest/types/MinableProperties.html#fluid_amount
-
-
         if 'results' in mining_definition.keys(): #https://lua-api.factorio.com/latest/types/MinableProperties.html#results
             for result in mining_definition['results']: 
-                if isinstance(result, dict):
-                    fixed_name = result['name']
+                fixed_name = result['name']
 
-                    if 'temperature' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#temperature
-                        fluid = data['fluid'][result['name']]
-                        fixed_name += '@'+str(result['temperature'])
-                        if not result['name'] in RELEVENT_FLUID_TEMPERATURES.keys():
-                            RELEVENT_FLUID_TEMPERATURES[result['name']] = {}
-                        if not result['temperature'] in RELEVENT_FLUID_TEMPERATURES[result['name']].keys():
-                            RELEVENT_FLUID_TEMPERATURES[result['name']][result['temperature']] = Fraction(result['temperature'] - fluid['default_temperature']) * convert_value_to_base_units(fluid['heat_capacity']) #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html#heat_capacity
+                if 'temperature' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#temperature
+                    fluid = data['fluid'][result['name']]
+                    fixed_name += '@'+str(result['temperature'])
+                    if not result['name'] in RELEVENT_FLUID_TEMPERATURES.keys():
+                        RELEVENT_FLUID_TEMPERATURES[result['name']] = {}
+                    if not result['temperature'] in RELEVENT_FLUID_TEMPERATURES[result['name']].keys():
+                        RELEVENT_FLUID_TEMPERATURES[result['name']][result['temperature']] = Fraction(result['temperature'] - fluid['default_temperature']).limit_denominator() * convert_value_to_base_units(fluid['heat_capacity']) #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html#heat_capacity
 
-                    if 'amount' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount works the same for items
-                        changes[fixed_name] = Fraction(result['amount'])
-                    else: #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount_min works the same for items
-                        changes[fixed_name] = Fraction(1, 2)*Fraction(result['amount_max']+result['amount_min'])
+                changes[fixed_name] = average_result_amount(result)
 
-                    if 'probability' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#probability works the same for items
-                        changes[fixed_name] *= Fraction(result['probability'])
-
-                else: #shortened (item only) definition (a list)
-                    changes[result[0]] = Fraction(result[1])
         else: #https://lua-api.factorio.com/latest/types/MinableProperties.html#result
-            changes[mining_definition['result']] = Fraction(mining_definition['count']) #https://lua-api.factorio.com/latest/types/MinableProperties.html#count
+            changes[mining_definition['result']] = Fraction(mining_definition['count']).limit_denominator() #https://lua-api.factorio.com/latest/types/MinableProperties.html#count
+            
+        base_inputs = CompressedVector()
 
-        resource['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store singular run inputs for catalyst calculations.
+        if 'required_fluid' in mining_definition: #https://lua-api.factorio.com/latest/types/MinableProperties.html#required_fluid
+            changes.key_addition(mining_definition['required_fluid'], -1 * Fraction(mining_definition['fluid_amount']) / 10) #https://lua-api.factorio.com/latest/types/MinableProperties.html#fluid_amount
+            base_inputs.key_addition(mining_definition['required_fluid'], -1 * Fraction(mining_definition['fluid_amount']) / 10)
+            #don't really have a citation for the divided by 10. Current theory in the discord is that ores are batched 10 at a time.
 
-        resource['vector'] = (Fraction(1) / Fraction(mining_definition['mining_time'])) * changes
+        resource['base_inputs'] = base_inputs #store singular run inputs for catalyst calculations.
 
-def vectorize_technologies(data: dict, COST_MODE: str = 'normal') -> None:
+        resource['vector'] = (Fraction(1) / Fraction(mining_definition['mining_time']).limit_denominator()) * changes
+
+def vectorize_technologies(data: dict, COST_MODE: str) -> None:
     """
     Adds a vector component to each technology. The vector component represents how labs researching a technology function.
 
@@ -377,29 +359,25 @@ def vectorize_technologies(data: dict, COST_MODE: str = 'normal') -> None:
         for ingred in cost_definition['unit']['ingredients']: #https://lua-api.factorio.com/latest/types/TechnologyData.html#unit 
             #https://lua-api.factorio.com/latest/types/TechnologyUnit.html
             #https://lua-api.factorio.com/latest/types/IngredientPrototype.html
-            if isinstance(ingred, dict): #full definition
-                fixed_name = ingred['name']
+            fixed_name = ingred['name']
 
-                if 'minimum_temperature' in ingred.keys():
-                    fixed_name += '@'+str(ingred['minimum_temperature'])+'-'+str(ingred['maximum_temperature'])
+            if 'minimum_temperature' in ingred.keys():
+                fixed_name += '@'+str(ingred['minimum_temperature'])+'-'+str(ingred['maximum_temperature'])
 
-                changes[ingred['name']] = -1 * Fraction(ingred['amount'])
-
-            else: #shortened (item only) definition (a list)
-                changes[ingred[0]] = -1 * Fraction(ingred[1])
+            changes[ingred['name']] = -1 * Fraction(ingred['amount']).limit_denominator()
         
         if 'count' in cost_definition['unit'].keys(): #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count
-            changes = Fraction(cost_definition['unit']['count']) * changes
+            changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
         else: #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count_formula
             logging.warning("Formulaic technological counts aren't fully supported yet, only the '1' instance is done. TODO")
             cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], 1)
-            changes = Fraction(cost_definition['unit']['count']) * changes
+            changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
 
         technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later.
         
-        changes[technology['name']] = Fraction(1)  #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
+        changes[technology['name']+'=research'] = Fraction(1)  #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
 
-        technology['vector'] = changes * (1 / (Fraction(cost_definition['unit']['time']) * Fraction(cost_definition['unit']['count'])))
+        technology['vector'] = changes * (1 / (Fraction(cost_definition['unit']['time']).limit_denominator() * Fraction(cost_definition['unit']['count']).limit_denominator()))
 
 def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
     """
@@ -419,6 +397,8 @@ def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
         recipe['allowed_modules'] = []
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
         resource['allowed_modules'] = []
+    for tech in data['technology'].values():
+        tech['allowed_modules'] = []
     for module in data['module'].values(): #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html
         if 'limitation' in module.keys(): #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html#limitation
             for recipe_name in module['limitation']:
@@ -437,12 +417,16 @@ def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
             for resource in data['resource'].values():
                 resource['allowed_modules'].append(module)
         
+        #TODO: Underdefined for labs?
+        for tech in data['technology'].values():
+            tech['allowed_modules'].append(module)
+
         #https://lua-api.factorio.com/latest/types/Effect.html
-        module['effect_vector'] = np.array([Fraction(module['effect'][effect]['bonus']) if effect in module['effect'].keys() else Fraction(0) for effect in MODULE_EFFECTS])
+        module['effect_vector'] = np.array([Fraction(module['effect'][effect]['bonus']).limit_denominator() if effect in module['effect'].keys() else Fraction(0) for effect in MODULE_EFFECTS])
 
         MODULE_REFERENCE[module['name']] = module
 
-def set_defaults_and_normalize(data: dict, COST_MODE: str = 'normal') -> None:
+def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
     """
     Sets the defaults of various optional elements that are called later. Including:
     recipe's energy_required (default: .5)
@@ -450,15 +434,24 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str = 'normal') -> None:
     resource's minable count (default: 1)
     machine's energy_source effectivity (default: 1)
 
-    Additionally normalizes terms across machines:
+    Normalizes terms across machines:
     furnace's, rocket-silo's, and assembling-machines's 'crafting_speed' is added to 'speed' term
     mining-drill's 'mining_speed' is added to 'speed' term
     lab's 'researching_speed' is added to 'speed' term
 
-    Additionally normalizes terms across recipe-likes:
+    Normalizes terms across recipe-likes:
     recipe's 'energy_required' is added to 'time_multiplier' term
     resources's 'minable' 'mining-time' is added to 'time_multiplier' term
     technology's 'unit' 'time' is added to 'time_multiplier' term
+
+    Normalizes allowed_effects by adding it to labs and mining-drills if not already present.
+    https://lua-api.factorio.com/latest/prototypes/LabPrototype.html#allowed_effects
+    https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#allowed_effects
+
+    Normalizes rocket_launch_products, if just rocket_launch_products is not given but rocket_launch_product is we put it into an array.
+
+    Fixes IngredientPrototypes to always be a dict. https://lua-api.factorio.com/latest/types/IngredientPrototype.html
+    Fixes ProductPrototypes to always be a dict. https://lua-api.factorio.com/latest/types/ItemProductPrototype.html
 
     Parameters
     ----------
@@ -480,26 +473,64 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str = 'normal') -> None:
 
     for ref in ['furnace', 'rocket-silo', 'assembling-machine']:
         for machine in data[ref].values():
-            machine['speed'] = Fraction(machine['crafting_speed'])
+            machine['speed'] = Fraction(machine['crafting_speed']).limit_denominator()
     for machine in data['mining-drill'].values():
-        machine['speed'] = Fraction(machine['mining_speed'])
+        machine['speed'] = Fraction(machine['mining_speed']).limit_denominator()
     for machine in data['lab'].values():
-        machine['speed'] = Fraction(machine['researching_speed'])
+        machine['speed'] = Fraction(machine['researching_speed']).limit_denominator()
 
     for recipe in data['recipe'].values():
         if COST_MODE in recipe.keys() and 'energy_required' in recipe[COST_MODE]:
-            recipe['time_multiplier'] = Fraction(recipe[COST_MODE]['energy_required'])
+            recipe['time_multiplier'] = Fraction(recipe[COST_MODE]['energy_required']).limit_denominator()
         else:
-            recipe['time_multiplier'] = Fraction(recipe['energy_required'])
+            recipe['time_multiplier'] = Fraction(recipe['energy_required']).limit_denominator()
     for resource in data['resource'].values():
-        resource['time_multiplier'] = Fraction(resource['minable']['mining_time'])
+        resource['time_multiplier'] = Fraction(resource['minable']['mining_time']).limit_denominator()
     for technology in data['technology'].values():
         if COST_MODE in technology.keys():
-            technology['time_multiplier'] = Fraction(technology[COST_MODE]['unit']['time'])
+            technology['time_multiplier'] = Fraction(technology[COST_MODE]['unit']['time']).limit_denominator()
         else:
-            technology['time_multiplier'] = Fraction(technology['unit']['time'])
+            technology['time_multiplier'] = Fraction(technology['unit']['time']).limit_denominator()
 
-def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, MODULE_REFERENCE: dict, **kwargs: str | dict) -> None:
+    for lab in data['lab'].values():
+        if not 'allowed_effects' in lab.keys():
+            lab['allowed_effects'] = MODULE_EFFECTS
+    for machine in data['mining-drill'].values():
+        if not 'allowed_effects' in machine.keys():
+            machine['allowed_effects'] = MODULE_EFFECTS
+    
+    for item in data['item'].values():
+        if not 'rocket_launch_products' in item.keys() and 'rocket_launch_product' in item.keys():
+            item['rocket_launch_products'] = [item['rocket_launch_product']]
+
+    def set_to_dicts(l):
+        for i in range(len(l)):
+            prod = l[i]
+            if not isinstance(prod, dict):
+                l[i] = {'name': prod[0], 'amount': prod[1]}
+    for resource in data['resource'].values():
+        if 'results' in resource['minable'].keys():
+            set_to_dicts(resource['minable']['results'])
+    for recipe in data['recipe'].values():
+        if COST_MODE in recipe.keys():
+            recipe_definition = recipe[COST_MODE]
+        else:
+            recipe_definition = recipe
+        if 'results' in recipe_definition.keys():
+            set_to_dicts(recipe_definition['results'])
+        if 'ingredients' in recipe_definition.keys():
+            set_to_dicts(recipe_definition['ingredients'])
+    for item in data['item'].values():
+        if 'rocket_launch_products' in item.keys():
+            set_to_dicts(item['rocket_launch_products'])
+    for technology in data['technology'].values():
+        if COST_MODE in technology.keys():
+            technology_definition = technology[COST_MODE]
+        else:
+            technology_definition = technology
+        set_to_dicts(technology_definition['unit']['ingredients'])
+
+def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, MODULE_REFERENCE: dict, COST_MODE: str) -> None:
     """
     Does all the premanagment steps on data.raw in an appropriate order.
 
@@ -509,11 +540,33 @@ def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, MODULE
         Entire data.raw. https://wiki.factorio.com/Data.raw
     """
     logging.debug("Beginning the premanagement of the game data.raw object. This will link technologies, standardize power, recategorize resources, simplify recipes, and link modules.")
-    set_defaults_and_normalize(data, **kwargs)
+    set_defaults_and_normalize(data, COST_MODE)
     standardize_power(data)
     prep_resources(data)
-    vectorize_recipes(data, RELEVENT_FLUID_TEMPERATURES, **kwargs)
+    vectorize_recipes(data, RELEVENT_FLUID_TEMPERATURES, COST_MODE)
     vectorize_resources(data, RELEVENT_FLUID_TEMPERATURES)
-    vectorize_technologies(data, **kwargs)
+    vectorize_technologies(data, COST_MODE)
     link_modules(data, MODULE_REFERENCE)
-    link_techs(data)
+    link_techs(data, COST_MODE)
+
+def average_result_amount(result: dict) -> Fraction:
+    """
+    Calculates the average result amount from a item or fluid product prototype.
+
+    Parameters
+    ----------
+    result:
+        Item or Fluid product prototype.
+    
+    Returns
+    -------
+    Average amount of result produced.
+    """
+    if 'amount' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount works the same for items
+        amount = Fraction(result['amount']).limit_denominator()
+    else: #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#amount_min works the same for items
+        amount = Fraction(1, 2)*Fraction(result['amount_max']+result['amount_min']).limit_denominator()
+
+    if 'probability' in result.keys(): #https://lua-api.factorio.com/latest/types/FluidProductPrototype.html#probability works the same for items
+        amount *= Fraction(result['probability']).limit_denominator()
+    return amount
