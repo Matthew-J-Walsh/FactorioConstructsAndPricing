@@ -266,3 +266,33 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
     fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
     logging.warning(fixed_expression)
     return numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
+
+def linear_transform_is_gt(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5):
+    """
+    Ax>=b for b's
+    Sometimes the tolerance has to be fat massive for values with huge i/o (such as electricity)
+    x>=0 is assumed
+    """
+    Ap = A.copy()
+    Ap[Ap < 0] = 0
+    Lhp = Ap @ x
+    An = A.copy()
+    An[An > 0] = 0
+    Lhn = An @ x
+    true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
+    return np.logical_or(A @ x - b >= -1 * true_tol, np.logical_or(A @ x >= b, np.isclose(A @ x, b)))
+
+def linear_transform_is_close(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5):
+    """
+    Ax>=b for b's
+    Sometimes the tolerance has to be fat massive for values with huge i/o (such as electricity)
+    x>=0 is assumed
+    """
+    Ap = A.copy()
+    Ap[Ap < 0] = 0
+    Lhp = Ap @ x
+    An = A.copy()
+    An[An > 0] = 0
+    Lhn = An @ x
+    true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
+    return np.logical_or(np.abs(A @ x - b) <=  true_tol, np.isclose(A @ x, b))

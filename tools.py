@@ -10,8 +10,8 @@ import scipy.sparse
 from utils import *
 from generators import *
 from linearconstructs import *
-from scipysolvers import *
 from datarawparse import *
+from lpproblems import *
 
 from numbers import Real
 
@@ -96,14 +96,15 @@ class FactorioInstance():
             del targets[k]
 
         m = len(constructs)
-        R_i_j, C_i_j = ConstructTransform(constructs, self.reference_list).to_dense()
-        R_i_j = R_i_j.T
+        R_j_i, C_i_j = ConstructTransform(constructs, self.reference_list).to_dense()
+        R_j_i = R_j_i.T
 
         p0_j = np.full(n, Fraction(1e100), dtype=Fraction)
         for k, v in reference_model.items():
             p0_j[self.reference_list.index(k)] = v
 
         c_i = C_i_j @ p0_j
+        assert (c_i!=0).all(), "Some suspiciously priced things"
         #print("Out")
         #print(R_i_j.shape)
         #print(u_j.shape)
@@ -111,39 +112,72 @@ class FactorioInstance():
         #print(R_i_j.dtype)
         #print(u_j.dtype)
         #print(c_i.dtype)
-        R_i_j = R_i_j.astype(np.double)
-        c_i = c_i.astype(np.double)
+        R_j_i = R_j_i.astype(np.longdouble)
+        c_i = c_i.astype(np.longdouble)
         assert not (c_i >= 1e50).any(), (c_i >= 1e50)
 
-        try:
-            u_j = np.zeros(n, dtype=Fraction)
-            for k, v in targets.items():
-                u_j[self.reference_list.index(k)] = v
-            u_j = u_j.astype(np.double)
+        u_j = np.zeros(n, dtype=Fraction)
+        for k, v in targets.items():
+            u_j[self.reference_list.index(k)] = v
+        u_j = u_j.astype(np.longdouble)
 
-            s_i = solve_optimization_problem(R_i_j, u_j, c_i)
-        except:
-            logging.warning("Solve optimization failed. Trying to figure out why.")
-            for k, v in targets.items():
-                try:
-                    logging.warning("Trying "+k)
-                    u_j = np.zeros(n, dtype=Fraction)
-                    u_j[self.reference_list.index(k)] = v
-                    u_j = u_j.astype(np.double)
-                    s_i = solve_optimization_problem(R_i_j, u_j, c_i)
-                except:
-                    logging.warning(k+" failed.")
-            raise ValueError(k)
+        s_i = solve_factory_optimization_problem(R_j_i, u_j, c_i)
+
+        #try:
+        #    u_j = np.zeros(n, dtype=Fraction)
+        #    for k, v in targets.items():
+        #        u_j[self.reference_list.index(k)] = v
+        #    u_j = u_j.astype(np.double)
+        #
+        #    s_i = solve_optimization_problem(R_j_i, u_j, c_i)
+        #except:
+        #    logging.warning("Solve optimization failed. Trying to figure out why.")
+        #    s_i = np.zeros_like(c_i)
+        #    for k, v in targets.items():
+        #        try:
+        #            logging.warning("Trying "+k)
+        #            u_j = np.zeros(n, dtype=Fraction)
+        #            u_j[self.reference_list.index(k)] = v
+        #            u_j = u_j.astype(np.double)
+        #            partial_s_i = solve_optimization_problem(R_j_i, u_j, c_i)
+        #            s_i = s_i + partial_s_i
+        #        except:
+        #            logging.warning(k+" failed!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            #np.savetxt("A.txt", R_j_i)
+            #np.savetxt("b.txt", u_j)
+            #np.savetxt("c.txt", c_i)
+            #np.savetxt("x.txt", s_i)
+            #assert linear_transform_is_gt(R_j_i, subs, u_j).all(), "Kekw. Nice program."
+            #raise ValueError()
         #print(s_i)
         #print(R_i_j @ s_i)
-        assert np.logical_or(np.isclose(R_i_j @ s_i, u_j), R_i_j @ s_i >= u_j).all(), "Somehow solution infeasible?" 
+        try:
+            assert linear_transform_is_gt(R_j_i, s_i, u_j).all(), "Somehow solution infeasible?"
+        except:
+            nonzero = np.nonzero(1-linear_transform_is_gt(R_j_i, s_i, u_j))[0]
+            for i in nonzero:
+                print("assertion failure on: "+self.reference_list[i]+" values are "+str((R_j_i @ s_i)[i])+" vs "+str(u_j[i]))
+            raise AssertionError
 
-        p_j = calculate_pricing_model_via_optimal(R_i_j, s_i, u_j, c_i)
+        p_j = solve_pricing_model_calculation_problem(R_j_i, s_i, u_j, c_i)
+        p_j = p_j / np.max(p_j) * 100
 
         s = CompressedVector()
         for i in range(m):
             if s_i[i] != 0:
                 s[constructs[i].ident] = s_i[i]
+
+        #logging.info("Shapes")
+        #logging.info(R_j_i.shape)
+        #logging.info(s_i.shape)
+        #logging.info(R_j_i.T.shape)
+        #logging.info(p_j.shape)
+
+        #logging.info("Used "+str(np.sum(s_i!=0))+" total constructs")
+        #value = R_j_i.T @ p_j
+        #value_to_cost = (value / c_i)[np.nonzero(s_i)[0]]
+        #logging.info(value_to_cost)
+        #logging.info("Value to cost spread: "+str((np.max(value_to_cost)-np.min(value_to_cost))/np.min(value_to_cost)))
 
         return s, p_j
     
@@ -332,7 +366,8 @@ class FactorioFactory():
         """
         if not looped: #build it based on some other reference
             s, p_j = self.instance.solve_for_target(self.targets, self.known_technologies, input)
-            pricing_model = CompressedVector({self.instance.reference_list[i]: p_j[i] for i in np.nonzero(p_j)[0]})
+            #pricing_model = CompressedVector({self.instance.reference_list[i]: p_j[i] for i in np.nonzero(p_j)[0]})
+            pricing_model = CompressedVector({k: p_j[self.instance.reference_list.index(k)] for k in self.targets.keys()}) + CompressedVector({self.instance.reference_list[i]: p_j[i] for i in np.nonzero(p_j)[0]})
             same = pricing_model==self.optimal_pricing_model
             pricing_model = CompressedVector({k:v for k, v in pricing_model.items() if not '-module' in k})
             self.optimal_factory, self.optimal_pricing_model = s, pricing_model
