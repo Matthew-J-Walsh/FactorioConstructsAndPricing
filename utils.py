@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import logging
-from fractions import Fraction
+from globalsandimports import *
+
 import numexpr
-import re
 
-from globalvalues import *
-
-from typing import TypeVar, Callable, Hashable, Iterable, Any
 T = TypeVar('T')
 
 class CompressedVector(dict):
@@ -15,20 +11,17 @@ class CompressedVector(dict):
     CompressedVector's are dicts where the values are all numbers and the values represent a dimension.
     """
     def __add__(self, other: CompressedVector) -> CompressedVector:
-        d3 = CompressedVector()
+        new_cv = CompressedVector()
         for k, v in self.items():
-            d3.update({k: v})
+            new_cv.key_addition(k, v)
         for k, v in other.items():
-            if k in d3.keys():
-                d3[k] = d3[k] + v
-            else:
-                d3.update({k: v})
-        return d3
+            new_cv.key_addition(k, v)
+        return new_cv
 
     def __mul__(self, multiplier: Fraction) -> CompressedVector:
         dn = CompressedVector()
         for k, v in self.items():
-            dn.update({k: multiplier * v})
+            dn[k] = multiplier * v
         return dn
     
     def __rmul__(self, multiplier: Fraction) -> CompressedVector:
@@ -36,7 +29,7 @@ class CompressedVector(dict):
     
     def key_addition(self, key, value) -> None:
         """
-        Single line adding key or adding to value in key
+        Single line adding key or adding to value in key.
         """
         if key in self.keys():
             self[key] += value
@@ -126,7 +119,7 @@ class TechnologicalLimitation:
     #def __gt__(self, other: TechnologicalLimitation) -> bool:
     #    return self >= other and self != other
         
-    def __ge__(self, other: TechnologicalLimitation) -> bool:
+    def __ge__(self, other: TechnologicalLimitation) -> bool: #only permitted and only needed comparison, "Does having this unlocked mean that other is unlocked?"
         if len(other.canonical_form)==0 and len(self.canonical_form)!=0:
             return True
         if len(self.canonical_form)==0 and len(other.canonical_form)!=0:
@@ -180,34 +173,16 @@ def convert_value_to_base_units(string: str) -> Fraction:
     except:
         raise ValueError(string)
 
-def list_of_dicts_by_key(list_of_dicts: list[dict], key, value) -> list[dict]:
+def technological_limitation_from_specification(data: dict, COST_MODE: str, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
     """
-    Filters a list of dictonaries for only dictionaries with the specified key and the specified value for that key.
-
-    Parameters
-    ----------
-    list_of_dicts:
-        List of dictionaries to filter.
-    key:
-        Key to filter for.
-    value:
-        Value key must be.
-    
-    Returns
-    -------
-    Filtered list.
-    """
-    return filter(lambda d: key in d.keys() and d[key]==value, list_of_dicts)
-
-def technological_limitation_from_specification(data: dict, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = [],
-                                                COST_MODE: str = 'normal') -> TechnologicalLimitation:
-    """
-    Generates a TechnologicalLimitation from a specification. Works as a more 'user' friendly way of getting useful TechnologicalLimitations.
+    Generates a TechnologicalLimitation from a specification. Works as a more user friendly way of getting useful TechnologicalLimitations.
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     fully_automated:
         List of fully automated science packs.
     extra_technologies:
@@ -221,14 +196,13 @@ def technological_limitation_from_specification(data: dict, fully_automated: lis
     """
     tech_obj = set()
     
-    assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "??"
+    assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
     for pack in fully_automated:
         assert pack in data['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
     for tech in extra_technologies:
         assert tech in data['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
     for recipe in extra_recipes:
         assert recipe in data['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
-
 
     for tech in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
         if COST_MODE in tech.keys():
@@ -264,35 +238,75 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
     """
     fixed_expression = expression.replace("l", str(level)).replace("L", str(level)).replace("^", "**")
     fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
-    logging.warning(fixed_expression)
     return numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
 
-def linear_transform_is_gt(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5):
+def linear_transform_is_gt(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
     """
-    Ax>=b for b's
-    Sometimes the tolerance has to be fat massive for values with huge i/o (such as electricity)
-    x>=0 is assumed
+    Determines of a linear transformation, A, onto a contravector, x, is greater than or equal to b.
+    Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
+
+    Parameters
+    ----------
+    A:
+        Linear transformation
+    x:
+        contravector assumed to be >=0
+    b:
+        contravector
     """
+    x = x.astype(np.longdouble)
+    b = b.astype(np.longdouble)
+    A = A.astype(np.longdouble)
+    
     Ap = A.copy()
     Ap[Ap < 0] = 0
     Lhp = Ap @ x
+
     An = A.copy()
     An[An > 0] = 0
     Lhn = An @ x
+
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     return np.logical_or(A @ x - b >= -1 * true_tol, np.logical_or(A @ x >= b, np.isclose(A @ x, b)))
 
-def linear_transform_is_close(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5):
+def linear_transform_is_close(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
     """
-    Ax>=b for b's
-    Sometimes the tolerance has to be fat massive for values with huge i/o (such as electricity)
-    x>=0 is assumed
+    Determines of a linear transformation, A, onto a contravector, x, is equal to b.
+    Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
+
+    Parameters
+    ----------
+    A:
+        Linear transformation
+    x:
+        contravector assumed to be >=0
+    b:
+        contravector
     """
+    x = x.astype(np.longdouble)
+    b = b.astype(np.longdouble)
+    A = A.astype(np.longdouble)
+
     Ap = A.copy()
     Ap[Ap < 0] = 0
     Lhp = Ap @ x
+    
     An = A.copy()
     An[An > 0] = 0
     Lhn = An @ x
+
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     return np.logical_or(np.abs(A @ x - b) <=  true_tol, np.isclose(A @ x, b))
+
+def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
+    """
+    Determines the possible optimal beacon setups.
+    Setups have a beacon per 1 effected building count and cost multiplier.
+    Cost multiplier should be the ratio of beacons per building if every beacon possible is placed.
+    """
+    M = building['tile_width']
+    assert building['tile_width']==building['tile_height'], "beacon setups are not calculated for non-square buildings"
+    B = beacon['tile_width']
+    assert beacon['tile_width']==beacon['tile_height'], "beacon setups are not calculated for non-square buildings"
+    E = int(beacon['supply_area_distance']*2)
+    assert B%2==E%2, "Uneven supply area"

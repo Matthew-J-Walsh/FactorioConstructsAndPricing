@@ -2,6 +2,7 @@ import pytest
 
 from utils import *
 from tools import *
+from lpproblems import *
 
 
 def compressed_vectors_test_1():
@@ -51,22 +52,6 @@ def convert_value_to_base_units_test():
     via_func = [convert_value_to_base_units(val) for val in values]
 
     assert all([rv==vf for rv, vf in zip(real_values, via_func)])
-
-
-def list_of_dicts_by_key_test():
-    list_of_dicts = [{"A": 1, "B": 2, "C": 3, "D": 4},
-                     {"A": 2, "E": 1, "C": 4, "D": 3},
-                     {"E": 1, "B": 2, "C": 3, "D": 4},
-                     {"A": 2, "B": 1, "E": 4, "F": 3},
-                     {"A": 1, "F": 2, "C": 3, "E": 4},]
-    filtered_A_1 = list_of_dicts_by_key(list_of_dicts, "A", 1)
-    filtered_E_4 = list_of_dicts_by_key(list_of_dicts, "E", 4)
-    assert len(filtered_A_1) == 2
-    for d in filtered_A_1:
-        assert d["A"] == 1
-    assert len(filtered_E_4) == 2
-    for d in filtered_E_4:
-        assert d["E"] == 4
 
 
 def vanilla_instance_test():
@@ -119,6 +104,8 @@ def vanilla_instance_test():
             assert isinstance(v, Fraction)
         assert isinstance(construct.limit, TechnologicalLimitation)
         assert isinstance(construct.base_productivity, Fraction)
-        assert isinstance(construct.universal_reference_list, list)
+        assert isinstance(construct.reference_list, list)
         assert isinstance(construct.catalyzing_deltas, list)
 
+
+#TODO: testing for solvers

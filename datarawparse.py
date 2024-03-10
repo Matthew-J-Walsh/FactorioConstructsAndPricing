@@ -1,8 +1,5 @@
-import logging
-import itertools
-
 from utils import *
-from globalvalues import *
+from globalsandimports import *
 
 import typing
 from typing import Generator
@@ -19,6 +16,8 @@ def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEM
         An EnergySource instance. https://lua-api.factorio.com/latest/types/EnergySource.html
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    RELEVENT_FLUID_TEMPERATURES:
+        Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
     
     Returns
     -------
@@ -99,6 +98,8 @@ def link_techs(data: dict, COST_MODE: str) -> None:
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     """
     enabled_technologies = list(filter(lambda tech: not 'enabled' in tech.keys() or tech['enabled'], data['technology'].values()))
     #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#enabled
@@ -107,7 +108,7 @@ def link_techs(data: dict, COST_MODE: str) -> None:
     for tech in enabled_technologies:
         tech['prereq_set'] = [] #will eventually contain technologies that are direct requirements to unlocking this one
         tech['prereq_of'] = [] #will eventually contain technologies that this is a direct unlock requirement of
-        tech['all_prereq'] = [] #will eventually contain ALL technologies that have to be researched to research this one
+        tech['all_prereq'] = [] #will eventually contain ALL technologies that have to be researched to research this one (recursive prereq_set)
         tech['enabled_recipes'] = [] #will eventually contain all recipes that researching this technology will unlock
 
     logging.debug("Compiling first order prerequisite.")
@@ -163,13 +164,19 @@ def link_techs(data: dict, COST_MODE: str) -> None:
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
         resource['limit'] = TechnologicalLimitation()
 
-    for technology in data['technology'].values():
-        technology['limit'] = TechnologicalLimitation() #complicated but this is best #TechnologicalLimitation([t['name'] for t in tech['all_prereq'] if t['name']!=tech['name']])
+    for technology in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+        """
+        Settings technologies to the limit of their previous technologies would make it far harder to produce science factories in the current implementation.
+        An interface (and the current tools.py interface does) use the difference of TechnologicalLimitations to properly find which technologies to research.
+        """
+        technology['limit'] = TechnologicalLimitation()
+        #TechnologicalLimitation([t['name'] for t in tech['all_prereq'] if t['name']!=tech['name']])
         
 def standardize_power(data: dict) -> None:
     """
     Standardizes all power usages and values across all machine types and items/fluids.
     Modifies data.raw directly to add new "_raw" values to power usages and values.
+    Memoization step as these values are used many times in construct generation.
 
     Parameters
     ----------
@@ -208,6 +215,7 @@ def standardize_power(data: dict) -> None:
         machine['consumption_raw'] = convert_value_to_base_units(machine['consumption'])
         if not 'type' in machine['heat_buffer'].keys():
             machine['heat_buffer']['type'] = 'heat'
+        machine['heat_buffer']['specific_heat_raw'] = convert_value_to_base_units(machine['heat_buffer']['specific_heat'])
     
     for machine in data['solar-panel'].values(): #https://lua-api.factorio.com/latest/prototypes/SolarPanelPrototype.html
         machine['production_raw'] = convert_value_to_base_units(machine['production'])
@@ -245,13 +253,18 @@ def prep_resources(data: dict) -> None:
 
 def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """
-    Adds a base_inputs and vector component to each recipe. The vector component represents how the recipe function.
+    Adds a base_inputs and vector component to each recipe. 
+    The vector component represents how the recipe function.
     While the base_inputs are values stored for catalyst cost calculations.
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    RELEVENT_FLUID_TEMPERATURES:
+        Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     """
     logging.debug("Beginning the vectorization of recipes.")
     for recipe in data['recipe'].values(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
@@ -296,13 +309,16 @@ def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: 
 
 def vectorize_resources(data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> None:
     """
-    Adds a base_inputs and vector component to each resource. The vector component represents how the mining of the resource acts.
+    Adds a base_inputs and vector component to each resource. 
+    The vector component represents how the mining of the resource acts.
     While the base_inputs are values stored for catalyst cost calculations.
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    RELEVENT_FLUID_TEMPERATURES:
+        Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
     """
     logging.debug("Beginning the vectorization of resources.")
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
@@ -340,12 +356,15 @@ def vectorize_resources(data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> None:
 
 def vectorize_technologies(data: dict, COST_MODE: str) -> None:
     """
-    Adds a vector component to each technology. The vector component represents how labs researching a technology function.
+    Adds a vector component to each technology. 
+    The vector component represents how labs researching a technology function.
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     """
     logging.debug("Beginning the vectorization of technologies.")
     for technology in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
@@ -373,16 +392,16 @@ def vectorize_technologies(data: dict, COST_MODE: str) -> None:
             cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], 1)
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
 
-        technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later.
+        technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later. TODO. Do we need?
         
         changes[technology['name']+'=research'] = Fraction(1)  #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
 
         technology['vector'] = changes * (1 / (Fraction(cost_definition['unit']['time']).limit_denominator() * Fraction(cost_definition['unit']['count']).limit_denominator()))
 
-def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
+def link_modules(data: dict) -> None:
     """
     Adds the allowed_module component to each recipe and resource mining type representing which modules can be used in a machine running said operation.
-    Also populates global MODULE_REFERENCE
+    Also populates MODULE_REFERENCE
 
     Parameters
     ----------
@@ -390,9 +409,9 @@ def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
         Entire data.raw. https://wiki.factorio.com/Data.raw
     """
     logging.debug("Starting the linking of modules into the recipe and resource lists. %d recipes are detected, %d resources are detected, and %d modules are detected. Info will be added to the each recipe and resource under the \'allowed_modules\' key.",
-        len(data['recipe'].values()),
-        len(data['resource'].values()),
-        len(data['module'].values()))
+                  len(data['recipe'].values()),
+                  len(data['resource'].values()),
+                  len(data['module'].values()))
     for recipe in data['recipe'].values(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
         recipe['allowed_modules'] = []
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
@@ -424,7 +443,7 @@ def link_modules(data: dict, MODULE_REFERENCE: dict) -> None:
         #https://lua-api.factorio.com/latest/types/Effect.html
         module['effect_vector'] = np.array([Fraction(module['effect'][effect]['bonus']).limit_denominator() if effect in module['effect'].keys() else Fraction(0) for effect in MODULE_EFFECTS])
 
-        MODULE_REFERENCE[module['name']] = module
+        #MODULE_REFERENCE[module['name']] = module
 
 def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
     """
@@ -444,19 +463,29 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
     resources's 'minable' 'mining-time' is added to 'time_multiplier' term
     technology's 'unit' 'time' is added to 'time_multiplier' term
 
-    Normalizes allowed_effects by adding it to labs and mining-drills if not already present.
-    https://lua-api.factorio.com/latest/prototypes/LabPrototype.html#allowed_effects
+    Normalizes allowed_effects by adding it to crafting machines, mining drills, and labs if not already present.
+    https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#allowed_effects
     https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#allowed_effects
+    https://lua-api.factorio.com/latest/prototypes/LabPrototype.html#allowed_effects
+
+    Normalizes module_specification -> module_slots by adding it to crafting machines, mining drills, and labs if not already present.
+    https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#module_specification
+    https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#module_specification
+    https://lua-api.factorio.com/latest/prototypes/LabPrototype.html#module_specification
 
     Normalizes rocket_launch_products, if just rocket_launch_products is not given but rocket_launch_product is we put it into an array.
 
     Fixes IngredientPrototypes to always be a dict. https://lua-api.factorio.com/latest/types/IngredientPrototype.html
     Fixes ProductPrototypes to always be a dict. https://lua-api.factorio.com/latest/types/ItemProductPrototype.html
+    Fixes IngredientPrototypes to always include their type. https://lua-api.factorio.com/latest/types/ItemIngredientPrototype.html#type
+    Fixes ProductPrototypes to always include their type. https://lua-api.factorio.com/latest/types/ItemProductPrototype.html#type
 
     Parameters
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     """
     for recipe in data['recipe'].values():
         if not 'energy_required' in recipe.keys(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#energy_required
@@ -492,12 +521,33 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
         else:
             technology['time_multiplier'] = Fraction(technology['unit']['time']).limit_denominator()
 
+    for ref in ['furnace', 'rocket-silo', 'assembling-machine']:
+        for machine in data[ref].values():
+            if not 'allowed_effects' in machine.keys():
+                machine['allowed_effects'] = []
     for lab in data['lab'].values():
         if not 'allowed_effects' in lab.keys():
             lab['allowed_effects'] = MODULE_EFFECTS
     for machine in data['mining-drill'].values():
         if not 'allowed_effects' in machine.keys():
             machine['allowed_effects'] = MODULE_EFFECTS
+
+    for ref in ['furnace', 'rocket-silo', 'assembling-machine']:
+        for machine in data[ref].values():
+            if not 'module_specification' in machine.keys():
+                machine['module_specification'] = {}
+            if not 'module_slots' in machine['module_specification'].keys():
+                machine['module_specification']['module_slots'] = 0
+    for lab in data['lab'].values():
+        if not 'module_specification' in lab.keys():
+            lab['module_specification'] = {}
+        if not 'module_slots' in lab['module_specification'].keys():
+            lab['module_specification']['module_slots'] = 0
+    for machine in data['mining-drill'].values():
+        if not 'module_specification' in machine.keys():
+            machine['module_specification'] = {}
+        if not 'module_slots' in machine['module_specification'].keys():
+            machine['module_specification']['module_slots'] = 0
     
     for item in data['item'].values():
         if not 'rocket_launch_products' in item.keys() and 'rocket_launch_product' in item.keys():
@@ -505,9 +555,10 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
 
     def set_to_dicts(l):
         for i in range(len(l)):
-            prod = l[i]
-            if not isinstance(prod, dict):
-                l[i] = {'name': prod[0], 'amount': prod[1]}
+            if not isinstance(l[i], dict):
+                l[i] = {'name': l[i][0], 'amount': l[i][1]}
+            if not 'type' in l[i].keys():
+                l[i]['type'] = 'solid'
     for resource in data['resource'].values():
         if 'results' in resource['minable'].keys():
             set_to_dicts(resource['minable']['results'])
@@ -530,7 +581,7 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
             technology_definition = technology
         set_to_dicts(technology_definition['unit']['ingredients'])
 
-def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, MODULE_REFERENCE: dict, COST_MODE: str) -> None:
+def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """
     Does all the premanagment steps on data.raw in an appropriate order.
 
@@ -538,15 +589,19 @@ def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, MODULE
     ----------
     data:
         Entire data.raw. https://wiki.factorio.com/Data.raw
+    RELEVENT_FLUID_TEMPERATURES:
+        Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
+    COST_MODE:
+        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     """
-    logging.debug("Beginning the premanagement of the game data.raw object. This will link technologies, standardize power, recategorize resources, simplify recipes, and link modules.")
+    logging.debug("Beginning the premanagement of the game data.raw object.")
     set_defaults_and_normalize(data, COST_MODE)
     standardize_power(data)
     prep_resources(data)
     vectorize_recipes(data, RELEVENT_FLUID_TEMPERATURES, COST_MODE)
     vectorize_resources(data, RELEVENT_FLUID_TEMPERATURES)
     vectorize_technologies(data, COST_MODE)
-    link_modules(data, MODULE_REFERENCE)
+    link_modules(data)
     link_techs(data, COST_MODE)
 
 def average_result_amount(result: dict) -> Fraction:

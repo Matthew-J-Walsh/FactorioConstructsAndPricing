@@ -1,15 +1,8 @@
-import numpy as np
-import scipy as sp
-from scipy import linalg
-import logging
-logging.basicConfig(level=logging.INFO)
+from globalsandimports import *
+
 import sympy
 
-from numbers import Real
-from fractions import Fraction
-from typing import TypeVar, Callable, Hashable, Iterable, Any, Optional
-
-def farkas_lemma(A: np.ndarray, b: np.ndarray, solver: Callable[[np.ndarray, np.ndarray, Optional[np.ndarray]], np.ndarray | Real]):
+def farkas_lemma(A: np.ndarray, b: np.ndarray, solver: Callable[[np.ndarray, np.ndarray, np.ndarray | None], np.ndarray[Real]]) -> None:
     """
     Throws an error if solver violates Farkas lemma on an A and b.
     https://en.wikipedia.org/wiki/Farkas%27_lemma
@@ -34,10 +27,9 @@ def farkas_lemma(A: np.ndarray, b: np.ndarray, solver: Callable[[np.ndarray, np.
         c = np.dot(x, b.T)
         assert c < 0
 
-def inverse_analysis(A: np.ndarray[Fraction], b: np.ndarray) -> None:
+def rank_analysis(A: np.ndarray[Fraction]) -> None:
     """
     Determines the handed-ness of a linear programming problem.
-    https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
 
     Parameters
     ----------
@@ -57,11 +49,12 @@ def inverse_analysis(A: np.ndarray[Fraction], b: np.ndarray) -> None:
     else:
         logging.info("No linear independence found. Please give an A matrix with linear independent rows or columns.")
 
-def inverse_analysis_slow(A: np.ndarray[Fraction], b: np.ndarray) -> bool:
+def inverse_analysis(A: np.ndarray[Fraction], b: np.ndarray) -> bool:
     """
     Uses the Moore-Penrose inverse to analyze the feasiblity of Ax=b.
     https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
     Method spent 6 hours on a 400x400 matrix so basically its unusable.
+    Cant use numpy/scipy methods because they are inaccurate.
 
     Parameters
     ----------
@@ -122,5 +115,3 @@ def inverse_analysis_slow(A: np.ndarray[Fraction], b: np.ndarray) -> bool:
             logging.info("\tSystem is inconsistent, there are no possible solutions.")
             return False
         
-
-

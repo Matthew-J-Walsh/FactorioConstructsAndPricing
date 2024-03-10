@@ -1,52 +1,11 @@
 from __future__ import annotations
 
-import numpy as np
-import scipy as sp
-import scipy.sparse
-import copy
-import itertools
-
 from utils import *
-from globalvalues import *
-
-from typing import Generator
-
-class Module:
-    """
-    Class for each module, contains all the information on a module that is needed for math.
-
-    Members
-    -------
-    name:
-        Name of module
-    cost:
-        Cost vector of the module
-    effect_vector:
-        Numpy array of the module's effects
-    limit:
-        TechnologicalLimitation of the module
-    """
-    name: str
-    cost: dict
-    effect_vecotr: np.ndarray
-    limit: TechnologicalLimitation
-
-    def __init__(self, module: dict) -> None:
-        """
-        Parameters
-        ----------
-        module:
-            A module instance. https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html
-        """
-        self.name = module['name']
-        self.cost = {module['name']: Fraction(1)}
-        self.effect_vector = np.array([(module['effect'][e] if e in module['effect'].keys() else 0) for e in MODULE_EFFECTS]) #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html#effect
-        #https://lua-api.factorio.com/latest/types/Effect.html
-        self.limit = module['limit']
+from globalsandimports import *
 
 class LinearConstruct:
     """
-    A compiled construct. Simply having its identifier, vector, and cost
+    A compiled construct. Simply having its identifier, vector, cost, and limit
 
     Members
     -------
@@ -56,6 +15,8 @@ class LinearConstruct:
         Vector of the construct representing its action
     cost:
         The cost vector of the construct
+    limit:
+        TechnologicalLimitation of using the construct
     """
     ident: str
     vector: CompressedVector
@@ -80,7 +41,14 @@ class LinearConstruct:
 
 class ConstructTransform:
     """
-    
+    List of constructs empowered with a reference list. Formed for more easy generation and manipulation of Matricies.
+
+    Members
+    -------
+    constructs:
+        List of the LinearConstructs making up this transform.
+    reference_list:
+        Reference list of items in the CompressedVectors.
     """
     constructs: list[LinearConstruct]
     reference_list: list[str]
@@ -91,13 +59,13 @@ class ConstructTransform:
     
     def to_sparse(self):
         """
-        
+        TODO: May want sparse version for faster LP once we get consistent.
         """
         raise NotImplementedError
     
     def to_dense(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        
+        Forms a dense effect and cost Matrix from the ConstructTransform
 
         Returns
         -------
@@ -139,7 +107,7 @@ class UncompiledConstruct:
     allowed_modules:
         List of tuples, each tuple representing a module and the amount of said module that is allowed.
     internal_module_limit
-        Number of module slots inside construct
+        Number of module slots inside construct.
     base_inputs:
         The base inputs for future catalyst calculations.
     cost:
@@ -149,10 +117,8 @@ class UncompiledConstruct:
     base_productivity:
         https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
         https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
-    universal_reference_list:
-        The universal reference list to use
     catalyzing_deltas:
-        The catalyst list to use for added construct costs
+        The catalyst list to use for added construct costs.
     """
     ident: str
     drain: CompressedVector
@@ -164,7 +130,6 @@ class UncompiledConstruct:
     cost: CompressedVector
     limit: TechnologicalLimitation
     base_productivity: Fraction
-    universal_reference_list: list[str]
     catalyzing_deltas: list[str]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
@@ -192,17 +157,17 @@ class UncompiledConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
 
-    def get_constructs(self, universal_reference_list: list[str], catalyzing_deltas: list[str], MODULE_REFERENCE: dict,
-                        max_external_mods: int = 0, beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
+    def get_constructs(self, catalyzing_deltas: list[str], module_data: dict, max_external_mods: int = 0, 
+                       beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
         """
         Returns a list of LinearConstructs for all possible module setups of this UncompiledConstruct
 
         Parameters
         ---------
-        universal_reference_list:
-            The universal reference list for vector orderings.
         catalyzing_deltas:
             List of catalysts to count in the cost.
+        module_data:
+            List of modules from data.raw.
         max_external_mods:
             External (beacon) module limit.
         beacon_multiplier:
@@ -212,13 +177,12 @@ class UncompiledConstruct:
         -------
         List of LinearConstructs
         """
-        n = len(universal_reference_list)
-        
         constructs = []
-        logging.debug("\nFound a total of "+str(len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods))))+" mod setups")
+        logging.info("Creating LinearConstructs for "+self.ident)
+        logging.info("\nFound a total of "+str(len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods))))+" mod setups")
         for mod_set in module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods):
             logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
-            ident = self.ident + (" with module setup: " + module_setup_readable(mod_set) if len(mod_set) > 0 else "")
+            ident = self.ident + (" with module setup: " + " & ".join([str(v)+"x "+k for k, v in mod_set.items()]) if len(mod_set)>0 else "")
 
             limit = self.limit
 
@@ -226,10 +190,10 @@ class UncompiledConstruct:
             for mod, count in mod_set.items():
                 mod_name, mod_region = mod.split("|")
                 if mod_region=="i":
-                    effect_vector += count * MODULE_REFERENCE[mod_name]['effect_vector'].astype(float)
+                    effect_vector += count * module_data[mod_name]['effect_vector'].astype(float)
                 if mod_region=="e":
-                    effect_vector += count * beacon_multiplier * MODULE_REFERENCE[mod_name]['effect_vector'].astype(float)
-                limit = limit + MODULE_REFERENCE[mod.split("|")[0]]['limit']
+                    effect_vector += count * beacon_multiplier * module_data[mod_name]['effect_vector'].astype(float)
+                limit = limit + module_data[mod.split("|")[0]]['limit']
             effect_vector[MODULE_EFFECTS.index('productivity')] += float(self.base_productivity)
             
             effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY.astype(float))
@@ -255,7 +219,7 @@ class UncompiledConstruct:
 
 def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, external_limit: int) -> Generator[CompressedVector, None, None]:
     """
-    Returns an generator over the set of possible module setups
+    Returns an generator over the set of possible module setups.
 
     Parameters
     ---------
@@ -272,9 +236,9 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
     """
     if len(modules)==0:
         yield CompressedVector()
-    else: #TODO: Why can i not just return?
-        internal_modules = [m for m, i, e in modules if i]
-        exteral_modules = [m for m, i, e in modules if e]
+    else:
+        internal_modules = [m for m, i, _ in modules if i]
+        exteral_modules = [m for m, _, e in modules if e]
 
         for internal_mod_count in range(internal_limit+1):
             for external_mod_count in range(external_limit+1):
@@ -286,21 +250,6 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
                         for mod in external_mod_setup:
                             vector += CompressedVector({mod+"|e": 1})
                         yield vector
-
-def module_setup_readable(module_setup: CompressedVector) -> str:
-    """
-    Turns a module setup into a readable string. Used to properly name constructs.
-
-    Parameters
-    ----------
-    module_setup:
-        Integral CompressedVector representing a module setup
-
-    Returns
-    -------
-    A human-readable string
-    """
-    return " & ".join([str(v)+"x "+k for k, v in module_setup.items()]) 
 
 def create_reference_list(uncompiled_construct_list: list[UncompiledConstruct]) -> list[str]:
     """
@@ -315,7 +264,7 @@ def create_reference_list(uncompiled_construct_list: list[UncompiledConstruct]) 
     -------
     A reference list containg every value of CompressedVector within.
     """
-    logging.debug("Creating a reference list for a total of %d constructs.", len(uncompiled_construct_list))
+    logging.info("Creating a reference list for a total of %d constructs.", len(uncompiled_construct_list))
     reference_list = set()
     for construct in uncompiled_construct_list:
         reference_list = reference_list.union(set(construct.drain.keys()))
@@ -326,20 +275,20 @@ def create_reference_list(uncompiled_construct_list: list[UncompiledConstruct]) 
             reference_list.add(val)
     reference_list = list(reference_list)
     reference_list.sort()
-    logging.debug("A total of %d items/fluids were found for the reference list.", len(reference_list))
+    logging.info("A total of %d items/fluids were found for the reference list.", len(reference_list))
     logging.debug(reference_list)
     return reference_list
 
-def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], universal_reference_list: list[str]) -> list[str]:
+def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], reference_list: list[str]) -> list[str]:
     """
     Determines the catalysts of a list of UncompiledConstructs.
-    Uses FALSE_CATALYST_METHODS and FALSE_CATALYST_LINKS to block facile catalysts.
+    TODO: Detecting do nothing loops.
 
     Parameters
     ---------
     uncompiled_construct_list:
         List of UncompiledConstructs.
-    universal_reference_list:
+    reference_list:
         The universal reference list for vector orderings
 
     Returns
@@ -349,7 +298,7 @@ def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], un
     logging.debug("Determining the catalysts present in a total of %d constructs.", len(uncompiled_construct_list))
     
     graph = {}
-    for item in universal_reference_list:
+    for item in reference_list:
         graph[item] = set()
     for ident in [construct.ident for construct in uncompiled_construct_list]:
         graph[ident+"-construct"] = set()
@@ -367,18 +316,18 @@ def determine_catalysts(uncompiled_construct_list: list[UncompiledConstruct], un
         while length!=len(descendants):
             length = len(descendants)
             old_descendants = copy.deepcopy(descendants)
-            for desc in old_descendants: #TODO: Make faster?
+            for desc in old_descendants:
                 for new_desc in graph[desc]:
                     descendants.add(new_desc)
         return descendants
     
-    catalyst_list = [item for item in universal_reference_list if item in all_descendants(item)]
+    catalyst_list = [item for item in reference_list if item in all_descendants(item)]
     
     logging.debug("A total of %d catalysts were found.", len(catalyst_list))
     logging.debug("Catalysts found: %s", str(catalyst_list))
     return catalyst_list
 
-def generate_all_construct_families(uncompiled_construct_list: list[UncompiledConstruct]) -> tuple[list[UncompiledConstruct], list[str], list[str]]:
+def generate_references_and_catalysts(uncompiled_construct_list: list[UncompiledConstruct]) -> tuple[list[str], list[str]]:
     """
     Generates the reference list, catalyst list, and all the construct families for a list of uncompiled constructs.
 
@@ -389,15 +338,13 @@ def generate_all_construct_families(uncompiled_construct_list: list[UncompiledCo
 
     Returns
     -------
-    linear_construct_families:
-        List of LinearConstructFamilys,
     reference_list:
         A reference list containing every relevent value.
     catalyst_list:
         A subset of the reference_list that contains catalytic items/fluids.
     """
-    logging.debug("Generating linear construct families from an uncompiled construct list of length %d.", len(uncompiled_construct_list))
+    logging.info("Generating linear construct families from an uncompiled construct list of length %d.", len(uncompiled_construct_list))
     reference_list = create_reference_list(uncompiled_construct_list)
     catalyst_list = determine_catalysts(uncompiled_construct_list, reference_list)
-    return uncompiled_construct_list, reference_list, catalyst_list
+    return reference_list, catalyst_list
 
