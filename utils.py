@@ -35,6 +35,14 @@ class CompressedVector(dict):
             self[key] += value
         else:
             self[key] = value
+    
+    def __eq__(self, other: CompressedVector) -> bool:
+        if set(self.keys())!=set(other.keys()):
+            return False
+        for k in self.keys():
+            if other[k]!=self[k]:
+                return False
+        return True
 
 def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lambda x: True) -> int:
     """
@@ -240,7 +248,7 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
     fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
     return numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
 
-def linear_transform_is_gt(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
+def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
     """
     Determines of a linear transformation, A, onto a contravector, x, is greater than or equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -254,22 +262,33 @@ def linear_transform_is_gt(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1
     b:
         contravector
     """
+    A = A.astype(np.longdouble)
     x = x.astype(np.longdouble)
     b = b.astype(np.longdouble)
-    A = A.astype(np.longdouble)
-    
-    Ap = A.copy()
-    Ap[Ap < 0] = 0
-    Lhp = Ap @ x
 
-    An = A.copy()
-    An[An > 0] = 0
+    if isinstance(A, np.ndarray):
+        Ap = A.copy()
+        Ap[Ap < 0] = 0
+        An = A.copy()
+        An[An > 0] = 0
+    else:
+        Ap = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] > 0],
+                                ([A.row[k] for k in range(A.nnz) if A.data[k] > 0],
+                                 [A.col[k] for k in range(A.nnz) if A.data[k] > 0])),
+                               shape=A.shape, dtype=np.longdouble)
+        An = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] < 0],
+                                ([A.row[k] for k in range(A.nnz) if A.data[k] < 0],
+                                 [A.col[k] for k in range(A.nnz) if A.data[k] < 0])),
+                               shape=A.shape, dtype=np.longdouble)
+    
+    Lhp = Ap @ x
     Lhn = An @ x
 
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
-    return np.logical_or(A @ x - b >= -1 * true_tol, np.logical_or(A @ x >= b, np.isclose(A @ x, b)))
+    Aax = A @ x
+    return np.logical_or(Aax - b >= -1 * true_tol, np.logical_or(Aax >= b, np.isclose(Aax, b)))
 
-def linear_transform_is_close(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
+def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
     """
     Determines of a linear transformation, A, onto a contravector, x, is equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -283,20 +302,31 @@ def linear_transform_is_close(A: np.ndarray, x: np.ndarray, b:np.ndarray, rel_to
     b:
         contravector
     """
+    A = A.astype(np.longdouble)
     x = x.astype(np.longdouble)
     b = b.astype(np.longdouble)
-    A = A.astype(np.longdouble)
 
-    Ap = A.copy()
-    Ap[Ap < 0] = 0
-    Lhp = Ap @ x
+    if isinstance(A, np.ndarray):
+        Ap = A.copy()
+        Ap[Ap < 0] = 0
+        An = A.copy()
+        An[An > 0] = 0
+    else:
+        Ap = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] > 0],
+                                ([A.row[k] for k in range(A.nnz) if A.data[k] > 0],
+                                 [A.col[k] for k in range(A.nnz) if A.data[k] > 0])),
+                               shape=A.shape, dtype=np.longdouble)
+        An = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] < 0],
+                                ([A.row[k] for k in range(A.nnz) if A.data[k] < 0],
+                                 [A.col[k] for k in range(A.nnz) if A.data[k] < 0])),
+                               shape=A.shape, dtype=np.longdouble)
     
-    An = A.copy()
-    An[An > 0] = 0
+    Lhp = Ap @ x
     Lhn = An @ x
 
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
-    return np.logical_or(np.abs(A @ x - b) <=  true_tol, np.isclose(A @ x, b))
+    Aax = A @ x
+    return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b))
 
 def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
     """

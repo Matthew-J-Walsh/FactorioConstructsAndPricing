@@ -5,10 +5,12 @@ from feasibilityanalysis import *
 from scipysolvers import generate_scipy_linear_solver
 from pulpsolvers import generate_pulp_linear_solver
 from scipsolvers import generate_scip_linear_solver
+from highssolvers import generate_highs_linear_solver
 from scipy import optimize
 
 
-def verified_solver(solver: Callable[[np.ndarray[Fraction], np.ndarray[Fraction], Optional[np.ndarray[Fraction]]], np.ndarray[Real]], name: str) -> Callable[[np.ndarray[Fraction], np.ndarray[Fraction], Optional[np.ndarray[Fraction]]], np.ndarray[Real]]:
+def verified_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]], 
+                    name: str) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
     """
     Returns a instance of the solver that verifies the result if given. Also eats errors unless debugging.
 
@@ -25,17 +27,17 @@ def verified_solver(solver: Callable[[np.ndarray[Fraction], np.ndarray[Fraction]
     -------
     Function with output verification and error catching added.
     """
-    def verified(A: np.ndarray[Fraction], b: np.ndarray[Fraction], c: np.ndarray[Fraction] | None = None):
+    def verified(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None):
         try:
             logging.debug("Trying the "+name+" solver.")
             sol = solver(A, b, c)
             if not sol is None:
                 if not linear_transform_is_close(A, sol, b).all():
                     if DEBUG_SOLVERS:
-                        raise AssertionError(np.max(np.abs(A.astype(np.longdouble) @ sol.astype(np.longdouble) - b.astype(np.longdouble))))
+                        raise AssertionError(np.max(np.abs(A @ sol - b)))
                     else:
                         logging.warning(name+" gave a result but result wasn't feasible. As debugging is off this won't throw an error. Returning None.")
-                        logging.warning("\tLargest recorded error is: "+str(np.max(np.abs(A.astype(np.longdouble) @ sol.astype(np.longdouble) - b.astype(np.longdouble)))))
+                        logging.warning("\tLargest recorded error is: "+str(np.max(np.abs(A @ sol - b))))
                         return None
             else:
                 logging.debug("Solver returned None.")
@@ -53,24 +55,27 @@ A@x=b, x>=0, minimize cx
 Ordered list, when a LP problem is attempted to be solved these should be ran in order. This order is mostly due to personal experience in usefulness.
 """
 PRIMARY_LP_SOLVERS = list(map(verified_solver,
-                              [#generate_scipy_linear_solver(),
-                               generate_scipy_linear_solver("highs-ipm", {}),
+                              [#generate_highs_linear_solver(),
                                generate_pulp_linear_solver(),
-                               generate_scip_linear_solver(),],
-                               [#"revised simplex",
-                                "highs-ipm",
+                               generate_scip_linear_solver(),
+                               ],
+                               [#"highspy",
                                 "pulp CBC",
-                                "scip",]))
+                                "scip",
+                                ]))
+#BACKUP_LP_SOLVERS = []
 BACKUP_LP_SOLVERS = list(map(verified_solver,
-                             [generate_scipy_linear_solver("highs", {}),
+                             [generate_scipy_linear_solver("highs-ipm", {}),
+                              generate_scipy_linear_solver("highs", {}),
                               generate_scipy_linear_solver("highs-ds", {}),
                               generate_scipy_linear_solver("simplex", {}),],
-                             ["highs",
+                             ["highs-ipm",
+                              "highs",
                               "highs-ds",
                               "simplex",]))
 
 
-def solve_factory_optimization_problem(R_j_i: np.ndarray, u_j: np.ndarray, c_i: np.ndarray, reference: list[str] = []) -> np.ndarray:
+def solve_factory_optimization_problem(R_j_i: sparse.coo_matrix, u_j: np.ndarray[np.longdouble], c_i: np.ndarray[np.longdouble], reference: list[str] = []) -> np.ndarray[Real]:
     """
     Solve an optimization problem given a linear transformation on construct counts, a target output vector, and a cost vector.
     Attempts to use the various linear programming solvers until one works. 
@@ -91,9 +96,10 @@ def solve_factory_optimization_problem(R_j_i: np.ndarray, u_j: np.ndarray, c_i: 
     """
     A = R_j_i
     b = u_j
-    A_slacked = np.concatenate([R_j_i, -1 * np.identity(R_j_i.shape[0], dtype=Fraction)], axis=1)
+    A_slacked = sparse.hstack([R_j_i, -1 * sparse.eye(R_j_i.shape[0], dtype=np.longdouble, format="coo")], format="coo")
+    assert A_slacked.shape[0]==R_j_i.shape[0] #TODO: remove check
     c = c_i
-    c_slacked = np.concatenate([c_i, np.zeros(R_j_i.shape[0], dtype=Fraction)])
+    c_slacked = np.concatenate([c_i, np.zeros(R_j_i.shape[0], dtype=np.longdouble)])
 
     #Ax>=b
     #Ax+k=b
@@ -113,11 +119,12 @@ def solve_factory_optimization_problem(R_j_i: np.ndarray, u_j: np.ndarray, c_i: 
     #    result = solver(A, b, c)
     #    if not result is None:
     #        return result
-    for solver in BACKUP_LP_SOLVERS:
-        result = solver(A_slacked, b, c_slacked)
-        if not result is None:
-            return result[:c.shape[0]]
+    #for solver in BACKUP_LP_SOLVERS:
+    #    result = solver(A_slacked, b, c_slacked)
+    #    if not result is None:
+    #        return result[:c.shape[0]]
     
+    """
     result = optimize.linprog(c.astype(np.longdouble), A_ub=-1 * A.astype(np.longdouble), b_ub=-1 * b.astype(np.longdouble), bounds=(0, None))
     if result.status==0:
         s = result.x
@@ -130,7 +137,7 @@ def solve_factory_optimization_problem(R_j_i: np.ndarray, u_j: np.ndarray, c_i: 
     failures = []
     for j in range(len(u_j)):
         if u_j[j]!=0:
-            b = np.full_like(u_j, Fraction(0))
+            b = np.full_like(u_j, np.longdouble(0))
             b[j] = u_j[j]
             works = False
 
@@ -154,10 +161,11 @@ def solve_factory_optimization_problem(R_j_i: np.ndarray, u_j: np.ndarray, c_i: 
                 failures.append(reference[j])
 
     logging.error(failures)
+    """
     raise ValueError("Unable to form factory even with slack.")
 
 
-def solve_pricing_model_calculation_problem(R_j_i: np.ndarray, s_i: np.ndarray, u_j: np.ndarray, c_i: np.ndarray) -> np.ndarray:
+def solve_pricing_model_calculation_problem(R_j_i: sparse.coo_matrix, s_i: np.ndarray[np.longdouble], u_j: np.ndarray[np.longdouble], c_i: np.ndarray[np.longdouble]) -> np.ndarray[Real]:
     """
     Calculates a pricing model given a list of constructs, their usages, the target output, and the inital pricing model.
     Attempts to use the various linear programming solvers until one works. 
@@ -190,14 +198,14 @@ def solve_pricing_model_calculation_problem(R_j_i: np.ndarray, s_i: np.ndarray, 
     #[R | I]       [c]
     #[0 | S] [p] = [0]
     #[P | 0] [l]   [0]
-    S_k = np.diag(1-np.isclose(s_i.astype(np.longdouble), 0)).astype(Fraction)
-    P_j = np.diag(1-linear_transform_is_close(R_j_i, s_i, u_j)).astype(Fraction)
+    S_k = sparse.diags(1-np.isclose(s_i.astype(np.longdouble), 0).astype(np.longdouble), format="coo")
+    P_j = sparse.diags(1-linear_transform_is_close(R_j_i, s_i, u_j).astype(np.longdouble), format="coo")
 
-    A = np.concatenate([np.concatenate([R_j_i.T, np.identity(m, dtype=Fraction)], axis=1),
-                        np.concatenate([np.zeros((m, n), dtype=Fraction), S_k], axis=1),
-                        np.concatenate([P_j, np.zeros((n, m), dtype=Fraction)], axis=1)], axis=0)
-    b = np.concatenate([c_i, np.zeros(m + n, dtype=Fraction)])
-    A_slacked = np.concatenate([A, np.identity(A.shape[0])], axis=1)
+    A = sparse.vstack([sparse.hstack([R_j_i.T, sparse.eye(m, dtype=np.longdouble, format="coo")], format="coo"),
+                       sparse.hstack([sparse.coo_matrix((m, n), dtype=np.longdouble), S_k], format="coo"),
+                       sparse.hstack([P_j, sparse.coo_matrix((n, m), dtype=np.longdouble)], format="coo")], format="coo")
+    b = np.concatenate([c_i, np.zeros(m + n, dtype=np.longdouble)])
+    A_slacked = sparse.hstack([A, sparse.eye(A.shape[0], dtype=np.longdouble, format="coo")], format="coo")
     slack_penalty = np.concatenate([np.zeros(A.shape[1]), np.ones(A.shape[0])])
 
     #A has no linear independence.
@@ -207,18 +215,18 @@ def solve_pricing_model_calculation_problem(R_j_i: np.ndarray, s_i: np.ndarray, 
         result = solver(A, b)
         if not result is None:
             return result[:n]#, result[n:]
-    for solver in PRIMARY_LP_SOLVERS:
+    #for solver in PRIMARY_LP_SOLVERS:
         result = solver(A_slacked, b, slack_penalty)
         if not result is None:
             return result[:n]#, result[n:m+n]
-    for solver in BACKUP_LP_SOLVERS:
-        result = solver(A, b)
-        if not result is None:
-            return result[:n]#, result[n:]
-    for solver in BACKUP_LP_SOLVERS:
-        result = solver(A_slacked, b, slack_penalty)
-        if not result is None:
-            return result[:n]#, result[n:m+n]
+    #for solver in BACKUP_LP_SOLVERS:
+    #    result = solver(A, b)
+    #    if not result is None:
+    #        return result[:n]#, result[n:]
+    #for solver in BACKUP_LP_SOLVERS:
+    #    result = solver(A_slacked, b, slack_penalty)
+    #    if not result is None:
+    #        return result[:n]#, result[n:m+n]
 
     raise ValueError("Unable to form pricing model even with slack.")
 

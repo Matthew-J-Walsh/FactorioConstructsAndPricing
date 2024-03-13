@@ -280,9 +280,9 @@ def generate_boiler_machine_constructs(machine: dict, data: dict, RELEVENT_FLUID
         
         drain = CompressedVector()
         
-        vector = {fuel_name: -1 * machine['energy_consumption_raw'] / fuel_value,
-                  input_fluid: -1*units_per_second, 
-                  output_fluid+'@'+str(machine['target_temperature']): units_per_second}
+        vector = CompressedVector({fuel_name: -1 * machine['energy_consumption_raw'] / fuel_value,
+                                   input_fluid: -1*units_per_second, 
+                                   output_fluid+'@'+str(machine['target_temperature']): units_per_second})
         if not fuel_burnt_result is None:
             vector[fuel_burnt_result] = machine['energy_consumption_raw'] / fuel_value
                 
@@ -290,7 +290,7 @@ def generate_boiler_machine_constructs(machine: dict, data: dict, RELEVENT_FLUID
         
         allowed_modules = []
         
-        base_inputs = {fuel_name: Fraction(-1)}
+        base_inputs = CompressedVector({fuel_name: Fraction(-1)})
         
         cost = CompressedVector({machine['name']: Fraction(1)})
         

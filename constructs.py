@@ -21,14 +21,14 @@ class LinearConstruct:
         TechnologicalLimitation of using the construct
     """
     ident: str
-    vector: CompressedVector
-    cost: CompressedVector
+    vector: sparse.sparray
+    cost: sparse.sparray
     limit: TechnologicalLimitation
 
-    def __init__(self, ident: str, vector: CompressedVector, cost: CompressedVector, limit: TechnologicalLimitation) -> None:
+    def __init__(self, ident: str, vector: sparse.sparray, cost: sparse.sparray, limit: TechnologicalLimitation) -> None:
         assert isinstance(ident, str)
-        assert isinstance(vector, CompressedVector)
-        assert isinstance(cost, CompressedVector)
+        assert isinstance(vector, sparse.sparray)
+        assert isinstance(cost, sparse.sparray)
         assert isinstance(limit, TechnologicalLimitation)
         self.ident = ident
         self.vector = vector
@@ -40,6 +40,12 @@ class LinearConstruct:
                 "\n\tWith a vector of: "+str(self.vector)+\
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tLimit of: "+str(self.limit)
+
+class CharacterizedTransform:
+    """
+    
+    """
+    constructs: list[LinearConstruct]
 
 class ConstructTransform:
     """
@@ -202,6 +208,7 @@ class UncompiledConstruct:
     cost: CompressedVector
     limit: TechnologicalLimitation
     base_productivity: Fraction
+    characterizations: list[CharacterizedTransform]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
