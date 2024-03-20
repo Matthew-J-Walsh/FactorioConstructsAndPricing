@@ -6,7 +6,8 @@ import Levenshtein
 
 from utils import *
 from generators import *
-from linearconstructs import *
+#from linearconstructs import *
+from constructs import *
 from datarawparse import *
 from lpproblems import *
 
@@ -23,8 +24,12 @@ class FactorioInstance():
         Whole data.raw dictonary post-premanagment.
     uncompiled_constructs:
         List of all UncompiledConstructs for the game instance.
-    compiled_constructs:
-        List of all LinearConstructs for the game instance.
+    complex_constructs:
+        List of all SingularConstructs for the game instance.
+    disabled_constructs:
+        List of non-permitted SingularConstruct idents. Used to force the usage of a complex construct.
+    compiled:
+        ComplexConstruct of the entire instance or None if hasn't been compiled since last edit.
     reference_list:
         List containing every relevent value in any CompressedVector in the instance.
     catalyst_list:
@@ -38,7 +43,9 @@ class FactorioInstance():
     """
     data_raw: dict
     uncompiled_constructs: list[UncompiledConstruct]
-    compiled_constructs: list[LinearConstruct]
+    complex_constructs: list[SingularConstruct]
+    disabled_constructs: list[str]
+    compiled: ComplexConstruct | None
     reference_list: list[str]
     catalyst_list: list[str]
     COST_MODE: str
@@ -68,9 +75,81 @@ class FactorioInstance():
         self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         logging.info("Building reference and catalyst lists.")
         self.reference_list, self.catalyst_list = generate_references_and_catalysts(self.uncompiled_constructs)
-        logging.info("Building compiled constructs.")
-        self.compiled_constructs = sum([uc.get_constructs(self.catalyst_list, self.data_raw['module']) for uc in self.uncompiled_constructs], [])
+        for k in self.reference_list:
+            DEBUG_REFERENCE_LIST.append(k)
+        logging.info("Building complex constructs.")
+        self.complex_constructs = [uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list) for uc in self.uncompiled_constructs]
+        self.compiled = None
+        self.compile()
     
+    def compile(self) -> ComplexConstruct:
+        """
+        Populates compiled and returns it.
+        """
+        if self.compiled is None:
+            self.compiled = ComplexConstruct(self.complex_constructs, "Whole Game Construct")
+        return self.compiled
+
+    def disable_complex_construct(self, target_name: str) -> None:
+        """
+        Disables the closest named complex construct. Searches using Levenshtein distance.
+
+        Parameters
+        ----------
+        target_name:
+            Target name of complex construct to be disabled.
+        """
+        self.disabled_constructs.append(self.search_complex_constructs(target_name))
+        self.compiled = None
+    
+    def enable_complex_construct(self, target_name: str) -> None:
+        """
+        Disables the closest named complex construct. Searches using Levenshtein distance.
+
+        Parameters
+        ----------
+        target_name:
+            Target name of complex construct to be disabled.
+        """
+        ident = self.search_complex_constructs(target_name)
+        try:
+            self.disabled_constructs.remove(ident)
+            self.compiled = None
+        except:
+            logging.warning(ident+" was not disabled in the first place.")
+
+    def search_complex_constructs(self, target_name: str) -> str:
+        """
+        Finds the closest named complex construct
+
+        Parameters
+        ----------
+        target_name:
+            Target name of complex construct to be disabled.
+
+        Returns
+        -------
+        ident of closest matching ComplexConstruct
+        """
+        best_matches: list[ComplexConstruct] = []
+        match_distance = Levenshtein.distance(target_name, self.complex_constructs[0].ident)
+        logging.debug("Atempting to translate: "+"\""+target_name+"\" starting distance is: "+str(match_distance)+" there "+("is" if target_name in [c.ident for c in self.complex_constructs] else "is not")+" a 0 length translation.")
+        for c in self.complex_constructs:
+            dist = Levenshtein.distance(target_name, c.ident)
+            if dist < match_distance:
+                best_matches = [c.ident]
+                match_distance = dist
+                logging.debug("\tFound a new best match in: \""+c.ident+"\" at distance: "+str(match_distance))
+            elif dist == match_distance:
+                best_matches.append(c.ident)
+                logging.debug("\t\tAdded the new possible match: \""+c.ident+"\"")
+            elif c.ident == target_name:
+                logging.debug("Found the exact match but chose to ignore it because im a dumb program "+str(dist))
+                raise ValueError
+        assert len(best_matches)==1, "Unable to determine which construct an input phrase is associated with.\nPhrase is: "+target_name+"\nPossible constructs were:\n\t"+"\n\t".join([m for m in best_matches])+"\n\tWith distance: "+str(match_distance)
+        logging.debug("Translated: \""+target_name+"\" to mean the construct: \""+best_matches[0]+"\"")
+        return best_matches[0]
+
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, CompressedVector, CompressedVector]:
         """
         Solves for a target output vector given a tech level and reference pricing model.
@@ -91,28 +170,30 @@ class FactorioInstance():
         p:
             CompressedVector of pricing model of resulting factory.
         k:
-            CompressedVector of how bad each unused construct is.
+            CompressedVector of how good each construct is. (1 should be maximum, less than 1 indicates loss when used)
         """
         n = len(self.reference_list)
 
+        if DEBUG_BLOCK_MODULES:
+            reference_model = CompressedVector({k: v for k, v in reference_model.items() if not '-module' in k})
         #reference_model = CompressedVector({k:v for k, v in reference_model.items() if not '-module' in k}) #module stripping
-        construct_transform = ConstructTransform(self.compiled_constructs, self.reference_list).validate(known_technologies, reference_model)
+        #construct_transform = ConstructTransform(self.compiled_constructs, self.reference_list).validate(known_technologies, reference_model)
         #assert not any(['with module setup' in construct.ident for construct in constructs]) #module stripping check
+        self.compile()
 
-        #assert any(['solar-panel' in construct.ident for construct in constructs])
-
-        m = len(construct_transform.constructs)
-        logging.info("Construct count: "+str(m))
-        R_i_j, C_i_j = construct_transform.to_sparse()
-        R_j_i = R_i_j.T
-
-        p0_j = np.full(n, 1e100, dtype=np.longdouble)
+        p0_j = np.zeros(n, dtype=np.longdouble)
         for k, v in reference_model.items():
             p0_j[self.reference_list.index(k)] = v
 
-        c_i = C_i_j @ p0_j
+        R_j_i, c_i, N1, N0, FactoryRecovery = self.compiled.reduce(p0_j, [self.reference_list.index(k) for k in reference_model.keys()], known_technologies)
+
         assert (c_i!=0).all(), "Some suspiciously priced things. In general nothing creatable should have no price."
         assert (c_i < 1e50).all(), "Some error has occured where an unpricable construct has been allowed through"
+        assert N1.shape[0]==0, "Stabilization unsupported "+str(N1.shape)
+        assert N0.shape[0]==0, "Stabilization unsupported "+str(N0.shape)
+
+        m = R_j_i.shape[1]
+        logging.info("Construct count: "+str(m))
 
         u_j = np.zeros(n, dtype=np.longdouble)
         for k, v in targets.items():
@@ -131,30 +212,30 @@ class FactorioInstance():
 
         logging.info("Starting solve for pricing model.")
         p_j = solve_pricing_model_calculation_problem(R_j_i, s_i, u_j, c_i)
-
-        s = CompressedVector()
-        k = CompressedVector()
-        o_i = (R_j_i.T @ p_j)
-        div_i = o_i / c_i
-        TEMPER = (o_i / c_i)[np.logical_not(np.isclose(s_i, 0))]
-        TEMPER = TEMPER.astype(np.longdouble)
-        for i in range(m): #TODO: compress
-            if not np.isclose(s_i[i], 0):
-                s[construct_transform.constructs[i].ident] = s_i[i]
-                #TODO: If weird stuff starts happening remove the comments
-                #try:
-                #    assert np.isclose(div_i[i], 1), construct_transform.constructs[i].ident#o_j[i] / c_i[i]
-                #except:
-                #    print(TEMPER[np.logical_not(np.isclose(TEMPER, 1))])
-                #    print(construct_transform.constructs[i])
-                #    print(div_i[i])
-                #    print(s_i[i])
-                #    raise AssertionError
-            else:
-                k[construct_transform.constructs[i].ident] = div_i[i]
-                assert np.isclose(div_i[i], 1) or div_i[i] <= 1.01, div_i[i] #give it some space for inaccuracies
         
         p = CompressedVector({k: p_j[self.reference_list.index(k)] / np.max(p_j) * 100 for k in targets.keys()}) #slight normalization
+        s, k = FactoryRecovery(s_i, p_j)
+        #s = CompressedVector()
+        #k = CompressedVector()
+        #o_i = (R_j_i.T @ p_j)
+        #div_i = o_i / c_i
+        #TEMPER = (o_i / c_i)[np.logical_not(np.isclose(s_i, 0))]
+        #TEMPER = TEMPER.astype(np.longdouble)
+        #for i in range(m): #TODO: compress
+        #    if not np.isclose(s_i[i], 0):
+        #        s[construct_transform.constructs[i].ident] = s_i[i]
+        #        #TODO: If weird stuff starts happening remove the comments
+        #        #try:
+        #        #    assert np.isclose(div_i[i], 1), construct_transform.constructs[i].ident#o_j[i] / c_i[i]
+        #        #except:
+        #        #    print(TEMPER[np.logical_not(np.isclose(TEMPER, 1))])
+        #        #    print(construct_transform.constructs[i])
+        #        #    print(div_i[i])
+        #        #    print(s_i[i])
+        #        #    raise AssertionError
+        #    else:
+        #        k[construct_transform.constructs[i].ident] = div_i[i]
+        #        assert np.isclose(div_i[i], 1) or div_i[i] <= 1.01, div_i[i] #give it some space for inaccuracies
 
         return s, p, k
     
@@ -661,50 +742,65 @@ class FactorioFactoryChain():
                 factory_type = "material"
         else:
             last_pricing_model = last_material.optimal_pricing_model 
-            #last_pricing_model = CompressedVector({k:v for k, v in last_pricing_model.items() if not '-module' in k}) #module stripping
-            craftable_constructs = ConstructTransform(self.instance.compiled_constructs, self.instance.reference_list).validate(known_technologies, last_pricing_model).constructs
+            if DEBUG_BLOCK_MODULES:
+                last_pricing_model = CompressedVector({k: v for k, v in last_pricing_model.items() if not '-module' in k})
 
+            p0_j = np.zeros(len(self.instance.reference_list), dtype=np.longdouble)
+            for k, v in last_pricing_model.items():
+                p0_j[self.instance.reference_list.index(k)] = v
+            
+            self.instance.compile()
+            R_j_i, c_i, N1, N0, FactoryRecovery = self.instance.compiled.reduce(p0_j, [self.instance.reference_list.index(k) for k in last_pricing_model.keys()], known_technologies)
+
+            targets_dict = CompressedVector()
+            
             if targets=="all tech":
                 factory_type = "science"
-                targets = CompressedVector({tool: Fraction(1) for tool in self.instance.data_raw['tool'].keys() if any([tool in construct.vector.keys() and construct.vector[tool] > 0 for construct in craftable_constructs])})
+                for tool in self.instance.data_raw['tool'].keys():
+                    if self.instance.reference_list.index(tool) in R_j_i.row:
+                        targets_dict[tool] = Fraction(1)
+
             elif targets=="all materials":
                 factory_type = "material"
                 #only actually craftable materials
-                targets = CompressedVector()
                 for item in self.instance.data_raw['item'].keys():
-                    for construct in craftable_constructs:
-                        if item in construct.vector.keys() and construct.vector[item] > 0:
-                            targets[item] = Fraction(1)
-                            break
+                    if not item in self.instance.reference_list:
+                        if not item in WARNING_LIST:
+                            logging.warning("Detected some a weird item: "+item)
+                            WARNING_LIST.append(item)
+                    elif self.instance.reference_list.index(item) in R_j_i.row:
+                        targets_dict[item] = Fraction(1)
                 for fluid in self.instance.data_raw['fluid'].keys():
                     if fluid in self.instance.RELEVENT_FLUID_TEMPERATURES.keys():
                         for temp in self.instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
-                            for construct in craftable_constructs:
-                                if fluid+'@'+str(temp) in construct.vector.keys() and construct.vector[fluid+'@'+str(temp)] > 0:
-                                    targets[fluid+'@'+str(temp)] = Fraction(1)
-                                    break
+                            if not fluid+'@'+str(temp) in self.instance.reference_list:
+                                raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
+                            if self.instance.reference_list.index(fluid+'@'+str(temp)) in R_j_i.row:
+                                targets_dict[fluid+'@'+str(temp)] = Fraction(1)
                     else:
-                        for construct in craftable_constructs:
-                            if fluid in construct.vector.keys() and construct.vector[fluid] > 0:
-                                targets[fluid] = Fraction(1)
-                                break
+                        if not fluid in self.instance.reference_list:
+                            if not fluid in WARNING_LIST:
+                                logging.warning("Detected some a weird fluid: "+fluid)
+                                WARNING_LIST.append(fluid)
+                        elif self.instance.reference_list.index(fluid) in R_j_i.row:
+                            targets_dict[fluid] = Fraction(1)
                 for module in self.instance.data_raw['module'].keys():
-                    for construct in craftable_constructs:
-                        if module in construct.vector.keys() and construct.vector[module] > 0:
-                            targets[module] = Fraction(1)
-                            break
+                    if not module in self.instance.reference_list:
+                        if not module in WARNING_LIST:
+                            logging.warning("Detected some a weird module: "+module)
+                            WARNING_LIST.append(module)
+                    elif self.instance.reference_list.index(module) in R_j_i.row:
+                        targets_dict[module] = Fraction(1)
                 for other in ['electric', 'heat']:
-                    for construct in craftable_constructs:
-                        if other in construct.vector.keys() and construct.vector[other] > 0:
-                            targets[other] = Fraction(1)
-                            break
-                #targets = CompressedVector({item: Fraction(1) for item in self.instance.data_raw['item'].keys() if any([item in construct.vector.keys() and construct.vector[item] > 0 for construct in craftable_constructs])}) + \
-                #          CompressedVector({fluid: Fraction(1) for fluid in self.instance.data_raw['fluid'].keys() if any([fluid in construct.vector.keys() and construct.vector[fluid] > 0 for construct in craftable_constructs])}) + \
-                #          CompressedVector({module: Fraction(1) for module in self.instance.data_raw['module'].keys() if any([module in construct.vector.keys() and construct.vector[module] > 0 for construct in craftable_constructs])}) + \
-                #          CompressedVector({'electric': Fraction(1)} if any(['electric' in construct.vector.keys() and construct.vector['electric'] > 0 for construct in craftable_constructs]) else {})
-                #          #CompressedVector({tool: Fraction(1) for tool in self.instance.data_raw['tool'].keys() if any([tool in construct.vector.keys() and construct.vector[tool] > 0 for construct in craftable_constructs])}) + \ #todo uncomment me
-            logging.info("Auto-targets:\n\t"+str(list(targets.keys())))
-            logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(set(targets.keys()).difference(set(last_material.targets.keys()))))
+                    if not other in self.instance.reference_list:
+                        if not other in WARNING_LIST:
+                            logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
+                            WARNING_LIST.append(other)
+                    if self.instance.reference_list.index(other) in R_j_i.row:
+                        targets_dict[other] = Fraction(1)
+            logging.info("Auto-targets:\n\t"+str(list(targets_dict.keys())))
+            logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(set(targets_dict.keys()).difference(set(last_material.targets.keys()))))
+            targets = targets_dict
 
         if factory_type == "science":
             for target in targets.keys():

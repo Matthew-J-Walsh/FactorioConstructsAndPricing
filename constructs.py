@@ -7,7 +7,9 @@ from scipy import sparse
 
 class LinearConstruct:
     """
-    A compiled construct. Simply having its identifier, vector, cost, and limit
+    A compiled construct. Simply having its identifier, vector, cost, and limit.
+    Has a Transformation from a count to an Effect
+    Has a Transformation from a count to a Cost
 
     Members
     -------
@@ -21,14 +23,14 @@ class LinearConstruct:
         TechnologicalLimitation of using the construct
     """
     ident: str
-    vector: sparse.sparray
-    cost: sparse.sparray
+    vector: sparse.coo_array
+    cost: sparse.coo_array
     limit: TechnologicalLimitation
 
-    def __init__(self, ident: str, vector: sparse.sparray, cost: sparse.sparray, limit: TechnologicalLimitation) -> None:
+    def __init__(self, ident: str, vector: sparse.coo_array, cost: sparse.coo_array, limit: TechnologicalLimitation) -> None:
         assert isinstance(ident, str)
-        assert isinstance(vector, sparse.sparray)
-        assert isinstance(cost, sparse.sparray)
+        assert isinstance(vector, sparse.coo_array)
+        assert isinstance(cost, sparse.coo_array)
         assert isinstance(limit, TechnologicalLimitation)
         self.ident = ident
         self.vector = vector
@@ -41,11 +43,276 @@ class LinearConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tLimit of: "+str(self.limit)
 
-class CharacterizedTransform:
+class ModulatedConstruct:
     """
+    A list of lists of LinearConstructs, each list contains a list of LinearConstructs of the same characteriztion (lying in the same orthant). 
+    Allows for easy presolving. Formed from an UncompiledConstruct.
+
+    Members
+    -------
+    subconstructs:
+        List of lists of LinearConstructs
+    ident:
+        Identifier for this set of LinearConstructs
+    """
+    subconstructs: tuple[tuple[LinearConstruct]]
+    ident: str
+
+    def __init__(self, constructs: tuple[LinearConstruct], ident: str) -> None:
+        self.subconstructs = []
+        orthants = {}
+        for construct in constructs:
+            orth = vectors_orthant(construct.vector)
+            if orth in orthants.keys():
+                self.subconstructs[orthants[orth]].append(construct)
+            else:
+                orthants[orth] = len(self.subconstructs)
+                self.subconstructs.append([construct])
+        self.subconstructs = tuple([tuple(orth) for orth in self.subconstructs])
+        self.ident = ident
     
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_array, np.ndarray, Callable[[sparse.coo_array, sparse.coo_array], tuple[CompressedVector, CompressedVector]]]:
+        """
+        Compiles the modulated construct given a pricing model. Uses the pricing model to compute a Pareto Frontier of LinearConstructs.
+
+        Parameters
+        ----------
+        pricing_model:
+            Reference pricing model, a CompressedVector with reference_list indicies as keys
+        known_technologies:
+            Tech level to compile at
+        
+        Returns
+        -------
+        A:
+            A Transformation from counts to an Effect
+        c:
+            A Transformation from counts to a Cost
+        Recovery:
+            A Recovery function from counts to CompressedVector of Factory setup
+        """
+        constructs = [[construct for construct in orth if known_technologies>=construct.limit and all([k in pricing_keys for k in construct.cost.row])] for orth in self.subconstructs]
+        effects = [[construct.vector for construct in orth] for orth in constructs]
+        flattened_effects = sum(effects, []) #saved for recovery
+        costs = [[np.dot(construct.cost.todense().flatten(), pricing_model) for construct in orth] for orth in constructs]
+        flattened_costs = sum(costs, []) #saved for recovery
+        cost_weighted_effects = [[eff / c for eff, c in zip(effs, cs)] for effs, cs in zip(effects, costs)]
+        masks = [pareto_frontier(d) for d in cost_weighted_effects]
+        if len(constructs[0])==0:
+            A = sparse.coo_matrix((pricing_model.shape[0], 0))
+            c = np.zeros(0)
+            names = np.array([])
+        else:
+            A = sparse.hstack([sparse.hstack(np.array(effs)[mask], format="coo") for effs, mask in zip(effects, masks)], format="coo")
+            c = np.vstack([np.vstack(np.array(costs)[mask]) for costs, mask in zip(costs, masks)]).flatten() #TODO: This is dangerous because i dont understand why it wouldnt be flat in the first place.
+            names = np.vstack([np.vstack(np.array([construct.ident for construct in orth])[mask]) for orth, mask in zip(constructs, masks)]).flatten()
+
+        def recovery(s: np.ndarray, p: np.ndarray) -> tuple[CompressedVector, CompressedVector]:
+            assert s.shape[0]==names.shape[0], "Given miss-shapen factory in recovery"
+            assert len(flattened_effects)==0 or p.shape[0]==flattened_effects[0].shape[0], "Given miss-shapen pricing model in recovery"
+            fac = CompressedVector()
+            loss = CompressedVector()
+            for i in range(s.shape[0]):
+                if i in s.nonzero()[0]:
+                    fac[names[i]] = s[i]
+                loss[names[i]] = np.dot(flattened_effects[i], p) / flattened_costs[i]
+            return fac, loss
+        
+        return A, c, recovery
+    
+    def __repr__(self) -> str:
+        return self.ident + "\n\tContaining " + sum([len(l) for l in self.subconstructs]) + " LinearConstructs split between " + len(self.subconstructs) + " orthants."
+
+class ComplexConstruct:
     """
-    constructs: list[LinearConstruct]
+    A true construct. A formation of subconstructs with stabilization values.
+
+    Members
+    -------
+    subconstructs:
+        Other ComplexConstructs that make up this construct
+    stabilization:
+        What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct.
+    """
+    subconstructs: tuple[ComplexConstruct]
+    stabilization: dict
+    ident: str
+
+    def __init__(self, subconstructs: tuple[ComplexConstruct], ident: str, stabilization: dict | None = None) -> None:
+        self.subconstructs = subconstructs
+        self.ident = ident
+        if stabilization is None:
+            self.stabilization = {}
+        else:
+            self.stabilization = stabilization
+
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.coo_array, Callable[[sparse.sparray, sparse.sparray], tuple[CompressedVector, CompressedVector]]]:
+        """
+        Compiles the complex construct given a pricing model.
+
+        Parameters
+        ----------
+        pricing_model:
+            Reference pricing model
+        known_technologies:
+            Current tech level
+        
+        Returns
+        -------
+        A:
+            A Transformation from variables to an Effect.
+        c:
+            A Transformation from variables to a Cost.
+        N1:
+            A Transformation on variables. Combined with T0 forms a constraint on variables.
+        N0:
+            A Vector. Combined with T0 forms a constraint on variables.
+        Recovery:
+            A Recovery function from variables and a pricing model to CompressedVector of Factory setup and CompressedVector of unused construct's efficiencies.
+        """
+        if len(self.stabilization.keys())!=0:
+            raise NotImplementedError("Stabilization not implemented yet. TODO")
+
+        compiled_subconstructs = [sc.compile(pricing_model, pricing_keys, known_technologies) for sc in self.subconstructs]
+        As, cs, N1s, N0s, Rs = zip(*compiled_subconstructs)
+
+        A = sparse.hstack(As, format="coo")
+        assert A.shape[0]==As[0].shape[0]
+        c = np.concatenate(cs)
+        N1 = sparse.hstack(N1s, format="coo")
+        N0 = sparse.hstack(N0s, format="coo")
+        assert all([n.shape[0]==0 for n in N1s])
+        assert all([n1.shape[0]==n0.shape[0] for n1, n0 in zip(N1s, N0s)])
+        assert N1.shape[0]==0
+        assert N0.shape[0]==0
+        
+        splits_diff = np.array([a.shape[1] for a in As])
+        splits_high = np.cumsum(splits_diff)
+        splits_low = np.concatenate([np.array([0]), splits_high[:-1]])
+
+        def Recovery(s: np.ndarray, p: np.ndarray) -> tuple[CompressedVector, CompressedVector]:
+            assert s.shape[0] == A.shape[1], "Given miss-shapen factory in recovery"
+            assert p.shape[0] == A.shape[0], "Given miss-shapen pricing model in recovery"
+            fac = CompressedVector()
+            loss = CompressedVector()
+            for i in range(len(Rs)):
+                assert s[splits_low[i]: splits_high[i]].shape[0]==cs[i].shape[0], "Splitting is wrong "+str(splits_low[i])+" "+str(splits_high[i])+" "+str(s[splits_low[i]: splits_high[i]].shape[0])+" "+str(cs[i].shape[0])
+                f, l = Rs[i](s[splits_low[i]: splits_high[i]], p)
+                fac = fac + f
+                loss = loss + l
+            return fac, loss
+
+        return A, c, N1, N0, Recovery
+    
+    def reduce(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.sparray, Callable[[sparse.sparray, sparse.sparray], tuple[CompressedVector, CompressedVector]]]:
+        """
+        Compiles the complex construct given a pricing model. Additionally removes columns that cannot be used because their inputs cannot be made.
+
+        Parameters
+        ----------
+        pricing_model:
+            Reference pricing model
+        known_technologies:
+            Current tech level
+        
+        Returns
+        -------
+        A:
+            A Transformation from variables to an Effect.
+        c:
+            A Transformation from variables to a Cost.
+        N1:
+            A Transformation on variables. Combined with T0 forms a constraint on variables.
+        N0:
+            A Vector. Combined with T0 forms a constraint on variables.
+        Recovery:
+            A Recovery function from variables and a pricing model to CompressedVector of Factory setup and CompressedVector of unused construct's efficiencies.
+        """
+        Af, cf, N1f, N0f, Recoveryf = self.compile(pricing_model, pricing_keys, known_technologies)
+        Af = Af.tocsr()
+        mask = np.full(Af.shape[1], True, dtype=bool)
+        valid_rows = np.asarray((Af[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
+
+        logging.info("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+        last_mask = np.full(Af.shape[1], False, dtype=bool)
+        while (last_mask!=mask).any():
+            last_mask = mask.copy()
+            valid_rows = np.asarray((Af[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0
+            mask = np.logical_and(mask, np.logical_not(np.asarray((Af[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
+            logging.info("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+        
+        A = Af[:, mask].tocoo()
+        c = cf[mask]
+        N1 = N1f
+        N0 = N0f
+        def Recovery(s: np.ndarray, p: np.ndarray) -> tuple[CompressedVector, CompressedVector]:
+            assert s.shape[0]==np.count_nonzero(mask), "Given miss-shapen factory in recovery"
+            assert p.shape[0]==Af.shape[0], "Given miss-shapen pricing model in recovery"
+            s_fixed = np.zeros_like(mask, dtype=s.dtype)
+            s_fixed[np.where(mask)[0]] = s
+            return Recoveryf(s_fixed, p)
+        
+        return A, c, N1, N0, Recovery
+
+    def stabilize(self, column: int, direction: int) -> None:
+        """
+        Applies stabilization on this ComplexConstruct.
+
+        Parameters
+        ----------
+        column:
+            Which column to stabilize
+        direction:
+            Direction of stabilization. 1: Positive, 0: Positive and Negative, -1: Negative
+        """
+        if column in self.stabilization.keys():
+            if direction==0 or self.stabilization[column]==0 or direction!=self.stabilization[column]:
+                self.stabilization[column] = 0
+        else:
+            self.stabilization[column] = direction
+    
+    def __repr__(self) -> str:
+        return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
+               ("\n\tWith Stabilization: "+str(self.stabilization) if len(self.stabilization.keys()) > 0 else "")
+
+class SingularConstruct(ComplexConstruct):
+    """
+    Base case ComplexConstruct, only a single UncompiledConstruct is used to create.
+    """
+    subconstructs: tuple[ModulatedConstruct]
+
+    def __init__(self, modulated_construct: ModulatedConstruct):
+        super().__init__((modulated_construct,), modulated_construct.ident)
+    
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.sparray, Callable[[sparse.sparray, sparse.sparray], tuple[CompressedVector, CompressedVector]]]:
+        """
+        Compiles the complex construct given a pricing model.
+
+        Parameters
+        ----------
+        pricing_model:
+            Reference pricing model
+        known_technologies:
+            Current tech level
+        
+        Returns
+        -------
+        A:
+            A Transformation from variables to an Effect.
+        c:
+            A Transformation from variables to a Cost.
+        N1:
+            A Transformation on variables. Combined with T0 forms a constraint on variables.
+        N0:
+            A Vector. Combined with T0 forms a constraint on variables.
+        Recovery:
+            A Recovery function from variables and a pricing model to CompressedVector of Factory setup and CompressedVector of unused construct's efficiencies.
+        """
+        A, c, R = self.subconstructs[0].compile(pricing_model, pricing_keys, known_technologies)
+        return A, c, sparse.coo_matrix((0, c.shape[0])), sparse.coo_array((0, 1)), R
+        
+    def stabilize(self, column: int, direction: int) -> None:
+        raise RuntimeError("SingularConstructs cannot be stabilized")
 
 class ConstructTransform:
     """
@@ -72,9 +339,9 @@ class ConstructTransform:
         Returns
         -------
         effect:
-            Linear transformation from amounts of constructs to total effect
+            Linear transformation from amounts of constructs to total effect.
         cost:
-            Linear transformation from amounts of constructs to cost
+            Linear transformation from amounts of constructs to cost.
         """
         effect = sparse.dok_matrix((len(self.constructs), len(self.reference_list)), dtype=np.longdouble)
         cost = sparse.dok_matrix((len(self.constructs), len(self.reference_list)), dtype=np.longdouble)
@@ -208,7 +475,6 @@ class UncompiledConstruct:
     cost: CompressedVector
     limit: TechnologicalLimitation
     base_productivity: Fraction
-    characterizations: list[CharacterizedTransform]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
@@ -235,10 +501,10 @@ class UncompiledConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
 
-    def get_constructs(self, catalyzing_deltas: list[str], module_data: dict, max_external_mods: int = 0, 
-                       beacon_multiplier: Fraction = Fraction(0)) -> list[LinearConstruct]:
+    def compile(self, catalyzing_deltas: list[str], module_data: dict, reference_list: list[str], max_external_mods: int = 0,
+                beacon_multiplier: Fraction = Fraction(0)) -> SingularConstruct:
         """
-        Returns a list of LinearConstructs for all possible module setups of this UncompiledConstruct
+        Returns a SingularConstruct of this UncompiledConstruct
 
         Parameters
         ---------
@@ -246,6 +512,8 @@ class UncompiledConstruct:
             List of catalysts to count in the cost.
         module_data:
             List of modules from data.raw.
+        reference_list:
+            Universal reference list to use for value orderings.
         max_external_mods:
             External (beacon) module limit.
         beacon_multiplier:
@@ -253,7 +521,7 @@ class UncompiledConstruct:
 
         Returns
         -------
-        List of LinearConstructs
+        A ModulatedConstruct.
         """
         constructs = []
         logging.info("Creating LinearConstructs for "+self.ident)
@@ -289,11 +557,14 @@ class UncompiledConstruct:
                 if item in self.base_inputs.keys():
                     effected_cost = effected_cost + CompressedVector({item: -1 * self.base_inputs[item]})
 
+            sparse_deltas = sparse.coo_array(([e for e in effected_deltas.values()], ([reference_list.index(d) for d in effected_deltas.keys()], [0 for _ in effected_deltas])), shape=(len(reference_list),1), dtype=np.longdouble)
+            sparse_cost = sparse.coo_array(([e for e in effected_cost.values()], ([reference_list.index(d) for d in effected_cost.keys()], [0 for _ in effected_cost])), shape=(len(reference_list),1), dtype=np.longdouble)
+
             logging.debug("\tFound an vector of %s", effected_deltas)
             logging.debug("\tFound an cost_vector of %s", effected_cost)
-            constructs.append(LinearConstruct(ident, effected_deltas, effected_cost, limit))
+            constructs.append(LinearConstruct(ident, sparse_deltas, sparse_cost, limit))
 
-        return constructs
+        return SingularConstruct(ModulatedConstruct(constructs, self.ident))
 
 def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, external_limit: int) -> Generator[CompressedVector, None, None]:
     """

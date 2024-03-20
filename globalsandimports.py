@@ -18,3 +18,7 @@ MODULE_EFFECTS = ['consumption', 'speed', 'productivity']
 MODULE_EFFECT_MINIMUMS = {'consumption': Fraction(1, 5), 'speed': Fraction(1, 5), 'productivity': Fraction(1)} 
 MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in MODULE_EFFECTS])
 DEBUG_SOLVERS = True #Should be set to True for debugging of solvers, will cause solvers that give infesible results to throw errors instead of being ignored.
+DEBUG_BLOCK_MODULES = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_REFERENCE_LIST = []
+WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
+

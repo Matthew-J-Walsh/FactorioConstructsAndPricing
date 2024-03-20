@@ -340,3 +340,37 @@ def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
     assert beacon['tile_width']==beacon['tile_height'], "beacon setups are not calculated for non-square buildings"
     E = int(beacon['supply_area_distance']*2)
     assert B%2==E%2, "Uneven supply area"
+
+def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> int:
+    """
+    Determines the orthant a vector is in.
+
+    Parameters
+    ----------
+    v:
+        Some vector (1 dimensional array).
+    
+    Returns
+    -------
+    The orthant that vector is in.
+    """
+    orth = 0
+    if isinstance(v, np.ndarray):
+        for i in range(v.shape[0]):
+            if v[i] < 0:
+                orth+=2**i
+    if isinstance(v, sparse.csr_array):
+        for i, j in zip(*v.nonzero()):
+            if v[i, j] < 0:
+                orth+=2**j
+    if isinstance(v, list):
+        for i in range(len(v)):
+            if v[i] < 0:
+                orth+=2**i
+    return orth
+
+def pareto_frontier(l: list[sparse.sparray]) -> np.ndarray:
+    """
+    Returns a mask on l of just the elements in the pareto frontier.
+    """
+    return np.full(len(l), True, dtype=bool)
