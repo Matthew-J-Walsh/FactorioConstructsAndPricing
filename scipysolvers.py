@@ -30,5 +30,6 @@ def generate_scipy_linear_solver(method: str = "revised simplex", options: dict 
         if result.status in [0,1,4]: #4 usually indicates possible issues with simplex reaching optimal, we leave it in there because most of the time its pretty close, if its some other error it will be caught on verification.
             return result.x
         
+        logging.error("Scipy solver unable to solve problem. Problem status: "+str(result.status)+"\n\tMessage: "+result.message)
         return None
     return solver

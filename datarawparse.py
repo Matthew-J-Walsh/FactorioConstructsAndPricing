@@ -389,7 +389,7 @@ def vectorize_technologies(data: dict, COST_MODE: str) -> None:
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
         else: #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count_formula
             logging.warning("Formulaic technological counts aren't fully supported yet, only the '1' instance is done. TODO")
-            cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], 1)
+            cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], int(re.search(r'\d+', technology['name']).group()))
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
 
         technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later. TODO. Do we need?
@@ -580,6 +580,13 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
         else:
             technology_definition = technology
         set_to_dicts(technology_definition['unit']['ingredients'])
+
+    for building_type in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab', 'beacon']:
+        for machine in data[building_type].values():
+            if not 'tile_width' in machine.keys():
+                machine['tile_width'] = math.ceil(abs(machine['collision_box'][1][0] - machine['collision_box'][0][0]))
+            if not 'tile_height' in machine.keys():
+                machine['tile_height'] = math.ceil(abs(machine['collision_box'][1][1] - machine['collision_box'][0][1]))
 
 def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """

@@ -215,7 +215,7 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
 
     base_productivity = Fraction(machine['base_productivity']).limit_denominator() if 'base_productivity' in machine.keys() else Fraction(0) #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
 
-    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, base_productivity)
+    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, machine, base_productivity)
 
 def generate_crafting_constructs(machine: dict, recipe: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
@@ -297,7 +297,7 @@ def generate_boiler_machine_constructs(machine: dict, data: dict, RELEVENT_FLUID
         
         limit = machine['limit']
         
-        yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, 0, base_inputs, cost, limit)
+        yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, 0, base_inputs, cost, limit, machine)
 
 def generate_mining_drill_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
@@ -360,7 +360,7 @@ def generate_burner_generator_constructs(machine: dict, data: dict, RELEVENT_FLU
 
             yield UncompiledConstruct(ident, CompressedVector(), vector, 
                                     {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0,
-                                    base_inputs, cost, machine['limit'])
+                                    base_inputs, cost, machine['limit'], machine)
 
 def generate_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
@@ -401,7 +401,7 @@ def generate_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMP
 
         yield UncompiledConstruct(ident, CompressedVector(), vector, 
                                   {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0, 
-                                  base_inputs, cost, machine['limit'])
+                                  base_inputs, cost, machine['limit'], machine)
         
     else:
         max_energy_density = RELEVENT_FLUID_TEMPERATURES[machine['fluid_box']['filter']][machine['maximum_temperature']]
@@ -422,7 +422,7 @@ def generate_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMP
             
             yield UncompiledConstruct(ident, CompressedVector(), vector, 
                                      {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0, 
-                                     base_inputs, cost, machine['limit'])
+                                     base_inputs, cost, machine['limit'], machine)
 
 def generate_reactor_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """
@@ -467,7 +467,7 @@ def generate_reactor_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPER
 
             yield UncompiledConstruct(ident, CompressedVector(), vector, 
                                     {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0, 
-                                    base_inputs, cost, machine['limit'])
+                                    base_inputs, cost, machine['limit'], machine)
 
 def valid_lab(machine: dict, technology: dict) -> bool:
     """
@@ -573,7 +573,7 @@ def generate_rocket_result_construct(machine: dict, item: dict, data: dict, RELE
 
             limit = machine['limit']
 
-            yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit)
+            yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, machine)
 
 def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> list[UncompiledConstruct]:
     """
@@ -596,9 +596,9 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
 
     all_uncompiled_constructs = []
 
-    for ref in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']:
-        logging.info("Starting construct generation of machines in category: %s", ref)
-        for machine in data[ref].values():
+    for building_type in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']:
+        logging.info("Starting construct generation of machines in category: %s", building_type)
+        for machine in data[building_type].values():
             logging.debug("Starting processing of machine: %s", machine['name'])
 
             if not machine['name'] in data['recipe'].keys():
@@ -649,7 +649,7 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
                 all_uncompiled_constructs.append(UncompiledConstruct(machine['name'], CompressedVector(), 
                                                                      CompressedVector({machine['fluid']: Fraction(60 * machine['pumping_speed']).limit_denominator()}), #https://lua-api.factorio.com/latest/prototypes/OffshorePumpPrototype.html#pumping_speed
                                                                      {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0,
-                                                                     CompressedVector(), CompressedVector({machine['name']: Fraction(1)}), machine['limit']))
+                                                                     CompressedVector(), CompressedVector({machine['name']: Fraction(1)}), machine['limit'], machine))
 
 
             elif machine['type']=='reactor': #https://lua-api.factorio.com/latest/prototypes/ReactorPrototype.html
@@ -660,7 +660,7 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
             elif machine['type']=='solar-panel': #https://lua-api.factorio.com/latest/prototypes/SolarPanelPrototype.html
                 all_uncompiled_constructs.append(UncompiledConstruct(machine['name'], CompressedVector(), CompressedVector({'electric': machine['production_raw']}), 
                                                                      {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0,
-                                                                     CompressedVector(), CompressedVector({machine['name']: Fraction(1)}), machine['limit']))
+                                                                     CompressedVector(), CompressedVector({machine['name']: Fraction(1)}), machine['limit'], machine))
 
 
             elif machine['type']=='lab': #https://lua-api.factorio.com/latest/prototypes/LabPrototype.html

@@ -78,7 +78,7 @@ class FactorioInstance():
         for k in self.reference_list:
             DEBUG_REFERENCE_LIST.append(k)
         logging.info("Building complex constructs.")
-        self.complex_constructs = [uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list) for uc in self.uncompiled_constructs]
+        self.complex_constructs = [uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list, list(self.data_raw['beacon'].values())) for uc in self.uncompiled_constructs]
         self.compiled = None
         self.compile()
     
@@ -200,7 +200,7 @@ class FactorioInstance():
             u_j[self.reference_list.index(k)] = v
 
         logging.info("Starting solve for factory.")
-        s_i = solve_factory_optimization_problem(R_j_i, u_j, c_i, self.reference_list)
+        s_i = solve_factory_optimization_problem(R_j_i, u_j, c_i)
 
         try:
             assert linear_transform_is_gt(R_j_i.astype(np.longdouble), s_i.astype(np.longdouble), u_j.astype(np.longdouble)).all(), "Somehow solution infeasible? This should never happen but we check anyway."
@@ -212,30 +212,25 @@ class FactorioInstance():
 
         logging.info("Starting solve for pricing model.")
         p_j = solve_pricing_model_calculation_problem(R_j_i, s_i, u_j, c_i)
+
+        primal, dual = solve_factory_optimization_problem_dual(R_j_i, u_j, c_i)
+        assert s_i.shape[0]==primal.shape[0]
+        assert p_j.shape[0]==dual.shape[0]
+        assert np.isclose(s_i, primal).all(), np.max(np.abs(s_i - primal))
+        targeting_mask = np.array([name in targets.keys() for name in self.reference_list])
+        assert targeting_mask.shape[0]==p_j.shape[0]
+        try:
+            assert np.isclose(p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]).all()
+        except:
+            tempers = np.argmax(np.abs(p_j[np.where(targeting_mask)] - dual[np.where(targeting_mask)]))
+            print(str(p_j[np.where(targeting_mask)][tempers])+" "+str(dual[np.where(targeting_mask)][tempers]))
+            dumpers = np.vstack([p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]]).T
+            print(dumpers)
+            raise AssertionError()
         
-        p = CompressedVector({k: p_j[self.reference_list.index(k)] / np.max(p_j) * 100 for k in targets.keys()}) #slight normalization
+        p = CompressedVector({k: p_j[self.reference_list.index(k)] / np.max(p_j) * 100 for k in targets.keys()}) #normalization to prevent massive numbers.
+        logging.info("Reconstructing factory.")
         s, k = FactoryRecovery(s_i, p_j)
-        #s = CompressedVector()
-        #k = CompressedVector()
-        #o_i = (R_j_i.T @ p_j)
-        #div_i = o_i / c_i
-        #TEMPER = (o_i / c_i)[np.logical_not(np.isclose(s_i, 0))]
-        #TEMPER = TEMPER.astype(np.longdouble)
-        #for i in range(m): #TODO: compress
-        #    if not np.isclose(s_i[i], 0):
-        #        s[construct_transform.constructs[i].ident] = s_i[i]
-        #        #TODO: If weird stuff starts happening remove the comments
-        #        #try:
-        #        #    assert np.isclose(div_i[i], 1), construct_transform.constructs[i].ident#o_j[i] / c_i[i]
-        #        #except:
-        #        #    print(TEMPER[np.logical_not(np.isclose(TEMPER, 1))])
-        #        #    print(construct_transform.constructs[i])
-        #        #    print(div_i[i])
-        #        #    print(s_i[i])
-        #        #    raise AssertionError
-        #    else:
-        #        k[construct_transform.constructs[i].ident] = div_i[i]
-        #        assert np.isclose(div_i[i], 1) or div_i[i] <= 1.01, div_i[i] #give it some space for inaccuracies
 
         return s, p, k
     

@@ -93,29 +93,35 @@ class ModulatedConstruct:
         """
         constructs = [[construct for construct in orth if known_technologies>=construct.limit and all([k in pricing_keys for k in construct.cost.row])] for orth in self.subconstructs]
         effects = [[construct.vector for construct in orth] for orth in constructs]
-        flattened_effects = sum(effects, []) #saved for recovery
         costs = [[np.dot(construct.cost.todense().flatten(), pricing_model) for construct in orth] for orth in constructs]
-        flattened_costs = sum(costs, []) #saved for recovery
         cost_weighted_effects = [[eff / c for eff, c in zip(effs, cs)] for effs, cs in zip(effects, costs)]
         masks = [pareto_frontier(d) for d in cost_weighted_effects]
+
+        flattened_effects = sum(effects, [])
+        compressed_effects = sparse.hstack(flattened_effects).T if len(flattened_effects)>0 else sparse.coo_matrix((0, self.subconstructs[0][0].vector.shape[0])) #saved for recovery
+        flattened_costs = np.array(sum(costs, [])) #saved for recovery
+        flattened_mask = np.where(np.concatenate([np.in1d(np.arange(len(effects[i])), masks[i]) for i in range(len(constructs))]))[0]
+        flattened_names = sum([[construct.ident for construct in orth] for orth in constructs], [])
+        #assert flattened_mask.shape[0]==compressed_effects.shape[0]
+        assert flattened_costs.shape[0]==compressed_effects.shape[0]
+
         if len(constructs[0])==0:
             A = sparse.coo_matrix((pricing_model.shape[0], 0))
             c = np.zeros(0)
             names = np.array([])
         else:
             A = sparse.hstack([sparse.hstack(np.array(effs)[mask], format="coo") for effs, mask in zip(effects, masks)], format="coo")
-            c = np.vstack([np.vstack(np.array(costs)[mask]) for costs, mask in zip(costs, masks)]).flatten() #TODO: This is dangerous because i dont understand why it wouldnt be flat in the first place.
+            c = np.vstack([np.vstack(np.array(costs)[mask]) for costs, mask in zip(costs, masks)]).flatten()
             names = np.vstack([np.vstack(np.array([construct.ident for construct in orth])[mask]) for orth, mask in zip(constructs, masks)]).flatten()
 
         def recovery(s: np.ndarray, p: np.ndarray) -> tuple[CompressedVector, CompressedVector]:
-            assert s.shape[0]==names.shape[0], "Given miss-shapen factory in recovery"
-            assert len(flattened_effects)==0 or p.shape[0]==flattened_effects[0].shape[0], "Given miss-shapen pricing model in recovery"
-            fac = CompressedVector()
-            loss = CompressedVector()
-            for i in range(s.shape[0]):
-                if i in s.nonzero()[0]:
-                    fac[names[i]] = s[i]
-                loss[names[i]] = np.dot(flattened_effects[i], p) / flattened_costs[i]
+            s_fixed = np.zeros(compressed_effects.shape[0])
+            s_fixed[flattened_mask] = s
+            assert s.shape[0]==c.shape[0], "Given miss-shapen factory in recovery"
+            assert p.shape[0]==compressed_effects.shape[1], "Given miss-shapen pricing model in recovery"
+            fac = CompressedVector({flattened_names[i]: s_fixed[i] for i in range(s_fixed.shape[0]) if not np.isclose(s_fixed[i], 0)})
+            loss_array = compressed_effects @ p / flattened_costs
+            loss = CompressedVector({flattened_names[i]: loss_array[i] for i in range(compressed_effects.shape[0])})
             return fac, loss
         
         return A, c, recovery
@@ -461,6 +467,8 @@ class UncompiledConstruct:
         The cost of a single instance. (without any modules)
     limit:
         TechnologicalLimitation to make this construct. (without any modules)
+    building:
+        Link the the building entity for tile size values
     base_productivity:
         https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
         https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
@@ -474,11 +482,12 @@ class UncompiledConstruct:
     base_inputs: CompressedVector
     cost: CompressedVector
     limit: TechnologicalLimitation
+    building: dict
     base_productivity: Fraction
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, int]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
-                 limit: TechnologicalLimitation, base_productivity: Fraction = Fraction(0)) -> None:
+                 limit: TechnologicalLimitation, building: dict, base_productivity: Fraction = Fraction(0)) -> None:
         self.ident = ident
         self.drain = drain
         self.deltas = deltas
@@ -488,6 +497,7 @@ class UncompiledConstruct:
         self.base_inputs = base_inputs
         self.cost = cost
         self.limit = limit
+        self.building = building
         self.base_productivity = base_productivity
         
     def __repr__(self) -> str:
@@ -501,8 +511,7 @@ class UncompiledConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)
 
-    def compile(self, catalyzing_deltas: list[str], module_data: dict, reference_list: list[str], max_external_mods: int = 0,
-                beacon_multiplier: Fraction = Fraction(0)) -> SingularConstruct:
+    def compile(self, catalyzing_deltas: list[str], module_data: dict, reference_list: list[str], beacons: list[dict]) -> SingularConstruct:
         """
         Returns a SingularConstruct of this UncompiledConstruct
 
@@ -514,10 +523,8 @@ class UncompiledConstruct:
             List of modules from data.raw.
         reference_list:
             Universal reference list to use for value orderings.
-        max_external_mods:
-            External (beacon) module limit.
-        beacon_multiplier:
-            Multiplier for beacon-ed modules.
+        beacons:
+            List of beacon dicts from data.raw.
 
         Returns
         -------
@@ -525,48 +532,50 @@ class UncompiledConstruct:
         """
         constructs = []
         logging.info("Creating LinearConstructs for "+self.ident)
-        logging.info("\nFound a total of "+str(len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods))))+" mod setups")
-        for mod_set in module_setup_generator(self.allowed_modules, self.internal_module_limit, max_external_mods):
-            logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
-            ident = self.ident + (" with module setup: " + " & ".join([str(v)+"x "+k for k, v in mod_set.items()]) if len(mod_set)>0 else "")
+        logging.info("\nFound a total of "+str(sum([len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, self.building, beacon))) for beacon in [None]+beacons]))+" mod setups")
+        for beacon in [None]+beacons: #None=No beacons
+            for mod_set, beacon_cost, module_cost in module_setup_generator(self.allowed_modules, self.internal_module_limit, self.building, beacon):
+                logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
+                ident = self.ident + (" with module setup: " + " & ".join([str(v)+"x "+k for k, v in mod_set.items()]) if len(mod_set)>0 else "")
 
-            limit = self.limit
+                limit = self.limit
 
-            effect_vector = np.zeros(len(MODULE_EFFECTS))
-            for mod, count in mod_set.items():
-                mod_name, mod_region = mod.split("|")
-                if mod_region=="i":
-                    effect_vector += count * module_data[mod_name]['effect_vector'].astype(float)
-                if mod_region=="e":
-                    effect_vector += count * beacon_multiplier * module_data[mod_name]['effect_vector'].astype(float)
-                limit = limit + module_data[mod.split("|")[0]]['limit']
-            effect_vector[MODULE_EFFECTS.index('productivity')] += float(self.base_productivity)
-            
-            effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY.astype(float))
-            
-            effected_deltas = CompressedVector()
-            for item, count in self.deltas.items():
-                for effect, effected in self.effect_effects.items():
-                    if item in effected:
-                        count *= 1 + effect_vector[MODULE_EFFECTS.index(effect)]
-                effected_deltas[item] = count
-            effected_deltas = effected_deltas + self.drain
+                effect_vector = np.zeros(len(MODULE_EFFECTS))
+                for mod, count in mod_set.items():
+                    mod_name, mod_region = mod.split("|")
+                    if mod_region=="i":
+                        effect_vector += count * module_data[mod_name]['effect_vector'].astype(float)
+                    if mod_region=="e":
+                        effect_vector += count * beacon['distribution_effectivity'] * module_data[mod_name]['effect_vector'].astype(float)
+                    limit = limit + module_data[mod.split("|")[0]]['limit']
+                effect_vector[MODULE_EFFECTS.index('productivity')] += float(self.base_productivity)
+                
+                effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY.astype(float))
+                
+                effected_deltas = CompressedVector()
+                for item, count in self.deltas.items():
+                    for effect, effected in self.effect_effects.items():
+                        if item in effected:
+                            count *= 1 + effect_vector[MODULE_EFFECTS.index(effect)]
+                    effected_deltas[item] = count
+                effected_deltas = effected_deltas + self.drain
 
-            effected_cost = self.cost + CompressedVector({mod.split("|")[0]: count for mod, count in mod_set.items()})
-            for item in catalyzing_deltas:
-                if item in self.base_inputs.keys():
-                    effected_cost = effected_cost + CompressedVector({item: -1 * self.base_inputs[item]})
+                effected_cost = self.cost + CompressedVector({mod.split("|")[0]: count for mod, count in module_cost.items()}) + \
+                                beacon_cost
+                for item in catalyzing_deltas:
+                    if item in self.base_inputs.keys():
+                        effected_cost = effected_cost + CompressedVector({item: -1 * self.base_inputs[item]})
 
-            sparse_deltas = sparse.coo_array(([e for e in effected_deltas.values()], ([reference_list.index(d) for d in effected_deltas.keys()], [0 for _ in effected_deltas])), shape=(len(reference_list),1), dtype=np.longdouble)
-            sparse_cost = sparse.coo_array(([e for e in effected_cost.values()], ([reference_list.index(d) for d in effected_cost.keys()], [0 for _ in effected_cost])), shape=(len(reference_list),1), dtype=np.longdouble)
+                sparse_deltas = sparse.coo_array(([e for e in effected_deltas.values()], ([reference_list.index(d) for d in effected_deltas.keys()], [0 for _ in effected_deltas])), shape=(len(reference_list),1), dtype=np.longdouble)
+                sparse_cost = sparse.coo_array(([e for e in effected_cost.values()], ([reference_list.index(d) for d in effected_cost.keys()], [0 for _ in effected_cost])), shape=(len(reference_list),1), dtype=np.longdouble)
 
-            logging.debug("\tFound an vector of %s", effected_deltas)
-            logging.debug("\tFound an cost_vector of %s", effected_cost)
-            constructs.append(LinearConstruct(ident, sparse_deltas, sparse_cost, limit))
+                logging.debug("\tFound an vector of %s", effected_deltas)
+                logging.debug("\tFound an cost_vector of %s", effected_cost)
+                constructs.append(LinearConstruct(ident, sparse_deltas, sparse_cost, limit))
 
         return SingularConstruct(ModulatedConstruct(constructs, self.ident))
 
-def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, external_limit: int) -> Generator[CompressedVector, None, None]:
+def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, building: dict, beacon: dict | None = None) -> Generator[tuple[CompressedVector, CompressedVector, CompressedVector], None, None]:
     """
     Returns an generator over the set of possible module setups.
 
@@ -576,29 +585,45 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
         List of tuples representing avaiable modules and if its allowed in internal/external.
     internal_limit:
         The remaining number of internal module slots.
-    external_limit:
-        The remaining number of external module slots.
+    building:
+        Building being used.
+    beacon:
+        Beacon being used.
     
     Yields
     ------
-    Integral CompressedVectors representing module setup options
+    vector:
+        Integral CompressedVectors representing module setup options
+    beacon_cost:
+        CompressedVector with keys of beacons and values of beacon count per building
+    external_module_cost:
+        CompressedVector with keys of modules and values of module count per building
     """
-    if len(modules)==0:
-        yield CompressedVector()
+    if len(modules)==0 or DEBUG_BLOCK_MODULES:
+        yield CompressedVector(), CompressedVector(), CompressedVector()
     else:
         internal_modules = [m for m, i, _ in modules if i]
-        exteral_modules = [m for m, _, e in modules if e]
+        external_modules = [m for m, _, e in modules if e]
 
-        for internal_mod_count in range(internal_limit+1):
-            for external_mod_count in range(external_limit+1):
+        if not beacon is None:
+            for beacon_count, beacon_cost in beacon_setups(building, beacon):
+                for internal_mod_count in range(internal_limit+1):
+                    for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
+                        #for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, beacon_count*beacon['module_specification']['module_slots']): #too big
+                        for external_mod in external_modules:
+                            vector = CompressedVector()
+                            for mod in internal_mod_setup:
+                                vector += CompressedVector({mod+"|i": 1})
+                            vector += CompressedVector({external_mod+"|e": beacon_count*beacon['module_specification']['module_slots']})
+                            yield vector, CompressedVector({beacon['name']: beacon_cost}), vector + CompressedVector({external_mod+"|e": beacon_cost*beacon['module_specification']['module_slots']})
+        else:
+            for internal_mod_count in range(internal_limit+1):
                 for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
-                    for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, external_mod_count):
+                    for external_mod in external_modules:
                         vector = CompressedVector()
                         for mod in internal_mod_setup:
                             vector += CompressedVector({mod+"|i": 1})
-                        for mod in external_mod_setup:
-                            vector += CompressedVector({mod+"|e": 1})
-                        yield vector
+                        yield vector, CompressedVector(), vector
 
 def create_reference_list(uncompiled_construct_list: list[UncompiledConstruct]) -> list[str]:
     """

@@ -246,7 +246,10 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
     """
     fixed_expression = expression.replace("l", str(level)).replace("L", str(level)).replace("^", "**")
     fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
-    return numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
+    value = numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
+    if value <= 0:
+        raise ValueError("Found a negative count. PANIC.")
+    return value
 
 def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
     """
@@ -328,19 +331,6 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
     Aax = A @ x
     return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b))
 
-def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
-    """
-    Determines the possible optimal beacon setups.
-    Setups have a beacon per 1 effected building count and cost multiplier.
-    Cost multiplier should be the ratio of beacons per building if every beacon possible is placed.
-    """
-    M = building['tile_width']
-    assert building['tile_width']==building['tile_height'], "beacon setups are not calculated for non-square buildings"
-    B = beacon['tile_width']
-    assert beacon['tile_width']==beacon['tile_height'], "beacon setups are not calculated for non-square buildings"
-    E = int(beacon['supply_area_distance']*2)
-    assert B%2==E%2, "Uneven supply area"
-
 def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> int:
     """
     Determines the orthant a vector is in.
@@ -369,8 +359,84 @@ def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> int:
                 orth+=2**i
     return orth
 
-def pareto_frontier(l: list[sparse.sparray]) -> np.ndarray:
+def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
     """
     Returns a mask on l of just the elements in the pareto frontier.
     """
-    return np.full(len(l), True, dtype=bool)
+    if len(l)==0:
+        return np.array([])
+    revelent_points = np.vstack([p.data for p in l])
+    mask = np.full(revelent_points.shape[0], True, dtype=bool)
+    for i in range(revelent_points.shape[0]):
+        if mask[i]:
+            #if len(l)>5:
+            #    print(len(l))#10
+            #    print(mask.shape)#(10,)
+            #    print(l[0].shape)#(397, 1)
+            #    print(revelent_points.shape)#(10, 2)
+            #    print(revelent_points[i, :].shape)#(2,)
+            #    print((revelent_points > revelent_points[i, :]).shape)#(10,2)
+            #    print(np.any(revelent_points > revelent_points[i, :], axis=1).shape)#(10,)
+            mask = np.logical_and(mask, np.any(revelent_points > revelent_points[i, :], axis=1))
+            mask[i] = True #mask[i] will compute to false in last line because its not strictly greater than every point in self.
+    
+    return np.where(mask)
+
+def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
+    """
+    Determines the possible optimal beacon setups.
+
+    Parameters
+    ----------
+    building:
+        Building being buffed by the beacon.
+    beacon:
+        Beacon buffing the building.
+    
+    Returns
+    -------
+    list_of_setups:
+        list of tuples with beacons hitting each building and beacons/building in the crystal.
+    """
+    try:
+        M_plus = max(building['tile_width'], building['tile_height'])
+        M_minus = min(building['tile_width'], building['tile_height'])
+    except:
+        raise ValueError(building['name'])
+    B_plus = max(beacon['tile_width'], beacon['tile_height'])
+    B_minus = min(beacon['tile_width'], beacon['tile_height'])
+    E_plus = int(beacon['supply_area_distance'])*2+B_plus
+    E_minus = int(beacon['supply_area_distance'])*2+B_minus
+
+    setups = []
+    #surrounded buildings: same direction
+    surrounded_buildings_same_direction_side_A = math.floor((E_plus - B_plus - 2 + M_plus)*1.0/B_minus)
+    surrounded_buildings_same_direction_side_B = math.floor((E_minus - B_minus - 2 + M_minus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+                   -1*Fraction(2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
+    #surrounded buildings: opposite direction
+    surrounded_buildings_opp_direction_side_A = math.floor((E_plus - B_plus - 2 + M_minus)*1.0/B_minus)
+    surrounded_buildings_opp_direction_side_B = math.floor((E_minus - B_minus - 2 + M_plus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+                   -1*Fraction(2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
+    #optimized rows: beacons long way
+    setups.append((2*math.ceil((1+math.ceil((E_plus-1)*1.0/M_minus))*1.0/math.ceil(B_plus*1.0/M_minus)),
+                   -1*Fraction(1, math.ceil(B_plus*1.0/M_minus))))
+    #optimized rows: beacons short way
+    setups.append((2*math.ceil((1+math.ceil((E_minus-1)*1.0/M_minus))*1.0/math.ceil(B_minus*1.0/M_minus)),
+                   -1*Fraction(1, math.ceil(B_minus*1.0/M_minus))))
+    
+    mask = [True]*4
+    for i in range(4): #ew
+        for j in range(4):
+            if i!=j:
+                if (setups[i][0] >= setups[j][0] and setups[i][1] > setups[j][1]) or (setups[i][0] > setups[j][0] and setups[i][1] >= setups[j][1]):
+                    mask[j] = False
+    filt_setups = []
+    for i in range(4):
+        if mask[i]:
+            filt_setups.append(setups[i])
+
+    return list(set(filt_setups))
+
+
