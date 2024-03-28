@@ -1,7 +1,6 @@
 from globalsandimports import *
 
 from pulpsolvers import create_mps_file, create_dual_mps_file
-import highspy
 
 def generate_highs_linear_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
     """
@@ -86,3 +85,5 @@ def generate_highs_dual_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.l
         return None
     
     return solver
+
+

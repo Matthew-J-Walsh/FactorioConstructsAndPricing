@@ -1,12 +1,10 @@
 from globalsandimports import *
 
 from utils import *
-from feasibilityanalysis import *
 from scipysolvers import generate_scipy_linear_solver
 from pulpsolvers import generate_pulp_linear_solver, generate_pulp_dual_solver
 from scipsolvers import generate_scip_linear_solver, generate_scip_dual_solver
 from highssolvers import generate_highs_linear_solver, generate_highs_dual_solver
-from scipy import optimize
 
 
 def verified_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]], 
@@ -60,7 +58,7 @@ def verified_dual_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.long
         Optimization function to use. Should solve problems of the form: 
         A@x>=b, x>=0, minimize c*x.
         It should also provide the dual solution to:
-        A.T@y>=c, y>=0, minimize b.T*y. 
+        A.T@y<=c, y>=0, minimize b.T*y. 
         If it cannot solve the problem for whatever reason it should return None.
     name:
         What to refer to solver as when giving warnings and throwing errors.
@@ -69,7 +67,7 @@ def verified_dual_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.long
     -------
     Solver with output verification and error catching added.
     """
-    def verified(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]):
+    def verified(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]) -> tuple[np.ndarray[Real], np.ndarray[Real]]:
         try:
             logging.debug("Trying the "+name+" solver.")
             primal, dual = solver(A, b, c)
@@ -98,13 +96,127 @@ def verified_dual_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.long
             return None
     return verified
 
+def flip_dual_solver(solver: Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]:
+    """
+    Solves a problem by solving its dual instead of its main.
+    For the moment actually tries both and times it.
+
+    Parameters
+    ----------
+    solver:
+        Optimization function to use. Should solve problems of the form: 
+        A@x>=b, x>=0, minimize c*x.
+        It should also provide the dual solution to:
+        A.T@y<=c, y>=0, minimize b.T*y. 
+        If it cannot solve the problem for whatever reason it should return None.
+    name:
+        What to refer to solver as when giving warnings and throwing errors.
+
+    Returns
+    -------
+    Solver instead targeting the dual problem.
+    """
+    def dual_solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]) -> tuple[np.ndarray[Real], np.ndarray[Real]]:
+        if DEBUG_TIME_DUAL_PROBLEM:
+            P_start_time = time.time()
+            primal_P, dual_P = solver(A, b, c)
+            P_end_time = time.time()
+            D_start_time = time.time()
+            dual_D, primal_D = solver(-1 * A.T, -1 * c, -1 * b)
+            D_end_time = time.time()
+            logging.error("Dual problem error value of "+str(np.dot(dual_P, b)-np.dot(primal_P, c))+" and "+str(np.dot(dual_D, b)-np.dot(primal_D, c)))
+            try:
+                assert np.isclose(primal_P, primal_D, rtol=1e-2, atol=1e-4).all(), "Difference between primal method and dual method for primal solution\n"+str(primal_P[~np.isclose(primal_P, primal_D, rtol=1e-2, atol=1e-4)])+"\n"+str(primal_D[~np.isclose(primal_P, primal_D, rtol=1e-2, atol=1e-4)])
+                assert np.isclose(dual_P, dual_D, rtol=1e-2, atol=1e-4).all(), "Difference between primal method and dual method for dual solution\n"+str(dual_P[~np.isclose(dual_P, dual_D, rtol=1e-2, atol=1e-4)])+"\n"+str(dual_D[~np.isclose(dual_P, dual_D, rtol=1e-2, atol=1e-4)])+"\n"+str(np.where(~np.isclose(dual_P, dual_D, rtol=1e-2, atol=1e-4)))
+            except:
+                logging.error(linear_transform_is_gt(A, primal_P, b).all())
+                logging.error(linear_transform_is_gt(A, primal_D, b).all())
+                logging.error(linear_transform_is_gt(-1 * A.T, dual_P, -1 * c).all())
+                logging.error(-1 * A.T.tocsr() @ dual_P + c)
+                logging.error(linear_transform_is_gt(-1 * A.T, dual_D, -1 * c).all())
+                logging.error(-1 * A.T.tocsr() @ dual_D + c)
+                raise AssertionError()
+            logging.info("Dual solver solved in "+str((D_end_time-D_start_time)/(P_end_time-P_start_time))+" times the time")
+            return primal_D, dual_D
+        else:
+            dual_D, primal_D = solver(-1 * A.T, -1 * c, -1 * b)
+            return primal_D, dual_D
+    return dual_solver
+
+def iterative_dual_informed_unrelaxation(solver: Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]) -> Callable[[np.ndarray[np.longdouble], sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]:
+    """
+    Uses a primal + dual solver and iteratively adds rows based on the dual weightings.
+
+    Parameters
+    ----------
+    solver:
+        Optimization function to use. Should solve problems of the form: 
+        A@x>=b, x>=0, minimize c*x.
+        It should also provide the dual solution to:
+        A.T@y<=c, y>=0, minimize b.T*y. 
+        If it cannot solve the problem for whatever reason it should return None.
+    """
+    def relaxation_solver(g: np.ndarray[np.longdouble], A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]) -> tuple[np.ndarray[Real], np.ndarray[Real]]:
+        if DEBUG_TIME_ITERATIVE_PROBLEM:
+            NI_start_time = time.time()
+            primal_NI, dual_NI = solver(A, b, c)
+            NI_end_time = time.time()
+
+            I_start_time = time.time()
+        elif A.shape[1] < A.shape[0] * 10: #problems that are faster to do in 1 go
+            return solver(A, b, c)
+
+        logging.info("Setting up unrelaxation.")
+        column_mask = np.full(A.shape[1], False, dtype=bool)
+        orthants = {}
+        Acsr = A.tocsr()
+        for i in range(A.shape[1]):
+            orth = vectors_orthant(Acsr[:, i].toarray().flatten())
+            if not orth in orthants.keys():
+                orthants[orth] = [i]
+            else:
+                orthants[orth].append(i)
+        logging.info("Found a total of "+str(len(orthants.keys()))+" different orthants.")
+        for k in orthants.keys():
+            orthants[k] = np.array(orthants[k])
+
+        def unrelax_rows(p):
+            for s in orthants.values():
+                i = np.argmax(p @ (Acsr / c[None, :]).tocsr()[:, s])
+                if column_mask[s[i]]:
+                    assert np.max(p @ (Acsr / c[None, :]).tocsr()[:, s]) <= 1.01, str(s[i])
+                column_mask[s[i]] = True
+        unrelax_rows(g)
+        
+        logging.info("Beginning unrelaxation.")
+        while True:
+            print()
+            masked_primal, dual = solver(Acsr[:, np.where(column_mask)[0]].tocoo(), b, c[np.where(column_mask)[0]])
+            if linear_transform_is_gt(-1 * A.T, dual, -1 * c).all():
+                logging.info("Unrelaxation terminated; reforming primal.")
+                primal = np.zeros(A.shape[1])
+                primal[np.where(column_mask)[0]] = masked_primal
+                if DEBUG_TIME_ITERATIVE_PROBLEM:
+                    I_end_time = time.time()
+                    logging.info("Iterative solver solved in "+str((I_end_time-I_start_time)/(NI_end_time-NI_start_time))+" times the time")
+                return primal, dual
+            last_count = np.count_nonzero(column_mask)
+            unrelax_rows(dual)
+            logging.info("Iterating. Unmasking a total of "+str(np.count_nonzero(column_mask)-last_count)+" new rows.")
+            if np.count_nonzero(column_mask)-last_count == 0:
+                assert linear_transform_is_gt(-1 * Acsr[:, np.where(column_mask)[0]].tocoo().T, dual, -1 * c[np.where(column_mask)[0]]).all(), "HUH?"
+                raise RuntimeError("No new row added?")
+
+    return relaxation_solver
+
+
 """
 DUAL_LP_SOLVERS are lists of solvers for problems of the form:
 A@x>=b, x>=0, minimize cx.
 A.T@y>=c, y>=0, minimize by.
 Ordered list, when a LP problem is attempted to be solved these should be ran in order. This order is mostly due to personal experience in usefulness.
 """
-DUAL_LP_SOLVERS = list(map(verified_dual_solver,
+DUAL_LP_SOLVERS_PRIMAL = list(map(verified_dual_solver,
                            [generate_highs_dual_solver(),
                             generate_pulp_dual_solver(),
                             #generate_scip_dual_solver(),
@@ -113,6 +225,10 @@ DUAL_LP_SOLVERS = list(map(verified_dual_solver,
                             "pulp CBC",
                             #"scip",
                            ]))
+#DUAL VERSION
+DUAL_LP_SOLVERS = list(map(flip_dual_solver, DUAL_LP_SOLVERS_PRIMAL))
+ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_LP_SOLVERS))
+#ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_LP_SOLVERS_PRIMAL))
 
 """
 PRIMARY_LP_SOLVERS and BACKUP_LP_SOLVERS are lists of solvers for problems of the form:
@@ -313,4 +429,34 @@ def solve_factory_optimization_problem_dual(R_j_i: sparse.coo_matrix, u_j: np.nd
         
     raise ValueError("Unable to form factory even with slack.")
 
+
+def solve_factory_optimization_problem_dual_iteratively(R_j_i: sparse.coo_matrix, u_j: np.ndarray[np.longdouble], c_i: np.ndarray[np.longdouble], p0_j: np.ndarray[np.longdouble]) -> tuple[np.ndarray[Real], np.ndarray[Real]]:
+    """
+    Solve an optimization problem given a linear transformation on construct counts, a target output vector, and a cost vector.
+    Returns both a rate usage and a pricing model.
+    Attempts to use the various linear programming solvers until one works. 
+    Runs PRIMARY_LP_SOLVERS without slack, then PRIMARY_LP_SOLVERS with slack, then BACKUP_LP_SOLVERS without slack, then BACKUP_LP_SOLVERS without slack.
+    
+    Parameters
+    ----------
+    R_j_i:
+        Sparse matrix representing the linear transformation from a construct array to results.
+    u_j:
+        Vector of required outputs.
+    c_i:
+        Vector of costs of constructs.
+
+    Returns
+    -------
+    primal:
+        Vector of rates that each construct is used in optimal factory.
+    dual:
+        Pricing module of the 
+    """
+    for dual_solver in ITERATIVE_DUAL_LP_SOLVERS:
+        primal, dual = dual_solver(p0_j, R_j_i, u_j, c_i)
+        if not primal is None:
+            return primal, dual
+        
+    raise ValueError("Unable to form factory even with slack.")
 

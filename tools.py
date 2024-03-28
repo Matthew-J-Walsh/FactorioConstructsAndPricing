@@ -1,17 +1,12 @@
 from __future__ import annotations
 from globalsandimports import *
 
-import json
-import Levenshtein
-
 from utils import *
 from generators import *
 #from linearconstructs import *
 from constructs import *
 from datarawparse import *
 from lpproblems import *
-
-import pandas as pd
 
 
 class FactorioInstance():
@@ -199,34 +194,36 @@ class FactorioInstance():
         for k, v in targets.items():
             u_j[self.reference_list.index(k)] = v
 
-        logging.info("Starting solve for factory.")
-        s_i = solve_factory_optimization_problem(R_j_i, u_j, c_i)
+        
+        #s_i = solve_factory_optimization_problem(R_j_i, u_j, c_i)
 
-        try:
-            assert linear_transform_is_gt(R_j_i.astype(np.longdouble), s_i.astype(np.longdouble), u_j.astype(np.longdouble)).all(), "Somehow solution infeasible? This should never happen but we check anyway."
-        except:
-            nonzero = np.nonzero(1-linear_transform_is_gt(R_j_i.astype(np.longdouble), s_i.astype(np.longdouble), u_j.astype(np.longdouble)))[0]
-            for i in nonzero:
-                print("assertion failure on: "+self.reference_list[i]+" values are "+str((R_j_i @ s_i)[i])+" vs "+str(u_j[i]))
-            raise AssertionError
+        #try:
+        #    assert linear_transform_is_gt(R_j_i.astype(np.longdouble), s_i.astype(np.longdouble), u_j.astype(np.longdouble)).all(), "Somehow solution infeasible? This should never happen but we check anyway."
+        #except:
+        #    nonzero = np.nonzero(1-linear_transform_is_gt(R_j_i.astype(np.longdouble), s_i.astype(np.longdouble), u_j.astype(np.longdouble)))[0]
+        #    for i in nonzero:
+        #        print("assertion failure on: "+self.reference_list[i]+" values are "+str((R_j_i @ s_i)[i])+" vs "+str(u_j[i]))
+        #    raise AssertionError
 
-        logging.info("Starting solve for pricing model.")
-        p_j = solve_pricing_model_calculation_problem(R_j_i, s_i, u_j, c_i)
+        #logging.info("Starting solve for pricing model.")
+        #p_j = solve_pricing_model_calculation_problem(R_j_i, s_i, u_j, c_i)
 
-        primal, dual = solve_factory_optimization_problem_dual(R_j_i, u_j, c_i)
-        assert s_i.shape[0]==primal.shape[0]
-        assert p_j.shape[0]==dual.shape[0]
-        assert np.isclose(s_i, primal).all(), np.max(np.abs(s_i - primal))
-        targeting_mask = np.array([name in targets.keys() for name in self.reference_list])
-        assert targeting_mask.shape[0]==p_j.shape[0]
-        try:
-            assert np.isclose(p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]).all()
-        except:
-            tempers = np.argmax(np.abs(p_j[np.where(targeting_mask)] - dual[np.where(targeting_mask)]))
-            print(str(p_j[np.where(targeting_mask)][tempers])+" "+str(dual[np.where(targeting_mask)][tempers]))
-            dumpers = np.vstack([p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]]).T
-            print(dumpers)
-            raise AssertionError()
+        logging.info("Starting a dual problem.")
+        #s_i, p_j = solve_factory_optimization_problem_dual(R_j_i, u_j, c_i)
+        s_i, p_j = solve_factory_optimization_problem_dual_iteratively(R_j_i, u_j, c_i, p0_j)
+        #assert s_i.shape[0]==primal.shape[0]
+        #assert p_j.shape[0]==dual.shape[0]
+        #assert np.isclose(s_i, primal).all(), np.max(np.abs(s_i - primal))
+        #targeting_mask = np.array([name in targets.keys() for name in self.reference_list])
+        #assert targeting_mask.shape[0]==p_j.shape[0]
+        #try:
+        #    assert np.isclose(p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]).all()
+        #except:
+        #    tempers = np.argmax(np.abs(p_j[np.where(targeting_mask)] - dual[np.where(targeting_mask)]))
+        #    print(str(p_j[np.where(targeting_mask)][tempers])+" "+str(dual[np.where(targeting_mask)][tempers]))
+        #    dumpers = np.vstack([p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]]).T
+        #    print(dumpers)
+        #    raise AssertionError()
         
         p = CompressedVector({k: p_j[self.reference_list.index(k)] / np.max(p_j) * 100 for k in targets.keys()}) #normalization to prevent massive numbers.
         logging.info("Reconstructing factory.")
@@ -758,13 +755,16 @@ class FactorioFactoryChain():
             elif targets=="all materials":
                 factory_type = "material"
                 #only actually craftable materials
-                for item in self.instance.data_raw['item'].keys():
-                    if not item in self.instance.reference_list:
-                        if not item in WARNING_LIST:
-                            logging.warning("Detected some a weird item: "+item)
-                            WARNING_LIST.append(item)
-                    elif self.instance.reference_list.index(item) in R_j_i.row:
-                        targets_dict[item] = Fraction(1)
+                for item_cata in ITEM_SUB_PROTOTYPES:
+                    if item_cata=='tool':
+                        continue #skip tools in material factories
+                    for item in self.instance.data_raw[item_cata].keys():
+                        if not item in self.instance.reference_list:
+                            if not item in WARNING_LIST:
+                                logging.warning("Detected some a weird "+item_cata+": "+item)
+                                WARNING_LIST.append(item)
+                        elif self.instance.reference_list.index(item) in R_j_i.row:
+                            targets_dict[item] = Fraction(1)
                 for fluid in self.instance.data_raw['fluid'].keys():
                     if fluid in self.instance.RELEVENT_FLUID_TEMPERATURES.keys():
                         for temp in self.instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
@@ -779,13 +779,6 @@ class FactorioFactoryChain():
                                 WARNING_LIST.append(fluid)
                         elif self.instance.reference_list.index(fluid) in R_j_i.row:
                             targets_dict[fluid] = Fraction(1)
-                for module in self.instance.data_raw['module'].keys():
-                    if not module in self.instance.reference_list:
-                        if not module in WARNING_LIST:
-                            logging.warning("Detected some a weird module: "+module)
-                            WARNING_LIST.append(module)
-                    elif self.instance.reference_list.index(module) in R_j_i.row:
-                        targets_dict[module] = Fraction(1)
                 for other in ['electric', 'heat']:
                     if not other in self.instance.reference_list:
                         if not other in WARNING_LIST:

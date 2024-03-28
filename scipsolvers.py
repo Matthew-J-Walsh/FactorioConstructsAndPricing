@@ -1,7 +1,5 @@
 from globalsandimports import *
 
-import pyscipopt as scip
-
 def generate_scip_linear_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[float]]:
     """
     Returns a solver for the standard linear programming problem pyscipopt 

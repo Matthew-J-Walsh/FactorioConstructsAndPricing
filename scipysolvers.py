@@ -1,7 +1,5 @@
 from globalsandimports import *
 
-from scipy import optimize
-
 def generate_scipy_linear_solver(method: str = "revised simplex", options: dict = {'pivot': 'bland', 'maxiter': 50000, 'presolve': True}) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
     """
     Returns a solver for the standard linear programming problem using scipy.optimize.linprog

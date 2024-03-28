@@ -3,8 +3,6 @@ from __future__ import annotations
 from utils import *
 from globalsandimports import *
 
-from scipy import sparse
-
 class LinearConstruct:
     """
     A compiled construct. Simply having its identifier, vector, cost, and limit.
@@ -127,7 +125,7 @@ class ModulatedConstruct:
         return A, c, recovery
     
     def __repr__(self) -> str:
-        return self.ident + "\n\tContaining " + sum([len(l) for l in self.subconstructs]) + " LinearConstructs split between " + len(self.subconstructs) + " orthants."
+        return self.ident + "\n\tContaining " + str(sum([len(l) for l in self.subconstructs])) + " LinearConstructs split between " + str(len(self.subconstructs)) + " orthants."
 
 class ComplexConstruct:
     """
@@ -534,14 +532,14 @@ class UncompiledConstruct:
         logging.info("Creating LinearConstructs for "+self.ident)
         logging.info("\nFound a total of "+str(sum([len(list(module_setup_generator(self.allowed_modules, self.internal_module_limit, self.building, beacon))) for beacon in [None]+beacons]))+" mod setups")
         for beacon in [None]+beacons: #None=No beacons
-            for mod_set, beacon_cost, module_cost in module_setup_generator(self.allowed_modules, self.internal_module_limit, self.building, beacon):
-                logging.debug("Generating a linear construct for %s given module setup %s", self.ident, mod_set)
-                ident = self.ident + (" with module setup: " + " & ".join([str(v)+"x "+k for k, v in mod_set.items()]) if len(mod_set)>0 else "")
+            for module_set, beacon_cost, module_cost in module_setup_generator(self.allowed_modules, self.internal_module_limit, self.building, beacon):
+                logging.debug("Generating a linear construct for %s given module setup %s given module costs %s given beacon cost %s", self.ident, module_set, module_cost, beacon_cost)
+                ident = self.ident + (" with module setup: " + " & ".join([str(v)+"x "+k for k, v in module_set.items()]) if len(module_set)>0 else "")
 
                 limit = self.limit
 
                 effect_vector = np.zeros(len(MODULE_EFFECTS))
-                for mod, count in mod_set.items():
+                for mod, count in module_set.items():
                     mod_name, mod_region = mod.split("|")
                     if mod_region=="i":
                         effect_vector += count * module_data[mod_name]['effect_vector'].astype(float)
@@ -560,12 +558,14 @@ class UncompiledConstruct:
                     effected_deltas[item] = count
                 effected_deltas = effected_deltas + self.drain
 
-                effected_cost = self.cost + CompressedVector({mod.split("|")[0]: count for mod, count in module_cost.items()}) + \
-                                beacon_cost
+                effected_cost = self.cost + beacon_cost
+                for mod, count in module_cost.items():
+                    effected_cost = effected_cost + CompressedVector({mod.split("|")[0]: count})
                 for item in catalyzing_deltas:
                     if item in self.base_inputs.keys():
                         effected_cost = effected_cost + CompressedVector({item: -1 * self.base_inputs[item]})
 
+                assert all([v > 0 for v in effected_cost.values()]), effected_cost
                 sparse_deltas = sparse.coo_array(([e for e in effected_deltas.values()], ([reference_list.index(d) for d in effected_deltas.keys()], [0 for _ in effected_deltas])), shape=(len(reference_list),1), dtype=np.longdouble)
                 sparse_cost = sparse.coo_array(([e for e in effected_cost.values()], ([reference_list.index(d) for d in effected_cost.keys()], [0 for _ in effected_cost])), shape=(len(reference_list),1), dtype=np.longdouble)
 
@@ -605,7 +605,7 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
         internal_modules = [m for m, i, _ in modules if i]
         external_modules = [m for m, _, e in modules if e]
 
-        if not beacon is None:
+        if not beacon is None and not DEBUG_BLOCK_BEACONS:
             for beacon_count, beacon_cost in beacon_setups(building, beacon):
                 for internal_mod_count in range(internal_limit+1):
                     for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
@@ -614,8 +614,9 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
                             vector = CompressedVector()
                             for mod in internal_mod_setup:
                                 vector += CompressedVector({mod+"|i": 1})
-                            vector += CompressedVector({external_mod+"|e": beacon_count*beacon['module_specification']['module_slots']})
-                            yield vector, CompressedVector({beacon['name']: beacon_cost}), vector + CompressedVector({external_mod+"|e": beacon_cost*beacon['module_specification']['module_slots']})
+                            yield vector + CompressedVector({external_mod+"|e": beacon_count * beacon['module_specification']['module_slots']}), \
+                                  CompressedVector({beacon['name']: -1 * beacon_cost}), \
+                                  vector + CompressedVector({external_mod+"|e": -1 * beacon_cost * beacon['module_specification']['module_slots']}), 
         else:
             for internal_mod_count in range(internal_limit+1):
                 for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):

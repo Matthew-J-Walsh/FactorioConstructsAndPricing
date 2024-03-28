@@ -1,9 +1,6 @@
 from utils import *
 from globalsandimports import *
 
-import typing
-from typing import Generator
-
 def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[tuple[str, Fraction, typing.Optional[str]], None, None]:
     """
     Given a set energy source (https://lua-api.factorio.com/latest/types/EnergySource.html) calculates a list of possible fuels.

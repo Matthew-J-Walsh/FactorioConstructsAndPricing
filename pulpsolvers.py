@@ -1,7 +1,5 @@
 from globalsandimports import *
 
-import pulp as pl
-
 def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
     """
     Returns a solver for the standard linear programming problem using a PuLP solver

@@ -2,7 +2,6 @@ from globalsandimports import *
 
 from utils import *
 from datarawparse import *
-#from linearconstructs import *
 from constructs import *
 
 
@@ -131,7 +130,7 @@ def module_specification_calculation(machine: dict, vector_source: dict) -> tupl
     allowed_modules = []
     max_internal_mods = machine['module_specification']['module_slots'] #https://lua-api.factorio.com/latest/types/ModuleSpecification.html
     #allowed_modules was populated in link_modules
-    allowed_modules = [(module['name'], True, True) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
+    allowed_modules = [(module['name'], True, "productivity" not in module['name']) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
     return max_internal_mods, allowed_modules
 
 def fix_temperature_settings(temperature_settings: dict, vector: CompressedVector) -> None:
@@ -565,7 +564,7 @@ def generate_rocket_result_construct(machine: dict, item: dict, data: dict, RELE
             
             max_internal_mods, allowed_modules = module_specification_calculation(machine, {'allowed_modules': list(data['module'].values())})
 
-            base_inputs = CompressedVector({item['name']: Fraction(1)})
+            base_inputs = CompressedVector({item['name']: -1 * Fraction(1)})
             base_inputs[fuel_name] = (-1 * (machine['energy_usage_raw'] + machine['active_energy_usage_raw']) / fuel_value) * Fraction(3684, 60) #https://wiki.factorio.com/Rocket_silo#Conclusions
             fix_temperature_settings(temperature_settings, base_inputs)
                 

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from globalsandimports import *
 
-import numexpr
-
 T = TypeVar('T')
 
 class CompressedVector(dict):
@@ -331,7 +329,7 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
     Aax = A @ x
     return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b))
 
-def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> int:
+def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> Hashable:
     """
     Determines the orthant a vector is in.
 
@@ -344,20 +342,15 @@ def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> int:
     -------
     The orthant that vector is in.
     """
-    orth = 0
     if isinstance(v, np.ndarray):
-        for i in range(v.shape[0]):
-            if v[i] < 0:
-                orth+=2**i
-    if isinstance(v, sparse.csr_array):
-        for i, j in zip(*v.nonzero()):
-            if v[i, j] < 0:
-                orth+=2**j
+        assert len(v.shape)==1
+        return tuple(np.sign(v))
+    if isinstance(v, sparse.coo_array) or isinstance(v, sparse.coo_matrix):
+        return tuple(v.tocsr().sign().todense()[0])
+    if isinstance(v, sparse.csr_array) or isinstance(v, sparse.csr_matrix):
+        return tuple(v.sign().toarray()[0])
     if isinstance(v, list):
-        for i in range(len(v)):
-            if v[i] < 0:
-                orth+=2**i
-    return orth
+        return tuple(np.sign(np.array(v)))
 
 def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
     """
