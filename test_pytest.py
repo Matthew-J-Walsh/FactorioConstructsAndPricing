@@ -14,7 +14,7 @@ def test_compressed_vectors():
     print(added)
     assert added==added_via_func
     multiA = CompressedVector({"A": 2, "B": 4, "C": 6, "D": 10, "E": 14})
-    multiA_via_func = 2 * compA
+    multiA_via_func = compA * Fraction(2)
     assert multiA==multiA_via_func
 
 
@@ -120,8 +120,8 @@ def test_vanilla_instance():
         for j in range(len(vanilla.reference_list)):
             if np.random.rand() >= .02:
                 p[j] = p_j[j]
-        vanilla.compiled.compile(p, all_tech)
-        A, c, N1, N0, R = vanilla.compiled.reduce(p, all_tech)
+        vanilla.compiled.compile(p_j, list(range(len(vanilla.reference_list))), all_tech)
+        A, c, N1, N0, R = vanilla.compiled.reduce(p_j, list(range(len(vanilla.reference_list))), all_tech)
         assert isinstance(A, sparse.spmatrix)
         assert A.shape[1]==c.shape[0]
         assert A.shape[0]==len(vanilla.reference_list)

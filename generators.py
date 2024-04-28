@@ -128,9 +128,9 @@ def module_specification_calculation(machine: dict, vector_source: dict) -> tupl
         list of tuples indicating what modules can be used where in the machine
     """
     allowed_modules = []
-    max_internal_mods = machine['module_specification']['module_slots'] #https://lua-api.factorio.com/latest/types/ModuleSpecification.html
+    max_internal_mods: int = machine['module_specification']['module_slots'] #https://lua-api.factorio.com/latest/types/ModuleSpecification.html
     #allowed_modules was populated in link_modules
-    allowed_modules = [(module['name'], True, "productivity" not in module['name']) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
+    allowed_modules: list[tuple[str, bool, bool]] = [(module['name'], True, "productivity" not in module['name']) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
     return max_internal_mods, allowed_modules
 
 def fix_temperature_settings(temperature_settings: dict, vector: CompressedVector) -> None:
@@ -185,7 +185,7 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
             vector[fuel_burnt_result] += machine['energy_usage_raw'] / fuel_value
         else:
             vector[fuel_burnt_result] = machine['energy_usage_raw'] / fuel_value
-    fix_temperature_settings(temperature_settings, vector_source)
+    fix_temperature_settings(temperature_settings, vector)
     
     effect_effects = {'speed': [], 'productivity': [], 'consumption': []}
     if 'allowed_effects' in machine.keys():
@@ -391,6 +391,8 @@ def generate_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMP
 
         if 'max_power_output' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#max_power_output
             corrected_fluid_usage = Fraction(min(fluid_usage, machine['max_power_output_raw'] / fuel_value / effectivity)).limit_denominator()
+        else:
+            corrected_fluid_usage = fluid_usage
 
         vector = CompressedVector({fuel_name: -1 * corrected_fluid_usage, 'electric': effectivity * corrected_fluid_usage * fuel_value})
         
@@ -574,7 +576,7 @@ def generate_rocket_result_construct(machine: dict, item: dict, data: dict, RELE
 
             yield UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, machine)
 
-def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> list[UncompiledConstruct]:
+def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> tuple[UncompiledConstruct, ...]:
     """
     Generates UncompiledConstructs for all machines in the version of the game represented in data.
 
@@ -672,4 +674,4 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
             else:
                 raise ValueError("Unknown type %s", machine['type'])
 
-    return all_uncompiled_constructs
+    return tuple(all_uncompiled_constructs)

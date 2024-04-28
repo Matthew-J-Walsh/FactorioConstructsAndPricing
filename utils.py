@@ -34,7 +34,8 @@ class CompressedVector(dict):
         else:
             self[key] = value
     
-    def __eq__(self, other: CompressedVector) -> bool:
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, dict)
         if set(self.keys())!=set(other.keys()):
             return False
         for k in self.keys():
@@ -81,10 +82,10 @@ class TechnologicalLimitation:
         list_of_nodes:
             Iterable of iterable over nodes to make up this limitation.
         """
-        self.canonical_form = set()
+        temp_cf = set()
         for nodes in list_of_nodes:
-            self.canonical_form.add(frozenset(nodes))
-        self.canonical_form = frozenset(self.canonical_form)
+            temp_cf.add(frozenset(nodes))
+        self.canonical_form = frozenset(temp_cf)
         
     def __repr__(self) -> str:
         return str(self.canonical_form)
@@ -249,7 +250,7 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
         raise ValueError("Found a negative count. PANIC.")
     return value
 
-def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
+def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
     """
     Determines of a linear transformation, A, onto a contravector, x, is greater than or equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -289,7 +290,7 @@ def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:n
     Aax = A @ x
     return np.logical_or(Aax - b >= -1 * true_tol, np.logical_or(Aax >= b, np.isclose(Aax, b)))
 
-def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray[bool]:
+def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
     """
     Determines of a linear transformation, A, onto a contravector, x, is equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -346,9 +347,9 @@ def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> Hashable:
         assert len(v.shape)==1
         return tuple(np.sign(v))
     if isinstance(v, sparse.coo_array) or isinstance(v, sparse.coo_matrix):
-        return tuple(v.tocsr().sign().todense()[0])
+        return tuple(v.tocsr().sign().todense()[0]) # type: ignore
     if isinstance(v, sparse.csr_array) or isinstance(v, sparse.csr_matrix):
-        return tuple(v.sign().toarray()[0])
+        return tuple(v.sign().toarray()[0]) # type: ignore
     if isinstance(v, list):
         return tuple(np.sign(np.array(v)))
 
@@ -373,7 +374,7 @@ def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
             mask = np.logical_and(mask, np.any(revelent_points > revelent_points[i, :], axis=1))
             mask[i] = True #mask[i] will compute to false in last line because its not strictly greater than every point in self.
     
-    return np.where(mask)
+    return np.where(mask)[0]
 
 def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
     """

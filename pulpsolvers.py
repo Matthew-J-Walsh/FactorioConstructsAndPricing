@@ -1,6 +1,6 @@
 from globalsandimports import *
 
-def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
+def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> CallableSolver:
     """
     Returns a solver for the standard linear programming problem using a PuLP solver
     A@x=b, x>=0, minimize cx
@@ -15,7 +15,7 @@ def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -
     -------
     Function that solves: A@x=b, x>=0, minimize cx given A, b, and c.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None) -> np.ndarray[Real]:
+    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         problem = pl.LpProblem()
         variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
 
@@ -39,7 +39,7 @@ def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -
     
     return solver
 
-def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]:
+def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False), pl_warm_solver = pl.PULP_CBC_CMD(presolve = False, warmStart = True)) -> CallableDualSolver:
     """
     Returns a solver for the standard linear programming problem using a PuLP solver
     A@x>=b, x>=0, minimize cx.
@@ -57,7 +57,7 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> 
     A@x>=b, x>=0, minimize cx.
     A.T@y>=c, y>=0, minimize b.Ty.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]) -> np.ndarray[Real]:
+    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         problem = pl.LpProblem()
         variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
 
@@ -74,7 +74,12 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> 
                 constraint_mask[j] = True
                 problem += sum([A.data[k] * variables[A.col[k]] for k in range(A.nnz) if A.row[k]==j]) >= b[j]
 
-        status = problem.solve(pl_solver)
+        if g is None:
+            status = problem.solve(pl_solver)
+        else:
+            for i, v in enumerate(variables.keys()):
+                assert v.setInitialValue(g[i])
+            status = problem.solve(pl_warm_solver)
         
         if status==1:
             primal = np.array([pl.value(v) if pl.value(v) else 0 for _, v in variables.items()])
@@ -83,12 +88,12 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> 
             return primal, dual
         
         logging.error("PULP was unable to find a solution. Problem Status: "+pl.LpStatus[status])
-        return None
+        return None, None
     
     return solver
 
-def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)):
-    def solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None) -> np.ndarray[Real]:
+def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> CallableSolver:
+    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         filename = "tempproblem.mps"
         create_mps_file(filename, A, b, c)
 
@@ -104,7 +109,7 @@ def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)):
     
     return solver
 
-def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None):
+def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
     A@x=b, x>=0, minimize cx
@@ -124,7 +129,7 @@ def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray[np.longdo
 
     problem.writeMPS(filename)
 
-def create_dual_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None):
+def create_dual_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
     A@x=b, x>=0, minimize cx

@@ -1,7 +1,7 @@
 from utils import *
 from globalsandimports import *
 
-def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[tuple[str, Fraction, typing.Optional[str]], None, None]:
+def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[tuple[str, Fraction, typing.Optional[str]], None, None] | list[tuple[str, Fraction, typing.Optional[str]]]:
     """
     Given a set energy source (https://lua-api.factorio.com/latest/types/EnergySource.html) calculates a list of possible fuels.
     RELEVENT_FLUID_TEMPERATURES must already be populated.
@@ -386,7 +386,13 @@ def vectorize_technologies(data: dict, COST_MODE: str) -> None:
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
         else: #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count_formula
             logging.warning("Formulaic technological counts aren't fully supported yet, only the '1' instance is done. TODO")
-            cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], int(re.search(r'\d+', technology['name']).group()))
+            digit_match = re.search(r'\d+', technology['name'])
+            if digit_match is None:
+                logging.error("Unable to find a digit to calculate formulaic technology count with. Defaulting to 1.")
+                digit = 1
+            else:
+                digit = int(digit_match.group())
+            cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], digit)
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
 
         technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later. TODO. Do we need?

@@ -2,7 +2,7 @@ from globalsandimports import *
 
 from pulpsolvers import create_mps_file, create_dual_mps_file
 
-def generate_highs_linear_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], Optional[np.ndarray[np.longdouble]]], np.ndarray[Real]]:
+def generate_highs_linear_solver() -> CallableSolver:
     """
     Returns a solver for the standard linear programming problem using the HiGHs solver
     A@x=b, x>=0, minimize cx
@@ -17,7 +17,7 @@ def generate_highs_linear_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np
     -------
     Function that solves: A@x=b, x>=0, minimize cx given A, b, and c.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble] | None = None) -> np.ndarray[Real]:
+    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         problem = highspy.Highs()
         filename = "tempproblem.mps"
 
@@ -37,10 +37,10 @@ def generate_highs_linear_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np
         
         logging.error("Highs couldn't find a solution. Problem status: "+problem.modelStatusToString(problem.getModelStatus()))
         return None
-    
+
     return solver
 
-def generate_highs_dual_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.longdouble], np.ndarray[np.longdouble]], tuple[np.ndarray[Real], np.ndarray[Real]]]:
+def generate_highs_dual_solver() -> CallableDualSolver:
     """
     Returns a solver for the standard linear programming problem using the HiGHs solver
     A@x>=b, x>=0, minimize cx.
@@ -53,8 +53,9 @@ def generate_highs_dual_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.l
     A@x>=b, x>=0, minimize cx.
     A.T@y>=c, y>=0, minimize b.Ty.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray[np.longdouble], c: np.ndarray[np.longdouble]) -> np.ndarray[Real]:
+    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         problem = highspy.Highs()
+        raise NotImplementedError("please implement g")
         filename = "tempproblem.mps"
 
         constraint_mask = create_dual_mps_file(filename, A, b, c)
@@ -82,7 +83,7 @@ def generate_highs_dual_solver() -> Callable[[sparse.coo_matrix, np.ndarray[np.l
             return x, y
         
         logging.error("Highs couldn't find a solution. Problem status: "+problem.modelStatusToString(problem.getModelStatus()))
-        return None
+        return None, None
     
     return solver
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from numbers import Complex
 from globalsandimports import *
 
 from utils import *
@@ -7,6 +8,7 @@ from generators import *
 from constructs import *
 from datarawparse import *
 from lpproblems import *
+from postprocessing import *
 
 
 class FactorioInstance():
@@ -37,17 +39,17 @@ class FactorioInstance():
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
     """
     data_raw: dict
-    uncompiled_constructs: list[UncompiledConstruct]
-    complex_constructs: list[SingularConstruct]
-    disabled_constructs: list[str]
+    uncompiled_constructs: tuple[UncompiledConstruct, ...]
+    complex_constructs: tuple[ComplexConstruct, ...]
+    disabled_constructs: list[ComplexConstruct]
     compiled: ComplexConstruct | None
-    reference_list: list[str]
-    catalyst_list: list[str]
+    reference_list: tuple[str, ...]
+    catalyst_list: tuple[str, ...]
     COST_MODE: str
     DEFAULT_TARGET_RESEARCH_TIME: Fraction
     RELEVENT_FLUID_TEMPERATURES: dict
 
-    def __init__(self, filename: str, COST_MODE: str = 'normal', DEFAULT_TARGET_RESEARCH_TIME: Real = 10000) -> None:
+    def __init__(self, filename: str, COST_MODE: str = 'normal', DEFAULT_TARGET_RESEARCH_TIME: Fraction = Fraction(10000), nobuild: bool = False) -> None:
         """
         Parameters
         ----------
@@ -57,6 +59,8 @@ class FactorioInstance():
             What cost mode should be used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
         DEFAULT_TARGET_RESEARCH_TIME:
             Default time that should science factories should complete their science in.
+        nobuild:
+            Don't build complex constructs, only load in data raw and manage.
         """
         with open(filename) as f:
             self.data_raw = json.load(f)
@@ -72,10 +76,11 @@ class FactorioInstance():
         self.reference_list, self.catalyst_list = generate_references_and_catalysts(self.uncompiled_constructs)
         for k in self.reference_list:
             DEBUG_REFERENCE_LIST.append(k)
-        logging.info("Building complex constructs.")
-        self.complex_constructs = [uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list, list(self.data_raw['beacon'].values())) for uc in self.uncompiled_constructs]
-        self.compiled = None
-        self.compile()
+        if not nobuild:
+            logging.info("Building complex constructs.")
+            self.complex_constructs = tuple([uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list, list(self.data_raw['beacon'].values())) for uc in self.uncompiled_constructs])
+            self.compiled = None
+            self.compile()
     
     def compile(self) -> ComplexConstruct:
         """
@@ -106,14 +111,14 @@ class FactorioInstance():
         target_name:
             Target name of complex construct to be disabled.
         """
-        ident = self.search_complex_constructs(target_name)
+        construct = self.search_complex_constructs(target_name)
         try:
-            self.disabled_constructs.remove(ident)
+            self.disabled_constructs.remove(construct)
             self.compiled = None
         except:
-            logging.warning(ident+" was not disabled in the first place.")
+            logging.warning(construct.ident+" was not disabled in the first place.")
 
-    def search_complex_constructs(self, target_name: str) -> str:
+    def search_complex_constructs(self, target_name: str) -> ComplexConstruct:
         """
         Finds the closest named complex construct
 
@@ -132,20 +137,20 @@ class FactorioInstance():
         for c in self.complex_constructs:
             dist = Levenshtein.distance(target_name, c.ident)
             if dist < match_distance:
-                best_matches = [c.ident]
+                best_matches = [c]
                 match_distance = dist
                 logging.debug("\tFound a new best match in: \""+c.ident+"\" at distance: "+str(match_distance))
             elif dist == match_distance:
-                best_matches.append(c.ident)
+                best_matches.append(c)
                 logging.debug("\t\tAdded the new possible match: \""+c.ident+"\"")
             elif c.ident == target_name:
                 logging.debug("Found the exact match but chose to ignore it because im a dumb program "+str(dist))
                 raise ValueError
-        assert len(best_matches)==1, "Unable to determine which construct an input phrase is associated with.\nPhrase is: "+target_name+"\nPossible constructs were:\n\t"+"\n\t".join([m for m in best_matches])+"\n\tWith distance: "+str(match_distance)
-        logging.debug("Translated: \""+target_name+"\" to mean the construct: \""+best_matches[0]+"\"")
+        assert len(best_matches)==1, "Unable to determine which construct an input phrase is associated with.\nPhrase is: "+target_name+"\nPossible constructs were:\n\t"+"\n\t".join([str(m) for m in best_matches])+"\n\tWith distance: "+str(match_distance)
+        logging.debug("Translated: \""+target_name+"\" to mean the construct: \""+str(best_matches[0])+"\"")
         return best_matches[0]
 
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, CompressedVector, CompressedVector]:
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, CompressedVector, CompressedVector, list[int]]:
         """
         Solves for a target output vector given a tech level and reference pricing model.
 
@@ -175,6 +180,7 @@ class FactorioInstance():
         #construct_transform = ConstructTransform(self.compiled_constructs, self.reference_list).validate(known_technologies, reference_model)
         #assert not any(['with module setup' in construct.ident for construct in constructs]) #module stripping check
         self.compile()
+        assert not self.compiled is None
 
         p0_j = np.zeros(n, dtype=np.longdouble)
         for k, v in reference_model.items():
@@ -229,7 +235,9 @@ class FactorioInstance():
         logging.info("Reconstructing factory.")
         s, k = FactoryRecovery(s_i, p_j)
 
-        return s, p, k
+        nnzs = self.find_nonzeros(R_j_i, s_i)
+
+        return s, p, k, nnzs
     
     def solve_looped_pricing_model(self, starter_base: CompressedVector, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, sp.sparse.sparray]:
         """
@@ -306,6 +314,24 @@ class FactorioInstance():
         
         return u_j, p_j
 
+    def find_nonzeros(self, R_j_i: sparse.coo_matrix, factory: np.ndarray) -> list[int]:
+        """
+        Given a factory finds which items have non-zero throughtput
+
+        Parameters
+        ----------
+        factory:
+            CompressedVector of the requested factory
+
+        Returns
+        -------
+        List of indexes of reference_list that have non-zero throughput
+        """
+        assert factory.shape[0]==len(self.reference_list)
+        R_j_i_csr = R_j_i.tocsr()
+        R_j_i_csr[R_j_i_csr < 0] = 0
+        return np.where(R_j_i_csr @ factory > 0)[0].tolist()
+
     def technological_limitation_from_specification(self, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
         """
         Wrapper for technological_limitation_from_specification that passes it the values it needs.
@@ -331,7 +357,7 @@ class FactorioInstance():
         return technological_limitation_from_specification(self.data_raw, self.COST_MODE, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
 
-def index_compiled_constructs(constructs: list[LinearConstruct], ident: str) -> LinearConstruct:
+def index_compiled_constructs(constructs: tuple[LinearConstruct, ...], ident: str) -> LinearConstruct:
     """
     Finds the LinearConstruct referenced by an ident.
 
@@ -374,9 +400,12 @@ class FactorioFactory():
     instance: FactorioInstance
     known_technologies: TechnologicalLimitation
     targets: CompressedVector
+    last_pricing_model: CompressedVector
     optimal_factory: CompressedVector
     optimal_pricing_model: CompressedVector
     inefficient_constructs: CompressedVector
+    nonzero_throughputs: list[int]
+    post_analyses: CompressedVector
 
     def __init__(self, instance: FactorioInstance, known_technologies: TechnologicalLimitation, targets: CompressedVector) -> None:
         """
@@ -396,6 +425,8 @@ class FactorioFactory():
         self.known_technologies = known_technologies
         self.targets = targets
         self.optimal_pricing_model = CompressedVector()
+        self.post_analyses = CompressedVector()
+        self.last_pricing_model = CompressedVector()
 
     def calculate_optimal_factory(self, reference_model: CompressedVector) -> bool:
         """
@@ -410,9 +441,11 @@ class FactorioFactory():
         -------
         If pricing model has changed.
         """
-        s, p, k = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model)
+        s, p, k, nnzs = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model)
+        self.last_pricing_model = reference_model
         same = p==self.optimal_pricing_model
         self.optimal_factory, self.optimal_pricing_model, self.inefficient_constructs = s, p, k
+        self.nonzero_throughputs = nnzs
 
         return not same
         #u_j, p_j = self.instance.solve_looped_pricing_model(input, self.known_technologies)
@@ -439,6 +472,26 @@ class FactorioFactory():
         for k in self_copy.keys():
             if not k in self.targets.keys():
                 self.targets[k] = retainment
+
+    def run_post_analysis(self) -> None:
+        """
+        Computes all the global post run analyses into post_analyses.
+        """
+        for construct_name, targets in POST_ANALYSES:
+            construct = self.instance.search_complex_constructs(construct_name)
+
+            initial_pricing_vector = np.zeros(len(self.instance.reference_list))
+            for k, v in self.last_pricing_model:
+                initial_pricing_vector[self.instance.reference_list.index(k)] = v
+
+            output_pricing_vector = np.zeros(len(self.instance.reference_list))
+            for k, v in self.optimal_pricing_model:
+                output_pricing_vector[self.instance.reference_list.index(k)] = v
+            
+
+            efficiency: float | None = compute_complex_construct_efficiency(construct, initial_pricing_vector, list(self.last_pricing_model.keys()), output_pricing_vector, 
+                                                                            self.nonzero_throughputs, self.known_technologies, targets)
+            self.post_analyses.update({construct.ident: efficiency})
     
     def dump_to_excel(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """
@@ -462,6 +515,7 @@ class FactorioFactory():
                                 inefficient_constructs_df], axis=1)
             merged_df.to_excel(writer, sheet_name=sheet_name, index=False)
         except:
+            logging.error("Was unable to dump factory to excel.")
             return
 
 
@@ -589,7 +643,7 @@ class FactorioScienceFactory(FactorioFactory):
         """
         return self._previous_coverage() + TechnologicalLimitation([set([targ[:targ.rfind("=")] for targ in self.targets.keys()])])
 
-    def retarget(self, science_targets: CompressedVector, retainment: Fraction = Fraction(1/1e6)) -> None:
+    def retarget(self, targets: CompressedVector, retainment: Fraction = Fraction(1/1e6)) -> None:
         """
         Rebuilds targets. This is useful if iteratively optimizing a built chain.
         After this one should re-run calculate_optimal_factory and if it returns False then the pricing model didn't change even after retargeting.
@@ -603,11 +657,12 @@ class FactorioScienceFactory(FactorioFactory):
             How much building of targets that used to exist should be retained. 
             With 0 retainment this factory may start mispricing those targets.
         """
-        assert not any([target in self.instance.data_raw['tool'].keys() for target in science_targets.keys()]), "retarget should NEVER be given a tool. Only researches."
+        assert not any([target in self.instance.data_raw['tool'].keys() for target in targets.keys()]), "retarget should NEVER be given a tool. Only researches."
         covering_to = technological_limitation_from_specification(self.instance.data_raw, self.instance.COST_MODE, fully_automated=self.clear) + \
-                      TechnologicalLimitation([set([target for target in science_targets.keys()])])
+                      TechnologicalLimitation([set([target for target in targets.keys()])])
         last_coverage = self._previous_coverage()
         
+        raise NotImplementedError("What was i thinking???")
         targets = CompressedVector({k: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage))})
 
         super().retarget(targets, retainment=retainment)
@@ -720,6 +775,7 @@ class FactorioFactoryChain():
                     "all materials" = will autopopulate all possible buildings and materials that can be made (TODO: restrict to catalysts)
                     "all tech" = will populate all possible tech that can be made
         """
+        factory_type = ""
         previous_sciences = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)]
         last_material = [fac for fac in self.chain if isinstance(fac, FactorioMaterialFactory)][-1]
         if len(previous_sciences)==0:
@@ -742,6 +798,7 @@ class FactorioFactoryChain():
                 p0_j[self.instance.reference_list.index(k)] = v
             
             self.instance.compile()
+            assert not self.instance.compiled is None
             R_j_i, c_i, N1, N0, FactoryRecovery = self.instance.compiled.reduce(p0_j, [self.instance.reference_list.index(k) for k in last_pricing_model.keys()], known_technologies)
 
             targets_dict = CompressedVector()
@@ -805,6 +862,7 @@ class FactorioFactoryChain():
         """
         Retargets all factories in the chain.
         """
+        raise NotImplementedError("Made for previous version, update me TODO.")
         for i in range(len(self.chain)):
             factory = self.chain[i]
             if isinstance(factory, InitialFactory):
@@ -813,7 +871,7 @@ class FactorioFactoryChain():
                 updated_targets = CompressedVector()
                 for j in range(i+1, len(self.chain)):
                     for construct_name, count in self.chain[j].optimal_factory.items():
-                        for k, v in index_compiled_constructs(self.instance.compiled_constructs, construct_name).cost.items():
+                        for k, v in index_compiled_constructs(self.instance.complex_constructs, construct_name).cost.items():
                             updated_targets.key_addition(k, count * v)
                     if isinstance(self.chain[j], FactorioMaterialFactory):
                         break #done with this material factories outputs
