@@ -4,7 +4,7 @@ from utils import *
 from scipysolvers import generate_scipy_linear_solver
 from pulpsolvers import generate_pulp_linear_solver, generate_pulp_dual_solver
 from scipsolvers import generate_scip_linear_solver, generate_scip_dual_solver
-from highssolvers import generate_highs_linear_solver, generate_highs_dual_solver
+from highssolvers import generate_highs_linear_solver, generate_highs_dual_solver, generate_highs_dual_solver_pythonic
 
 
 def verified_solver(solver: CallableSolver, name: str) -> CallableSolver:
@@ -77,14 +77,21 @@ def verified_dual_solver(solver: CallableDualSolver, name: str) -> CallableDualS
                         raise AssertionError(np.max(np.abs(A @ primal - b)))
                     else:
                         logging.warning(name+" gave a result but result wasn't feasible. As debugging is off this won't throw an error. Returning None.")
-                        logging.warning("\tLargest recorded error is: "+str(np.max(np.abs(A @ primal - b))))
+                        logging.warning("\tLargest recorded error is: "+str(A @ primal - b))
                         return None, None
                 if not linear_transform_is_gt(-1 * A.T, dual, -1 * c).all():
                     if DEBUG_SOLVERS:
                         raise AssertionError(np.max(np.abs(A.T @ dual - c)))
                     else:
                         logging.warning(name+" gave a result but dual wasn't feasible. As debugging is off this won't throw an error. Returning None.")
-                        logging.warning("\tLargest recorded error is: "+str(np.max(np.abs(A.T @ dual - c))))
+                        logging.warning("\tLargest recorded error is: "+str(A.T @ dual - c))
+                        return None, None
+                if not np.isclose(np.dot(primal, c), np.dot(dual, b), rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']):
+                    if DEBUG_SOLVERS:
+                        raise AssertionError(np.dot(primal, c) - np.dot(dual, b))
+                    else:
+                        logging.warning(name+" gave a result but didn't forfill strong duality. As debugging is off this won't throw an error. Returning None.")
+                        logging.warning("\tDuality gap is: "+str(np.dot(primal, c))+", "+str(np.dot(dual, b)))
                         return None, None
             else:
                 logging.debug("Solver returned None.")
@@ -121,7 +128,7 @@ def flip_dual_solver(solver: CallableDualSolver) -> CallableDualSolver:
         return primal_D, dual_D
     return dual_solver
 
-def iterative_dual_informed_unrelaxation(solver: CallableDualSolver) -> CallableDualSolver:
+def iterative_dual_informed_unrelaxation(solver: CallableDualSolver, dual_mode: bool = False) -> CallableDualSolver:
     """
     Uses a primal + dual solver and iteratively adds rows based on the dual weightings.
 
@@ -137,6 +144,9 @@ def iterative_dual_informed_unrelaxation(solver: CallableDualSolver) -> Callable
     def relaxation_solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         if A.shape[1] < A.shape[0] * 10: #problems that are faster to do in 1 go
             return solver(A, b, c=c, g=g)
+        
+        if ginv is None:
+            ginv = np.ones(A.shape[0])
 
         logging.info("Setting up unrelaxation.")
         column_mask = np.full(A.shape[1], False, dtype=bool)
@@ -162,8 +172,10 @@ def iterative_dual_informed_unrelaxation(solver: CallableDualSolver) -> Callable
         
         logging.info("Beginning unrelaxation.")
         while True:
-            print()
-            masked_primal, dual = solver(sparse.coo_matrix(Acsr[:, np.where(column_mask)[0]]), b, c[np.where(column_mask)[0]])
+            if dual_mode:
+                dual, masked_primal = solver(-1 * sparse.coo_matrix(Acsr[:, np.where(column_mask)[0]]).T, -1 * c[np.where(column_mask)[0]], -1 * b)
+            else:
+                masked_primal, dual = solver(sparse.coo_matrix(Acsr[:, np.where(column_mask)[0]]), b, c[np.where(column_mask)[0]])
             if masked_primal is None or dual is None:
                 logging.error("Please debug solver")
                 return None, None
@@ -196,7 +208,8 @@ def two_phase_assisted_solver(solver: CallableDualSolver) -> CallableDualSolver:
     """
     def assisted_solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         if ginv is None:
-            ginv = np.ones(A.shape[1])
+            ginv = np.ones(A.shape[0])
+
         initial_mask = np.full(A.shape[1], False, dtype=bool)
         orthants = {}
         Acsr = A.tocsr()
@@ -217,7 +230,8 @@ def two_phase_assisted_solver(solver: CallableDualSolver) -> CallableDualSolver:
             initial_mask[s[i]] = True
         
         masked_primal, masked_dual = solver(sparse.coo_matrix(Acsr[:, np.where(initial_mask)[0]]), b, c[np.where(initial_mask)[0]])
-        unmasked_primal = np.zeros(A.shape[0])
+        unmasked_primal = np.zeros(A.shape[1])
+        assert unmasked_primal.shape[0]==initial_mask.shape[0]
         unmasked_primal[np.where(initial_mask)[0]] = masked_primal
         primal, dual = solver(A, b, c=c, g=unmasked_primal)
         return primal, dual
@@ -239,16 +253,17 @@ def mass_dual_solver_timing_test(solver: CallableDualSolver) -> CallableDualSolv
     """
     def timing_solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         logging.info("Starting a timing solver.")
-        standard = solver
-        flipped = flip_dual_solver(solver)
+        #standard = solver
+        #flipped = flip_dual_solver(solver)
         iterative_di = iterative_dual_informed_unrelaxation(solver)
-        assisted = two_phase_assisted_solver(solver)
-        for slvr, name in zip([standard, flipped, iterative_di, assisted], ["standard", "flipped", "iterative_di", "assisted"]):
+        iterative_ddi = iterative_dual_informed_unrelaxation(solver, True)
+        #assisted = two_phase_assisted_solver(solver)
+        for slvr, name in zip([iterative_di, iterative_ddi], ["iterative_di", "iterative_ddi"]):
             start = time.time()
             slvr(A, b, c, g=g, ginv=ginv)
             end = time.time()
-            logging.info(name+" ran in "+str(start-end)+"s")
-        return standard(A, b, c, g=g, ginv=ginv)
+            logging.info(name+" ran in "+str(end-start)+"s")
+        return iterative_di(A, b, c, g=g, ginv=ginv)
     return timing_solver
 
 """
@@ -258,18 +273,21 @@ A.T@y>=c, y>=0, minimize by.
 Ordered list, when a LP problem is attempted to be solved these should be ran in order. This order is mostly due to personal experience in usefulness.
 """
 DUAL_LP_SOLVERS_PRIMAL = list(map(verified_dual_solver,
-                           [generate_highs_dual_solver(),
-                            generate_pulp_dual_solver(),
+                           [generate_pulp_dual_solver(),
+                            generate_highs_dual_solver_pythonic(),
                             #generate_scip_dual_solver(),
                            ],
-                           ["highspy",
-                            "pulp CBC",
+                           ["pulp CBC",
+                            "highspy",
                             #"scip",
                            ]))
 #DUAL VERSION
 DUAL_LP_SOLVERS = list(map(flip_dual_solver, DUAL_LP_SOLVERS_PRIMAL))
 ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_LP_SOLVERS))
+TIMEING_TEST_DUAL_LP_SOLVERS = list(map(mass_dual_solver_timing_test, DUAL_LP_SOLVERS_PRIMAL))
 #ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_LP_SOLVERS_PRIMAL))
+
+BEST_LP_SOLVER: CallableDualSolver = iterative_dual_informed_unrelaxation(verified_dual_solver(generate_pulp_dual_solver(), "pulp CBC"), True)
 
 """
 PRIMARY_LP_SOLVERS and BACKUP_LP_SOLVERS are lists of solvers for problems of the form:
@@ -384,10 +402,15 @@ def solve_factory_optimization_problem_dual(R_j_i: sparse.coo_matrix, u_j: np.nd
     dual:
         Pricing module of the 
     """
-    for dual_solver in DUAL_LP_SOLVERS:
-        primal, dual = dual_solver(R_j_i, u_j, c_i)
+    if not DEBUG_SOLVERS:
+        primal, dual = BEST_LP_SOLVER(R_j_i, u_j, c_i)
         if not primal is None and not dual is None:
             return primal, dual
+    else:
+        for dual_solver in TIMEING_TEST_DUAL_LP_SOLVERS:#DUAL_LP_SOLVERS:#DUAL_LP_SOLVERS_PRIMAL:
+            primal, dual = dual_solver(R_j_i, u_j, c_i)
+            if not primal is None and not dual is None:
+                return primal, dual
         
     raise ValueError("Unable to form factory even with slack.")
 

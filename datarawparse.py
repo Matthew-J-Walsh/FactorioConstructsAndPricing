@@ -385,11 +385,11 @@ def vectorize_technologies(data: dict, COST_MODE: str) -> None:
         if 'count' in cost_definition['unit'].keys(): #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count
             changes = Fraction(cost_definition['unit']['count']).limit_denominator() * changes
         else: #https://lua-api.factorio.com/latest/types/TechnologyUnit.html#count_formula
-            logging.warning("Formulaic technological counts aren't fully supported yet, only the '1' instance is done. TODO")
+            logging.warning("Formulaic technological counts aren't fully supported yet, only the first instance is done. TODO")
             digit_match = re.search(r'\d+', technology['name'])
             if digit_match is None:
-                logging.error("Unable to find a digit to calculate formulaic technology count with. Defaulting to 1.")
-                digit = 1
+                logging.error("Unable to find a digit to calculate formulaic technology count with. Defaulting to 10.")
+                digit = 10
             else:
                 digit = int(digit_match.group())
             cost_definition['unit']['count'] = evaluate_formulaic_count(cost_definition['unit']['count_formula'], digit)
@@ -397,7 +397,7 @@ def vectorize_technologies(data: dict, COST_MODE: str) -> None:
 
         technology['base_inputs'] = CompressedVector({c: v for c, v in changes.items() if v < 0}) #store inputs for lab matching later. TODO. Do we need?
         
-        changes[technology['name']+'=research'] = Fraction(1)  #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
+        changes[technology['name']+RESEARCH_SPECIAL_STRING] = Fraction(1)  #The result of a technology vector is the researched technology. Enabled recipies are calculated as limits of these results.
 
         technology['vector'] = changes * (1 / (Fraction(cost_definition['unit']['time']).limit_denominator() * Fraction(cost_definition['unit']['count']).limit_denominator()))
 

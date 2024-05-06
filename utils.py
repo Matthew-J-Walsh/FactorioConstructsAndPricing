@@ -288,7 +288,7 @@ def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:n
 
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     Aax = A @ x
-    return np.logical_or(Aax - b >= -1 * true_tol, np.logical_or(Aax >= b, np.isclose(Aax, b)))
+    return np.logical_or(Aax - b >= -1 * true_tol, np.logical_or(Aax >= b, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])))
 
 def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
     """
@@ -328,7 +328,7 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
 
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     Aax = A @ x
-    return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b))
+    return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
 
 def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> Hashable:
     """

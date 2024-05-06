@@ -69,7 +69,7 @@ class ModulatedConstruct:
         self.subconstructs = tuple([tuple(orth) for orth in temp_subcs])
         self.ident = ident
     
-    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation, debug: bool = False) -> tuple[sparse.coo_matrix, np.ndarray, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
         """
         Compiles the modulated construct given a pricing model. Uses the pricing model to compute a Pareto Frontier of LinearConstructs.
 
@@ -94,6 +94,15 @@ class ModulatedConstruct:
         costs: list[list[float]] = [[np.dot(construct.cost.todense().flatten(), pricing_model) for construct in orth] for orth in constructs]
         cost_weighted_effects: list[list[sparse.coo_array]]  = [[eff / c for eff, c in zip(effs, cs)] for effs, cs in zip(effects, costs)]
         masks: list[np.ndarray] = [pareto_frontier(d) for d in cost_weighted_effects]
+
+        if debug:
+            logging.info(self.ident)
+            logging.info("\t"+str(pricing_keys))
+            logging.info("\t"+str(known_technologies))
+            logging.info("\t"+str(sum([len(construct) for construct in constructs])))
+            logging.info("\t"+str(sum([len(construct) for construct in [[construct for construct in orth if all([k in pricing_keys for k in construct.cost.row])] for orth in self.subconstructs]])))
+            logging.info("\t"+str(sum([len(construct) for construct in [[construct for construct in orth if known_technologies>=construct.limit] for orth in self.subconstructs]])))
+            logging.info("\t"+str(sum([len(construct) for construct in self.subconstructs])))
 
         flattened_effects: list[sparse.coo_array] = sum(effects, [])
         compressed_effects: sparse.coo_matrix = sparse.hstack(flattened_effects).T if len(flattened_effects)>0 else sparse.coo_matrix((0, self.subconstructs[0][0].vector.shape[0])) #saved for recovery
@@ -150,7 +159,7 @@ class ComplexConstruct:
         else:
             self.stabilization = stabilization
 
-    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.coo_array, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation, debug: bool = False) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.coo_array, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
         """
         Compiles the complex construct given a pricing model.
 
@@ -177,8 +186,20 @@ class ComplexConstruct:
         if len(self.stabilization.keys())!=0:
             raise NotImplementedError("Stabilization not implemented yet. TODO")
 
-        compiled_subconstructs = [sc.compile(pricing_model, pricing_keys, known_technologies) for sc in self.subconstructs]
+        assert all([isinstance(sc, ComplexConstruct) for sc in self.subconstructs]), "Modulated Construct Appeared in Complex Compile."
+        compiled_subconstructs = [sc.compile(pricing_model, pricing_keys, known_technologies, debug) for sc in self.subconstructs]
+        assert len(compiled_subconstructs)>0, self.ident
+        if debug:
+            logging.info(len(compiled_subconstructs))
+        for i in range(len(compiled_subconstructs)):
+            csc = compiled_subconstructs[i]
+            assert len(csc)==5, self.subconstructs[i].ident
         As, cs, N1s, N0s, Rs = zip(*compiled_subconstructs)
+        if debug:
+            logging.info([temp.shape for temp in As])
+            logging.info([temp.shape for temp in cs])
+            logging.info([temp.shape for temp in N1s])
+            logging.info([temp.shape for temp in N0s])
 
         A = sparse.coo_matrix(sparse.hstack(As, format="coo"))
         assert A.shape[0]==As[0].shape[0]
@@ -287,7 +308,7 @@ class SingularConstruct(ComplexConstruct):
     def __init__(self, modulated_construct: ModulatedConstruct):
         super().__init__((modulated_construct,), modulated_construct.ident)
     
-    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.coo_array, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
+    def compile(self, pricing_model: np.ndarray, pricing_keys: list[int], known_technologies: TechnologicalLimitation, debug: bool = False) -> tuple[sparse.coo_matrix, np.ndarray, sparse.coo_matrix, sparse.coo_array, Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]]:
         """
         Compiles the complex construct given a pricing model.
 
@@ -316,7 +337,7 @@ class SingularConstruct(ComplexConstruct):
         R: Callable[[np.ndarray, np.ndarray], tuple[CompressedVector, CompressedVector]]
         assert len(self.subconstructs)==1
         assert isinstance(self.subconstructs[0], ModulatedConstruct)
-        A, c, R = self.subconstructs[0].compile(pricing_model, pricing_keys, known_technologies)
+        A, c, R = self.subconstructs[0].compile(pricing_model, pricing_keys, known_technologies, debug)
         return A, c, sparse.coo_matrix((0, c.shape[0])), sparse.coo_array((0, 1)), R
         
     def stabilize(self, column: int, direction: int) -> None:

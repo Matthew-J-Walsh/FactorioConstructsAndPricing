@@ -77,7 +77,7 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False), pl_
         if g is None:
             status = problem.solve(pl_solver)
         else:
-            for i, v in enumerate(variables.keys()):
+            for i, v in enumerate(variables.values()):
                 assert v.setInitialValue(g[i])
             status = problem.solve(pl_warm_solver)
         
@@ -112,7 +112,7 @@ def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> Callab
 def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
-    A@x=b, x>=0, minimize cx
+    A@x>=b, x>=0, minimize cx
     """
     problem = pl.LpProblem()
     variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
@@ -132,7 +132,7 @@ def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.nd
 def create_dual_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
-    A@x=b, x>=0, minimize cx
+    A@x>=b, x>=0, minimize cx
     """
     problem = pl.LpProblem()
     variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)

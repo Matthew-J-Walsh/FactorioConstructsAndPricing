@@ -1,5 +1,7 @@
 from __future__ import annotations
 from numbers import Complex
+
+from sympy import ccode
 from globalsandimports import *
 
 from utils import *
@@ -40,7 +42,7 @@ class FactorioInstance():
     """
     data_raw: dict
     uncompiled_constructs: tuple[UncompiledConstruct, ...]
-    complex_constructs: tuple[ComplexConstruct, ...]
+    complex_constructs: list[ComplexConstruct]
     disabled_constructs: list[ComplexConstruct]
     compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
@@ -76,9 +78,12 @@ class FactorioInstance():
         self.reference_list, self.catalyst_list = generate_references_and_catalysts(self.uncompiled_constructs)
         for k in self.reference_list:
             DEBUG_REFERENCE_LIST.append(k)
+        
+        self.disabled_constructs = []
+
         if not nobuild:
             logging.info("Building complex constructs.")
-            self.complex_constructs = tuple([uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list, list(self.data_raw['beacon'].values())) for uc in self.uncompiled_constructs])
+            self.complex_constructs = [uc.compile(self.catalyst_list, self.data_raw['module'], self.reference_list, list(self.data_raw['beacon'].values())) for uc in self.uncompiled_constructs]
             self.compiled = None
             self.compile()
     
@@ -87,7 +92,7 @@ class FactorioInstance():
         Populates compiled and returns it.
         """
         if self.compiled is None:
-            self.compiled = ComplexConstruct(self.complex_constructs, "Whole Game Construct")
+            self.compiled = ComplexConstruct(tuple([cc for cc in self.complex_constructs if not cc in self.disabled_constructs]), "Whole Game Construct") # type: ignore
         return self.compiled
 
     def disable_complex_construct(self, target_name: str) -> None:
@@ -150,7 +155,40 @@ class FactorioInstance():
         logging.debug("Translated: \""+target_name+"\" to mean the construct: \""+str(best_matches[0])+"\"")
         return best_matches[0]
 
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, CompressedVector, CompressedVector, list[int]]:
+    def bind_complex_constructs(self, target_names: list[str | tuple[str, bool]]) -> str:
+        """
+        Binds a list of complex constructs together, disables marked ones, and returns the new name they are under.
+
+        Parameters
+        ----------
+        target_names:
+            List of names and if the original construct should be disabled. If no bool is provided "True" is assumed.
+
+        Returns
+        -------
+        New construct name
+        """
+        lookup_names: list[str] = []
+        disable_list: list[bool] = []
+        for pp in target_names:
+            if isinstance(pp, tuple):
+                lookup_names.append(pp[0])
+                disable_list.append(pp[1])
+            else:
+                lookup_names.append(pp)
+                disable_list.append(True)
+        
+        constructs: list[ComplexConstruct] = [self.search_complex_constructs(name) for name in lookup_names]
+        
+        new_name = "Combined Construct["+" and ".join([construct.ident for construct in constructs])+"]"
+        self.complex_constructs.append(ComplexConstruct(tuple(constructs), new_name)) # type: ignore
+        for i, construct in enumerate(constructs):
+            if disable_list[i]:
+                self.disable_complex_construct(construct.ident)
+        
+        return new_name
+
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float]:
         """
         Solves for a target output vector given a tech level and reference pricing model.
 
@@ -216,7 +254,7 @@ class FactorioInstance():
 
         logging.info("Starting a dual problem.")
         #s_i, p_j = solve_factory_optimization_problem_dual(R_j_i, u_j, c_i)
-        s_i, p_j = solve_factory_optimization_problem_dual_iteratively(R_j_i, u_j, c_i, p0_j)
+        s_i, p_j = solve_factory_optimization_problem_dual(R_j_i, u_j, c_i)
         #assert s_i.shape[0]==primal.shape[0]
         #assert p_j.shape[0]==dual.shape[0]
         #assert np.isclose(s_i, primal).all(), np.max(np.abs(s_i - primal))
@@ -230,14 +268,18 @@ class FactorioInstance():
         #    dumpers = np.vstack([p_j[np.where(targeting_mask)], dual[np.where(targeting_mask)]]).T
         #    print(dumpers)
         #    raise AssertionError()
+
+        assert linear_transform_is_gt(-1 * (R_j_i / c_i[None, :]).tocoo().T, p_j, -1 * np.ones_like(c_i)).all(), (R_j_i / c_i[None, :]).tocoo().T @ p_j # type: ignore
         
         p = CompressedVector({k: p_j[self.reference_list.index(k)] / np.max(p_j) * 100 for k in targets.keys()}) #normalization to prevent massive numbers.
+        pf = CompressedVector({k: p_j[i] / np.max(p_j) * 100 for i, k in enumerate(self.reference_list)}) #normalization to prevent massive numbers.
+        scale = 100 / np.max(p_j)
         logging.info("Reconstructing factory.")
         s, k = FactoryRecovery(s_i, p_j)
 
-        nnzs = self.find_nonzeros(R_j_i, s_i)
+        zs = self.find_zeros(R_j_i, s_i)
 
-        return s, p, k, nnzs
+        return s, p, pf, k, zs, scale
     
     def solve_looped_pricing_model(self, starter_base: CompressedVector, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, sp.sparse.sparray]:
         """
@@ -314,23 +356,22 @@ class FactorioInstance():
         
         return u_j, p_j
 
-    def find_nonzeros(self, R_j_i: sparse.coo_matrix, factory: np.ndarray) -> list[int]:
+    def find_zeros(self, R_j_i: sparse.coo_matrix, s_i: np.ndarray) -> list[int]:
         """
-        Given a factory finds which items have non-zero throughtput
+        Given a factory finds which items have zero throughtput
 
         Parameters
         ----------
-        factory:
+        s_i:
             CompressedVector of the requested factory
 
         Returns
         -------
-        List of indexes of reference_list that have non-zero throughput
+        List of indexes of reference_list that have zero throughput
         """
-        assert factory.shape[0]==len(self.reference_list)
         R_j_i_csr = R_j_i.tocsr()
         R_j_i_csr[R_j_i_csr < 0] = 0
-        return np.where(R_j_i_csr @ factory > 0)[0].tolist()
+        return np.where(np.isclose(R_j_i_csr @ s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
 
     def technological_limitation_from_specification(self, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
         """
@@ -403,9 +444,13 @@ class FactorioFactory():
     last_pricing_model: CompressedVector
     optimal_factory: CompressedVector
     optimal_pricing_model: CompressedVector
+    full_optimal_pricing_model: CompressedVector
     inefficient_constructs: CompressedVector
-    nonzero_throughputs: list[int]
+    zero_throughputs: list[int]
     post_analyses: CompressedVector
+    transport_densities: list[tuple[str, str, Fraction | float]]
+    optimized: bool
+    intermediate_scale_factor: float
 
     def __init__(self, instance: FactorioInstance, known_technologies: TechnologicalLimitation, targets: CompressedVector) -> None:
         """
@@ -425,8 +470,11 @@ class FactorioFactory():
         self.known_technologies = known_technologies
         self.targets = targets
         self.optimal_pricing_model = CompressedVector()
+        self.full_optimal_pricing_model = CompressedVector()
         self.post_analyses = CompressedVector()
         self.last_pricing_model = CompressedVector()
+        self.optimized = False
+        self.intermediate_scale_factor = 0
 
     def calculate_optimal_factory(self, reference_model: CompressedVector) -> bool:
         """
@@ -441,11 +489,12 @@ class FactorioFactory():
         -------
         If pricing model has changed.
         """
-        s, p, k, nnzs = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model)
+        s, p, pf, k, zs, scale = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model)
         self.last_pricing_model = reference_model
         same = p==self.optimal_pricing_model
-        self.optimal_factory, self.optimal_pricing_model, self.inefficient_constructs = s, p, k
-        self.nonzero_throughputs = nnzs
+        self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self.inefficient_constructs, self.intermediate_scale_factor = s, p, pf, k, scale
+        self.zero_throughputs = zs
+        self.optimized = True
 
         return not same
         #u_j, p_j = self.instance.solve_looped_pricing_model(input, self.known_technologies)
@@ -473,6 +522,8 @@ class FactorioFactory():
             if not k in self.targets.keys():
                 self.targets[k] = retainment
 
+        self.optimized = False
+
     def run_post_analysis(self) -> None:
         """
         Computes all the global post run analyses into post_analyses.
@@ -481,17 +532,17 @@ class FactorioFactory():
             construct = self.instance.search_complex_constructs(construct_name)
 
             initial_pricing_vector = np.zeros(len(self.instance.reference_list))
-            for k, v in self.last_pricing_model:
+            for k, v in self.last_pricing_model.items():
                 initial_pricing_vector[self.instance.reference_list.index(k)] = v
 
             output_pricing_vector = np.zeros(len(self.instance.reference_list))
-            for k, v in self.optimal_pricing_model:
+            for k, v in self.full_optimal_pricing_model.items():
                 output_pricing_vector[self.instance.reference_list.index(k)] = v
             
-
-            efficiency: float | None = compute_complex_construct_efficiency(construct, initial_pricing_vector, list(self.last_pricing_model.keys()), output_pricing_vector, 
-                                                                            self.nonzero_throughputs, self.known_technologies, targets)
-            self.post_analyses.update({construct.ident: efficiency})
+            efficiency: float | None = compute_complex_construct_efficiency(construct, initial_pricing_vector, [self.instance.reference_list.index(k) for k in self.last_pricing_model.keys()], 
+                                                                            output_pricing_vector, self.zero_throughputs, self.known_technologies, targets, self.intermediate_scale_factor)
+            self.post_analyses.update({construct.ident: efficiency if not efficiency is None else "None"})
+        self.transport_densities = compute_transportation_densities(self.instance.data_raw, self.full_optimal_pricing_model)
     
     def dump_to_excel(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """
@@ -504,19 +555,27 @@ class FactorioFactory():
         sheet_name:
             What sheet to write to.
         """
+        self.run_post_analysis()
         try:
             targets_df = pd.DataFrame(list(self.targets.items()), columns=['target', 'count'])
             optimal_factory_df = pd.DataFrame(list(self.optimal_factory.items()), columns=['construct', 'count'])
             optimal_pricing_model_df = pd.DataFrame(list(self.optimal_pricing_model.items()), columns=['item', 'value'])
             inefficient_constructs_df = pd.DataFrame(list(self.inefficient_constructs.items()), columns=['construct', 'relative value'])
+            post_analyses_df = pd.DataFrame(list(self.post_analyses.items()), columns=['complex-construct', 'efficiency'])
+            transport_df = pd.DataFrame(list(self.transport_densities), columns=['item', 'via', 'relative density'])
             merged_df = pd.concat([targets_df, pd.DataFrame({}, columns=['']), 
                                 optimal_factory_df, pd.DataFrame({}, columns=['']),
                                 optimal_pricing_model_df, pd.DataFrame({}, columns=['']),
-                                inefficient_constructs_df], axis=1)
+                                inefficient_constructs_df, pd.DataFrame({}, columns=['']),
+                                post_analyses_df, pd.DataFrame({}, columns=['']),
+                                transport_df], axis=1)
             merged_df.to_excel(writer, sheet_name=sheet_name, index=False)
         except:
-            logging.error("Was unable to dump factory to excel.")
-            return
+            if SUPRESS_EXCEL_ERRORS:
+                logging.error("Was unable to dump factory to excel.")
+                return
+            else:
+                raise RuntimeError("Unsuppressed Excel Error.")
 
 
 class FactorioMaterialFactory(FactorioFactory):
@@ -624,7 +683,7 @@ class FactorioScienceFactory(FactorioFactory):
         else:
             self.time_target = time_target
 
-        targets = CompressedVector({k+"=research": 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+        targets = CompressedVector({k+RESEARCH_SPECIAL_STRING: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 
         super().__init__(instance, last_coverage, targets)
         #super().__init__(instance, last_coverage, science_targets)
@@ -919,10 +978,16 @@ class FactorioFactoryChain():
         science_factory_ident = 1
         for factory in self.chain[1:]:
             if isinstance(factory, FactorioMaterialFactory):
-                factory.dump_to_excel(writer, "Material Factory "+str(material_factory_ident))
+                if not factory.optimized:
+                    logging.error("Found Material Factory "+str(material_factory_ident))
+                else:
+                    factory.dump_to_excel(writer, "Material Factory "+str(material_factory_ident))
                 material_factory_ident += 1
             elif isinstance(factory, FactorioScienceFactory):
-                factory.dump_to_excel(writer, "Science Factory "+str(science_factory_ident))
+                if not factory.optimized:
+                    logging.error("Found Science Factory "+str(science_factory_ident))
+                else:
+                    factory.dump_to_excel(writer, "Science Factory "+str(science_factory_ident))
                 science_factory_ident += 1
             #else: #if isinstance(factory, InitialFactory):
         writer.close()
