@@ -32,11 +32,13 @@ def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pr
     -------
     Decimal Efficiency
     """
+    raise NotImplementedError("Remove me")
     #logging.info("========================================")
     #logging.info(construct)
     #logging.info(known_technologies)
     #logging.info(initial_pricing_keys)
-    A, c, N1, N0, Recovery = construct.compile(initial_pricing_model, initial_pricing_keys, known_technologies, False)
+    A, C, N1, N0, Recovery = construct.compile(initial_pricing_model, initial_pricing_keys, known_technologies, False)
+    c = C.T @ initial_pricing_model
     Acsr = A.tocsr()
     valid_rows = list(set(targets.keys()).union(set(zfluxes)))
     valid_rows.sort() #do we really need? This is a disaster
@@ -163,7 +165,7 @@ def fluid_transport_density_helper(ident: str, value: float, output: list[tuple[
         output.append((ident, "inserter", value * container_size))
         for wagon in data['cargo-wagon'].values():
             output.append((ident, wagon['name']+" cargo-wagon", value * container_stacks * wagon['inventory_size'] * container_size))
-    output.append((ident, "pipe", value * EXPECTED_PIPE_FLOW_RATE))
+    output.append((ident, "pipe", value * PIPE_EXPECTED_SPEED))
     for wagon in data['fluid-wagon'].values():
         output.append((ident, wagon['name']+" fluid-wagon", value * wagon['capacity'] * (wagon['tank_count'] if 'tank_count' in wagon.keys() else 3)))
 

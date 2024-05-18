@@ -157,6 +157,13 @@ def link_techs(data: dict, COST_MODE: str) -> None:
             if any([k==module["name"] and v > 0 for k, v in recipe['vector'].items()]):
                 logging.info("Found module "+module['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 module['limit'] = module['limit'] + recipe['limit']
+
+    for beacon in data['beacon'].values(): #https://lua-api.factorio.com/latest/prototypes/BeaconPrototype.html
+        beacon['limit'] = TechnologicalLimitation()
+        for recipe in data['recipe'].values():
+            if any([k==beacon["name"] and v > 0 for k, v in recipe['vector'].items()]):
+                logging.info("Found module "+beacon['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
+                beacon['limit'] = beacon['limit'] + recipe['limit']
     
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
         resource['limit'] = TechnologicalLimitation()

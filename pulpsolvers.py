@@ -15,7 +15,8 @@ def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -
     -------
     Function that solves: A@x=b, x>=0, minimize cx given A, b, and c.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
+    raise NotImplementedError("Unfixed")
+    def solver(A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         problem = pl.LpProblem()
         variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
 
@@ -57,22 +58,32 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False), pl_
     A@x>=b, x>=0, minimize cx.
     A.T@y>=c, y>=0, minimize b.Ty.
     """
-    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
+    def solver(A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         problem = pl.LpProblem()
         variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
+        Acoo = A.tocoo()
 
         if not c is None:
-            problem += sum([c[i] * variables[i] for i in range(A.shape[1])])
+            problem += sum([c[i] * variables[i] for i in range(Acoo.shape[1])])
 
         constraint_mask = np.full(b.shape[0], True, dtype=bool)
+
+        summations = np.full(b.shape[0], 0, dtype=object)
+        for j, i, v in zip(Acoo.row, Acoo.col, Acoo.data):
+            summations[j] += v * variables[i]
+
         for j in range(b.shape[0]):
-            summation = sum([A.data[k] * variables[A.col[k]] for k in range(A.nnz) if A.row[k]==j])
-            if isinstance(summation, Real):
+            #summation = sum([A.data[k] * variables[A.col[k]] for k in range(A.nnz) if A.row[k]==j])
+            #assert summations[j]==summation
+            if isinstance(summations[j], Real):
                 constraint_mask[j] = False
-                assert np.isclose(summation, b[j]), "Invalid row "+str(j)
+                #try:
+                assert np.logical_or(summations[j] >= b[j], np.isclose(summations[j], b[j])), "Invalid row "+str(j)+": "+str(summations[j] - b[j])+", "+str(b[j]) # type: ignore
+                #except:
+                    #raise ValueError(summation - b[j])
             else:
                 constraint_mask[j] = True
-                problem += sum([A.data[k] * variables[A.col[k]] for k in range(A.nnz) if A.row[k]==j]) >= b[j]
+                problem += summations[j] >= b[j]
 
         if g is None:
             status = problem.solve(pl_solver)
@@ -93,7 +104,7 @@ def generate_pulp_dual_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False), pl_
     return solver
 
 def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> CallableSolver:
-    def solver(A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
+    def solver(A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         filename = "tempproblem.mps"
         create_mps_file(filename, A, b, c)
 
@@ -109,11 +120,12 @@ def pulp_solver_via_mps(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> Callab
     
     return solver
 
-def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
+def create_mps_file(filename: str, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
     A@x>=b, x>=0, minimize cx
     """
+    raise NotImplementedError("Unfixed")
     problem = pl.LpProblem()
     variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
 
@@ -129,11 +141,12 @@ def create_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.nd
 
     problem.writeMPS(filename)
 
-def create_dual_mps_file(filename: str, A: sparse.coo_matrix, b: np.ndarray, c: np.ndarray | None = None):
+def create_dual_mps_file(filename: str, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None):
     """
     Creates a mps file for the standard linear programming problem
     A@x>=b, x>=0, minimize cx
     """
+    raise NotImplementedError("Unfixed")
     problem = pl.LpProblem()
     variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
 

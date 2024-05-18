@@ -22,9 +22,9 @@ def vanilla_main():
     ("uranium-ore in electric-mining-drill", False)]
 
     nuclear_construct = vanilla.bind_complex_constructs(nuclear_targets)
-    POST_ANALYSES.append((nuclear_construct, {vanilla.reference_list.index("electric"): 1e10}))
-    POST_ANALYSES.append(("solar-panel", {vanilla.reference_list.index("electric"): 1e10}))
-    POST_ANALYSES.append(("electric from steam-engine via steam@165", {vanilla.reference_list.index("electric"): 1e10}))
+    #POST_ANALYSES.append((nuclear_construct, {vanilla.reference_list.index("electric"): 1e10}))
+    #POST_ANALYSES.append(("solar-panel", {vanilla.reference_list.index("electric"): 1e10}))
+    #POST_ANALYSES.append(("electric from steam-engine via steam@165", {vanilla.reference_list.index("electric"): 1e10}))
 
     logging.info("=============================================")
     logging.info(vanilla.reference_list)
@@ -160,6 +160,10 @@ def vanilla_main():
     logging.info("=============================================")
     vanilla_chain.add("all materials")
     logging.info(len(vanilla_chain.chain)-1)
+
+    print("Retarget and computing.")
+
+    vanilla_chain.compute_all()
 
     print("Dumping to Excel.")
 

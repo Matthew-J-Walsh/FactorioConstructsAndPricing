@@ -250,7 +250,7 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
         raise ValueError("Found a negative count. PANIC.")
     return value
 
-def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
+def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix | sparse.csr_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
     """
     Determines of a linear transformation, A, onto a contravector, x, is greater than or equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -273,7 +273,7 @@ def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:n
         Ap[Ap < 0] = 0
         An = A.copy()
         An[An > 0] = 0
-    else:
+    elif isinstance(A, sparse.coo_matrix):
         Ap = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] > 0],
                                 ([A.row[k] for k in range(A.nnz) if A.data[k] > 0],
                                  [A.col[k] for k in range(A.nnz) if A.data[k] > 0])),
@@ -282,6 +282,11 @@ def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:n
                                 ([A.row[k] for k in range(A.nnz) if A.data[k] < 0],
                                  [A.col[k] for k in range(A.nnz) if A.data[k] < 0])),
                                shape=A.shape, dtype=np.longdouble)
+    else: #isinstance(A, sparse.csr_matrix):
+        Ap = A.copy()
+        Ap[Ap < 0] = 0
+        An = A.copy()
+        An[An > 0] = 0
     
     Lhp = Ap @ x
     Lhn = An @ x
@@ -290,7 +295,7 @@ def linear_transform_is_gt(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:n
     Aax = A @ x
     return np.logical_or(Aax - b >= -1 * true_tol, np.logical_or(Aax >= b, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])))
 
-def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
+def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix | sparse.csr_matrix, x: np.ndarray, b:np.ndarray, rel_tol=1e-5) -> np.ndarray:
     """
     Determines of a linear transformation, A, onto a contravector, x, is equal to b.
     Sometimes the tolerance has to be larger for values with huge i/o (such as electricity).
@@ -313,7 +318,7 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
         Ap[Ap < 0] = 0
         An = A.copy()
         An[An > 0] = 0
-    else:
+    elif isinstance(A, sparse.coo_matrix):
         Ap = sparse.coo_matrix(([A.data[k] for k in range(A.nnz) if A.data[k] > 0],
                                 ([A.row[k] for k in range(A.nnz) if A.data[k] > 0],
                                  [A.col[k] for k in range(A.nnz) if A.data[k] > 0])),
@@ -322,6 +327,11 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
                                 ([A.row[k] for k in range(A.nnz) if A.data[k] < 0],
                                  [A.col[k] for k in range(A.nnz) if A.data[k] < 0])),
                                shape=A.shape, dtype=np.longdouble)
+    else: #isinstance(A, sparse.csr_matrix):
+        Ap = A.copy()
+        Ap[Ap < 0] = 0
+        An = A.copy()
+        An[An > 0] = 0
     
     Lhp = Ap @ x
     Lhn = An @ x
@@ -329,6 +339,23 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix, x: np.ndarray, 
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     Aax = A @ x
     return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
+
+def find_zeros(R_j_i: sparse.csr_matrix, s_i: np.ndarray) -> list[int]:
+    """
+    Given a factory finds which items have zero throughtput
+
+    Parameters
+    ----------
+    s_i:
+        CompressedVector of the requested factory
+
+    Returns
+    -------
+    List of indexes of reference_list that have zero throughput
+    """
+    R_j_i = R_j_i.copy()
+    R_j_i[R_j_i < 0] = 0
+    return np.where(np.isclose(R_j_i @ s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
 
 def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> Hashable:
     """
@@ -376,7 +403,7 @@ def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
     
     return np.where(mask)[0]
 
-def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
+def beacon_setups_old(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
     """
     Determines the possible optimal beacon setups.
 
@@ -432,5 +459,75 @@ def beacon_setups(building: dict, beacon: dict) -> list[tuple[int, Fraction]]:
             filt_setups.append(setups[i])
 
     return list(set(filt_setups))
+
+def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[int, Fraction]]:
+    """
+    Determines the possible optimal beacon setups.
+
+    Parameters
+    ----------
+    building_size:
+        Size of building's tile.
+    beacon:
+        Beacon buffing the building.
+    
+    Returns
+    -------
+    list_of_setups:
+        list of tuples with beacons hitting each building and beacons/building in the crystal.
+    """
+    try:
+        M_plus = max(building_size)
+        M_minus = min(building_size)
+    except:
+        raise ValueError(building_size)
+    B_plus = max(beacon['tile_width'], beacon['tile_height'])
+    B_minus = min(beacon['tile_width'], beacon['tile_height'])
+    E_plus = int(beacon['supply_area_distance'])*2+B_plus
+    E_minus = int(beacon['supply_area_distance'])*2+B_minus
+
+    setups = []
+    #surrounded buildings: same direction
+    surrounded_buildings_same_direction_side_A = math.floor((E_plus - B_plus - 2 + M_plus)*1.0/B_minus)
+    surrounded_buildings_same_direction_side_B = math.floor((E_minus - B_minus - 2 + M_minus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+                   -1*Fraction(2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
+    #surrounded buildings: opposite direction
+    surrounded_buildings_opp_direction_side_A = math.floor((E_plus - B_plus - 2 + M_minus)*1.0/B_minus)
+    surrounded_buildings_opp_direction_side_B = math.floor((E_minus - B_minus - 2 + M_plus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+                   -1*Fraction(2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
+    #optimized rows: beacons long way
+    setups.append((2*math.ceil((1+math.ceil((E_plus-1)*1.0/M_minus))*1.0/math.ceil(B_plus*1.0/M_minus)),
+                   -1*Fraction(1, math.ceil(B_plus*1.0/M_minus))))
+    #optimized rows: beacons short way
+    setups.append((2*math.ceil((1+math.ceil((E_minus-1)*1.0/M_minus))*1.0/math.ceil(B_minus*1.0/M_minus)),
+                   -1*Fraction(1, math.ceil(B_minus*1.0/M_minus))))
+    
+    mask = [True]*4
+    for i in range(4): #ew
+        for j in range(4):
+            if i!=j:
+                if (setups[i][0] >= setups[j][0] and setups[i][1] > setups[j][1]) or (setups[i][0] > setups[j][0] and setups[i][1] >= setups[j][1]):
+                    mask[j] = False
+    filt_setups = []
+    for i in range(4):
+        if mask[i]:
+            filt_setups.append(setups[i])
+
+    return list(set(filt_setups))
+
+def sparse_addition_broadcasting(A, b):
+    """
+    Adds sparse vector b to A. Retains A's format.
+    https://stackoverflow.com/questions/30741461/elementwise-addition-of-sparse-scipy-matrix-vector-with-broadcasting
+    """
+    An = A.tolil()
+    tp = b.tocoo()
+    for i, v in zip(tp.col, tp.data):
+        An[:, i] = sparse.coo_matrix(An[:, i].A + v)
+    return An.asformat(A.getformat())
+
+
 
 
