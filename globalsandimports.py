@@ -21,7 +21,7 @@ import pulp as pl
 
 import typing
 from numbers import Real
-from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Any, Optional, Generator, Protocol
+from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol
 
 class CallableSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
@@ -29,6 +29,10 @@ class CallableSolver(Protocol):
 
 class CallableDualSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
+        return None, None
+
+class CallableDenseSolver(Protocol):
+    def __call__(self, A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
 MODULE_EFFECTS = ['consumption', 'speed', 'productivity'] 
@@ -49,9 +53,9 @@ def multilienar_effect_ordering():
 MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
 
 MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in MODULE_EFFECTS])
-DEBUG_SOLVERS: bool = False #Should be set to True for debugging of solvers, will cause solvers that give infesible results to throw errors instead of being ignored.
-DEBUG_BLOCK_MODULES: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
-DEBUG_BLOCK_BEACONS: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_SOLVERS: bool = True #Should be set to True for debugging of solvers, will cause solvers that give infesible results to throw errors instead of being ignored.
+DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_TIME_DUAL_PROBLEM: bool = False #Should the standard problem be timed when solving a dual problem.
 DEBUG_TIME_ITERATIVE_PROBLEM: bool = False #Should the standard problem be timed when solving an iterative problem.
 SUPRESS_EXCEL_ERRORS: bool = False #Should Excel errors be supressed to prevent future factories from being dumped.

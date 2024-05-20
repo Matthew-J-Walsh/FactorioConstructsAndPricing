@@ -85,7 +85,7 @@ def calculate_drain(energy_source: dict, energy_usage: Fraction, fuel_name: str,
         drain[fuel_name] = -1 *(energy_usage / 30) / fuel_value
     return drain
 
-def link_techs(data: dict, COST_MODE: str) -> None:
+def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
     """
     Links the technologies from data.raw to eachother to the recipes, to the machines, and to the modules and all inbetween in all the funs ways. 
     Modifies data.raw directly.
@@ -124,6 +124,9 @@ def link_techs(data: dict, COST_MODE: str) -> None:
     for tech in enabled_technologies:
         tech['all_prereq'] = recursive_prereqs(tech)
 
+    tech_tree = TechnologyTree(list(enabled_technologies))
+    assert all(['tech_tree_identifier' in tech.keys() for tech in list(filter(lambda tech: not 'enabled' in tech.keys() or tech['enabled'], data['technology'].values()))]) #TODO remove me
+
     logging.info("Linking of all recipes to their technologies.")
     for recipe in data['recipe'].values(): #https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html
         recipe_techs = []
@@ -139,12 +142,12 @@ def link_techs(data: dict, COST_MODE: str) -> None:
                         recipe_techs.append([t['name'] for t in tech['all_prereq']]) #each element of recipe_techs will be a list representing a combination of techs that lets the recipe be used
                         tech['enabled_recipes'].append(recipe)
         recipe['enableable'] = enableable
-        recipe['limit'] = TechnologicalLimitation(recipe_techs)
+        recipe['limit'] = TechnologicalLimitation(tech_tree, recipe_techs)
 
     logging.info("Linking of all machines to their technologies.")
     for cata in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']: #https://lua-api.factorio.com/latest/prototypes/EntityWithOwnerPrototype.html
         for machine in data[cata].values():
-            machine['limit'] = TechnologicalLimitation()
+            machine['limit'] = TechnologicalLimitation(tech_tree)
             for recipe in data['recipe'].values():
                 if any([k==machine["name"] and v > 0 for k, v in recipe['vector'].items()]):
                     logging.info("Found machine "+machine['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
@@ -152,29 +155,31 @@ def link_techs(data: dict, COST_MODE: str) -> None:
                 
     logging.info("Linking of all modules to their technologies.")
     for module in data['module'].values(): #https://lua-api.factorio.com/latest/prototypes/ModulePrototype.html
-        module['limit'] = TechnologicalLimitation()
+        module['limit'] = TechnologicalLimitation(tech_tree)
         for recipe in data['recipe'].values():
             if any([k==module["name"] and v > 0 for k, v in recipe['vector'].items()]):
                 logging.info("Found module "+module['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 module['limit'] = module['limit'] + recipe['limit']
 
     for beacon in data['beacon'].values(): #https://lua-api.factorio.com/latest/prototypes/BeaconPrototype.html
-        beacon['limit'] = TechnologicalLimitation()
+        beacon['limit'] = TechnologicalLimitation(tech_tree)
         for recipe in data['recipe'].values():
             if any([k==beacon["name"] and v > 0 for k, v in recipe['vector'].items()]):
                 logging.info("Found module "+beacon['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 beacon['limit'] = beacon['limit'] + recipe['limit']
     
     for resource in data['resource'].values(): #https://lua-api.factorio.com/latest/prototypes/ResourceEntityPrototype.html
-        resource['limit'] = TechnologicalLimitation()
+        resource['limit'] = TechnologicalLimitation(tech_tree)
 
     for technology in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
         """
         Settings technologies to the limit of their previous technologies would make it far harder to produce science factories in the current implementation.
         An interface (and the current tools.py interface does) use the difference of TechnologicalLimitations to properly find which technologies to research.
         """
-        technology['limit'] = TechnologicalLimitation()
+        technology['limit'] = TechnologicalLimitation(tech_tree)
         #TechnologicalLimitation([t['name'] for t in tech['all_prereq'] if t['name']!=tech['name']])
+
+    return tech_tree
         
 def standardize_power(data: dict) -> None:
     """
@@ -598,7 +603,7 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
             if not 'tile_height' in machine.keys():
                 machine['tile_height'] = math.ceil(abs(machine['collision_box'][1][1] - machine['collision_box'][0][1]))
 
-def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
+def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> TechnologyTree:
     """
     Does all the premanagment steps on data.raw in an appropriate order.
 
@@ -619,7 +624,7 @@ def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_M
     vectorize_resources(data, RELEVENT_FLUID_TEMPERATURES)
     vectorize_technologies(data, COST_MODE)
     link_modules(data)
-    link_techs(data, COST_MODE)
+    return link_techs(data, COST_MODE)
 
 def average_result_amount(result: dict) -> Fraction:
     """

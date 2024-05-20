@@ -87,7 +87,7 @@ def test_solvers():
         A_dense = np.random.rand(m, n)
         rows, cols = np.nonzero(A_dense)
         data = A_dense[rows, cols]
-        A = sparse.csr_matrix((data, (rows, cols)), shape=A_dense.shape)
+        A = sparse.csr_matrix((data, (rows, cols)), shape=A_dense.shape).todense()
         b = np.random.rand(m)
         c = np.random.rand(n)
         results = []

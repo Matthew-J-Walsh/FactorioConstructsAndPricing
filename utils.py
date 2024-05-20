@@ -1,4 +1,5 @@
 from __future__ import annotations
+from calendar import c
 
 from globalsandimports import *
 
@@ -8,7 +9,17 @@ class CompressedVector(dict):
     """
     CompressedVector's are dicts where the values are all numbers and the values represent a dimension.
     """
+    hash_value: int | None
+
+    def __init__(self, input = None) -> None: # type: ignore
+        if input is None:
+            super().__init__()
+        else:
+            super().__init__(input) # type: ignore
+        self.hash_value = None
+
     def __add__(self, other: CompressedVector) -> CompressedVector:
+        self.hash_value = None
         new_cv = CompressedVector()
         for k, v in self.items():
             new_cv.key_addition(k, v)
@@ -17,31 +28,44 @@ class CompressedVector(dict):
         return new_cv
 
     def __mul__(self, multiplier: Fraction) -> CompressedVector:
+        self.hash_value = None
         dn = CompressedVector()
         for k, v in self.items():
             dn[k] = multiplier * v
         return dn
     
     def __rmul__(self, multiplier: Fraction) -> CompressedVector:
+        self.hash_value = None
         return self.__mul__(multiplier)
     
     def key_addition(self, key, value) -> None:
         """
         Single line adding key or adding to value in key.
         """
+        self.hash_value = None
         if key in self.keys():
             self[key] += value
         else:
             self[key] = value
     
+    def __hash__(self) -> int: # type: ignore
+        if self.hash_value is None:
+            self.hash_value = hash(tuple(sorted(self.items())))
+        return self.hash_value
+    
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, dict)
+        if hash(self)!=hash(other):
+            return False
         if set(self.keys())!=set(other.keys()):
             return False
         for k in self.keys():
             if other[k]!=self[k]:
                 return False
         return True
+
+    def __lt__(self, other: CompressedVector) -> bool:
+        return hash(self) < hash(other)
 
 def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lambda x: True) -> int:
     """
@@ -63,7 +87,158 @@ def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lamb
     else: #isinstance(l, dict):
         return sum([1 if func(e) else 0 for e in l.values()])
 
+class TechnologyTree:
+    """
+    A representation of the technology tree for more effective technology limitations.
+    Now we only need to store the 'caps' of the tree.
+    We want to be able to, given a cap researches of a technological limitation, add two tech limits, subtract them, 
+    and most importantly determine if all researches imply another tech limit (>=).
+    The fastest way to do this will be to provide a function that determines if a research is greater than, less than, equal to, or skew to another research.
+    Let A and B be researches.
+    A > B iff B is a prerequisite of A
+    A = B iff they are the same research
+    A < B iff A is a prerequisite of B
+    A X B (X = 'skew') iff None of the above 3 apply.
+    """
+    reference_map: dict[str, int]
+    inverse_map: dict[int, str]
+    comparison_table: np.ndarray
+
+    def __init__(self, technology_data: list[dict]) -> None:
+        self.reference_map = {}
+        self.inverse_map = {}
+        self.comparison_table = np.full((len(technology_data), len(technology_data)), 13, dtype=float) #random number to check for at end to make sure we filled it
+        for i, tech in enumerate(technology_data):
+            self.reference_map.update({tech['name']: i})
+            self.inverse_map.update({i: tech['name']})
+            tech.update({'tech_tree_identifier': i})
+            for j, other_tech in enumerate(technology_data):
+                if tech['name']==other_tech['name']:
+                    self.comparison_table[i, j] = 0
+                elif other_tech in tech['all_prereq']:
+                    self.comparison_table[i, j] = 1
+                elif tech in other_tech['all_prereq']:
+                    self.comparison_table[i, j] = -1
+                else:
+                    self.comparison_table[i, j] = float('nan')
+        assert not (self.comparison_table==13).any()
+
+    def compare(self, rA: int, rB: int) -> int:
+        """
+        A > B = 1 iff B is a prerequisite of A
+        A = B = 0 iff they are the same research
+        A < B = -1 iff A is a prerequisite of B
+        A X B = nan (X = 'skew') iff None of the above 3 apply.
+        """
+        return self.comparison_table[rA, rB]
+
+    def simplify(self, sets_of_references: Collection[Collection[int]]) -> frozenset[frozenset[int]]:
+        """
+        Given a list of possible lists research references simplify it to the minimal set of minimal sets of researches.
+        """
+        subsets = set()
+        for sublist in sets_of_references:
+            subset: set[int] = set()
+
+            for research in sublist:
+                covered = False
+                cleaved = []
+                for other_res in subset:
+                    if self.compare(other_res, research) >= 0:
+                        covered = True
+                    if self.compare(research, other_res) >= 0:
+                        cleaved.append(other_res)
+                
+                if not covered:
+                    subset.add(research)
+                    for cleave in cleaved:
+                        subset.remove(cleave)
+                else:
+                    assert len(cleaved)==0
+
+            subsets.add(frozenset(subset))
+
+        return frozenset(subsets)
+
+    def reference(self, sets_of_researches: Collection[Collection[str]]) -> frozenset[frozenset[int]]:
+        """
+        Given a list of possible lists researche names simplify it to the minimal set of minimal sets of researches.
+        """
+        sets_of_references: list[list[int]] = [[self.reference_map[research_str] for research_str in sublist] for sublist in sets_of_researches]
+        return self.simplify(sets_of_references)
+    
+    def techlimit_ge(self, A: TechnologicalLimitation, B: TechnologicalLimitation) -> bool:
+        for Asubsets in A.canonical_form:
+            for Bsubsets in B.canonical_form:
+                for Bresearch in Bsubsets:
+                    covered = False
+
+                    for Aresearch in Asubsets:
+                        if self.compare(Aresearch, Bresearch)>=0:
+                            covered = True
+                            break
+
+                    if not covered:
+                        return False
+
+        return True
+
 class TechnologicalLimitation:
+    """
+    Shortened to a 'limit' elsewhere in the program. Represents the technologies that must be researched in order
+    to unlock the specific object (recipe, machine, module, etc.).
+
+    Members
+    -------
+    canonical_form:
+        List of sets making up the canonical form.
+    """
+    tree: TechnologyTree
+    canonical_form: frozenset[frozenset[int]]
+
+    def __init__(self, tree: TechnologyTree, sets_of_researches: Collection[Collection[str]] = [], sets_of_references: Collection[Collection[int]] = []) -> None:
+        """
+        Parameters
+        ----------
+        TODO
+        """
+        assert len(sets_of_researches)==0 or len(sets_of_references)==0, "Can't take both input types"
+        self.tree = tree
+        if len(sets_of_references)==0:
+            self.canonical_form = self.tree.reference(sets_of_researches)
+        else:
+            self.canonical_form = self.tree.simplify(sets_of_references)
+        
+    def __repr__(self) -> str:
+        return str(self.canonical_form)
+
+    def __add__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
+        """
+        Addition betwen two TechnologicalLimitations is an AND operation.
+        """
+        assert self.tree == other.tree
+        if len(self.canonical_form)==0:
+            return other
+        if len(other.canonical_form)==0:
+            return self
+        added = set()
+        for s1 in self.canonical_form:
+            for s2 in other.canonical_form:
+                added.add(s1.union(s2))
+        return TechnologicalLimitation(self.tree, sets_of_references=added)
+
+    def __sub__(self, other: Collection[str]) -> list[frozenset[str]]:
+        """
+        Returns a list of possible additions to a set of researches that will result in the completion of limitation.
+        """
+        raise NotImplementedError()
+        return [frozenset(nodes.difference(other)) for nodes in self.canonical_form]
+        
+    def __ge__(self, other: TechnologicalLimitation) -> bool: #only permitted and only needed comparison, "Does having this unlocked mean that other is unlocked?"
+        assert self.tree == other.tree
+        return self.tree.techlimit_ge(self, other)
+
+class TechnologicalLimitationOld:
     """
     Shortened to a 'limit' elsewhere in the program. Represents the technologies that must be researched in order
     to unlock the specific object (recipe, machine, module, etc.).
@@ -75,12 +250,12 @@ class TechnologicalLimitation:
     """
     canonical_form: frozenset[frozenset[str]]
 
-    def __init__(self, list_of_nodes: Iterable[Iterable[str]] = []) -> None:
+    def __init__(self, list_of_nodes: Collection[Collection[str]] = []) -> None:
         """
         Parameters
         ----------
         list_of_nodes:
-            Iterable of iterable over nodes to make up this limitation.
+            Collection of iterable over nodes to make up this limitation.
         """
         temp_cf = set()
         for nodes in list_of_nodes:
@@ -91,7 +266,7 @@ class TechnologicalLimitation:
         return str(self.canonical_form)
         #return ", or\n\t".join([" and ".join(nodes) for nodes in self.canonical_form])
 
-    def __add__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
+    def __add__(self, other: TechnologicalLimitationOld) -> TechnologicalLimitationOld:
         """
         Addition betwen two TechnologicalLimitations is an AND operation.
         """
@@ -103,9 +278,9 @@ class TechnologicalLimitation:
         for s1 in self.canonical_form:
             for s2 in other.canonical_form:
                 added.add(s1.union(s2))
-        return TechnologicalLimitation(added)
+        return TechnologicalLimitationOld(added)
 
-    def __sub__(self, other: Iterable[str]) -> list[frozenset[str]]:
+    def __sub__(self, other: Collection[str]) -> list[frozenset[str]]:
         """
         Returns a list of possible additions to a set of researches that will result in the completion of limitation.
         """
@@ -126,7 +301,7 @@ class TechnologicalLimitation:
     #def __gt__(self, other: TechnologicalLimitation) -> bool:
     #    return self >= other and self != other
         
-    def __ge__(self, other: TechnologicalLimitation) -> bool: #only permitted and only needed comparison, "Does having this unlocked mean that other is unlocked?"
+    def __ge__(self, other: TechnologicalLimitationOld) -> bool: #only permitted and only needed comparison, "Does having this unlocked mean that other is unlocked?"
         if len(other.canonical_form)==0 and len(self.canonical_form)!=0:
             return True
         if len(self.canonical_form)==0 and len(other.canonical_form)!=0:
@@ -180,7 +355,7 @@ def convert_value_to_base_units(string: str) -> Fraction:
     except:
         raise ValueError(string)
 
-def technological_limitation_from_specification(data: dict, COST_MODE: str, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
+def technological_limitation_from_specification(instance, COST_MODE: str, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
     """
     Generates a TechnologicalLimitation from a specification. Works as a more user friendly way of getting useful TechnologicalLimitations.
 
@@ -205,13 +380,13 @@ def technological_limitation_from_specification(data: dict, COST_MODE: str, full
     
     assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
     for pack in fully_automated:
-        assert pack in data['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
+        assert pack in instance.data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
     for tech in extra_technologies:
-        assert tech in data['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+        assert tech in instance.data_raw['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
     for recipe in extra_recipes:
-        assert recipe in data['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
+        assert recipe in instance.data_raw['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
 
-    for tech in data['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+    for tech in instance.data_raw['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
         if COST_MODE in tech.keys():
             unit = tech[COST_MODE]['unit']
         else:
@@ -220,13 +395,13 @@ def technological_limitation_from_specification(data: dict, COST_MODE: str, full
             tech_obj.add(tech['name'])
     
     for tech in extra_technologies:
-        tech_obj = tech_obj.union(next(iter(data['technology'][tech]['limit'].canonical_form)))
+        tech_obj = tech_obj.union(next(iter(instance.data_raw['technology'][tech]['limit'].canonical_form)))
         tech_obj.add(tech)
     
     for recipe in extra_recipes:
-        tech_obj = tech_obj.union(data['recipe'][recipe]['limit'])
+        tech_obj = tech_obj.union(instance.data_raw['recipe'][recipe]['limit'])
     
-    return TechnologicalLimitation([tech_obj])
+    return TechnologicalLimitation(instance.tech_tree, [tech_obj])
 
 def evaluate_formulaic_count(expression: str, level: int) -> int:
     """
@@ -340,7 +515,7 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix | sparse.csr_mat
     Aax = A @ x
     return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
 
-def find_zeros(R_j_i: sparse.csr_matrix, s_i: np.ndarray) -> list[int]:
+def find_zeros(R_j_i: np.ndarray, s_i: np.ndarray) -> list[int]:
     """
     Given a factory finds which items have zero throughtput
 

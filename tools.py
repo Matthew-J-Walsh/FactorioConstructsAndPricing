@@ -40,6 +40,7 @@ class FactorioInstance():
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
     """
     data_raw: dict
+    tech_tree: TechnologyTree
     uncompiled_constructs: tuple[UncompiledConstruct, ...]
     complex_constructs: list[ComplexConstruct]
     disabled_constructs: list[ComplexConstruct]
@@ -70,7 +71,7 @@ class FactorioInstance():
         self.DEFAULT_TARGET_RESEARCH_TIME = DEFAULT_TARGET_RESEARCH_TIME
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
-        complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         logging.info("Building uncompiled constructs.")
         self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         logging.info("Building reference and catalyst lists.")
@@ -92,7 +93,7 @@ class FactorioInstance():
         """
         if self.compiled is None:
             self.compiled = ComplexConstruct(tuple([cc for cc in self.complex_constructs if not cc in self.disabled_constructs]), "Whole Game Construct") # type: ignore
-            self.compiled_constructs = [CompiledConstruct(uc, self) for uc in self.uncompiled_constructs]
+            #self.compiled_constructs = [CompiledConstruct(uc, self) for uc in self.uncompiled_constructs]
         return self.compiled
 
     def disable_complex_construct(self, target_name: str) -> None:
@@ -249,11 +250,12 @@ class FactorioInstance():
         p_full = CompressedVector({k: p_j[i] * scale for i, k in enumerate(self.reference_list)}) #normalization to prevent massive numbers.
         
         s = CompressedVector({})
-        positives = np.isclose(s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])
+        positives = np.logical_not(np.isclose(s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
         for i in range(s_i.shape[0]):
             if positives[i]:
                 s = s + s_i[i] * N_i[i]
-        k: CompressedVector = efficiency_analysis(self.compiled, p0_j, priced_indices, p_j, known_technologies)
+        valid_rows = np.asarray((R_j_i > 0).sum(axis=1)).flatten() > 0
+        k: CompressedVector = efficiency_analysis(self.compiled, p0_j, priced_indices, p_j, known_technologies, valid_rows)
 
         fc_i = C_j_i @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
@@ -360,14 +362,14 @@ class FactorioInstance():
         -------
         Specified TechnologicalLimitations
         """
-        return technological_limitation_from_specification(self.data_raw, self.COST_MODE, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
+        return technological_limitation_from_specification(self, self.COST_MODE, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
-def efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation) -> CompressedVector:
+def efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, valid_rows: np.ndarray) -> CompressedVector:
         efficiencies: CompressedVector = CompressedVector({})
         for sc in construct.subconstructs:
             if isinstance(sc, ComplexConstruct):
-                efficiencies.update({sc.ident: sc.efficiency_analysis(pricing_vector, priced_indices, dual_vector, known_technologies)})
-                efficiencies = efficiencies + efficiency_analysis(sc, pricing_vector, priced_indices, dual_vector, known_technologies)
+                efficiencies.update({sc.ident: sc.efficiency_analysis(pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows)})
+                efficiencies = efficiencies + efficiency_analysis(sc, pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows)
         return efficiencies
 
 def index_compiled_constructs(constructs: tuple[LinearConstruct, ...], ident: str) -> LinearConstruct:
@@ -636,8 +638,8 @@ class FactorioScienceFactory(FactorioFactory):
         self.instance = instance
         self.clear = [target for target in science_targets.keys() if target in self.instance.data_raw['tool'].keys()]
         self.previous_science = previous_science
-        covering_to = technological_limitation_from_specification(self.instance.data_raw, self.instance.COST_MODE, fully_automated=self.clear) + \
-                      TechnologicalLimitation([set([target for target in science_targets.keys() if target in self.instance.data_raw['technology'].keys()])])
+        covering_to = technological_limitation_from_specification(self.instance, self.instance.COST_MODE, fully_automated=self.clear) + \
+                      TechnologicalLimitation(instance.tech_tree, [set([target for target in science_targets.keys() if target in self.instance.data_raw['technology'].keys()])])
         
         last_coverage = self._previous_coverage()
 
@@ -646,7 +648,7 @@ class FactorioScienceFactory(FactorioFactory):
         else:
             self.time_target = time_target
 
-        targets = CompressedVector({k+RESEARCH_SPECIAL_STRING: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+        targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 
         super().__init__(instance, last_coverage, targets)
         #super().__init__(instance, last_coverage, science_targets)
@@ -663,7 +665,7 @@ class FactorioScienceFactory(FactorioFactory):
         """
         Determine what technologies will be unlocked when this factory is done.
         """
-        return self._previous_coverage() + TechnologicalLimitation([set([targ[:targ.rfind("=")] for targ in self.targets.keys()])])
+        return self._previous_coverage() + TechnologicalLimitation(self.instance.tech_tree, [set([targ[:targ.rfind("=")] for targ in self.targets.keys()])])
 
     def retarget(self, targets: CompressedVector, retainment: float = RETAINMENT_VALUE) -> None:
         """
@@ -681,8 +683,8 @@ class FactorioScienceFactory(FactorioFactory):
         """
         #assert not any([target in self.instance.data_raw['tool'].keys() for target in targets.keys()]), "retarget should NEVER be given a tool. Only researches."
         assert all([t in self.targets.keys() for t in targets]), "retarget should never add new targets... yet."
-        covering_to: TechnologicalLimitation = technological_limitation_from_specification(self.instance.data_raw, self.instance.COST_MODE, fully_automated=self.clear) + \
-                      TechnologicalLimitation([set([target for target in targets.keys()])])
+        covering_to: TechnologicalLimitation = technological_limitation_from_specification(self.instance, self.instance.COST_MODE, fully_automated=self.clear) + \
+                      TechnologicalLimitation(self.instance.tech_tree, [set([target for target in targets.keys()])])
         last_coverage: TechnologicalLimitation = self._previous_coverage()
         
         targets = CompressedVector({k: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage))}) # type: ignore

@@ -11,14 +11,8 @@ c.txt
 simp_rev_A_eq.txt
 simp_rev_b_eq.txt
 x.txt
-RunResultsSaveModules.xlsx
-RunResultsSave.xlsx
 /Clp-releases.1.17.9-w64-msvc16-md
 /CLP
 Af.txt
 Aff.txt
-RunResultsSaveBeacons.xlsx
-~$ResultAnalysis.xlsx
-ResultAnalysis.xlsx
-RunResultsSaveSave.xlsx
-~$RunResultsSave.xlsx
+*.xlsx

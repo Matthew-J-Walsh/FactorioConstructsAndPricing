@@ -3,7 +3,7 @@ from globalsandimports import *
 from lookuptables import *
 from utils import *
 from scipysolvers import generate_scipy_linear_solver
-from pulpsolvers import generate_pulp_linear_solver, generate_pulp_dual_solver
+from pulpsolvers import generate_pulp_linear_solver, generate_pulp_dual_solver, generate_pulp_dense_solver, pulp_dense_solver
 from scipsolvers import generate_scip_linear_solver, generate_scip_dual_solver
 from highssolvers import generate_highs_linear_solver, generate_highs_dual_solver, generate_highs_dual_solver_pythonic
 
@@ -69,6 +69,61 @@ def verified_dual_solver(solver: CallableDualSolver, name: str) -> CallableDualS
     Solver with output verification and error catching added.
     """
     def verified(A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
+        try:
+            logging.debug("Trying the "+name+" solver.")
+            primal, dual = solver(A, b, c=c, g=g)
+            if not (primal is None or dual is None):
+                if not linear_transform_is_gt(A, primal, b).all():
+                    if DEBUG_SOLVERS:
+                        raise AssertionError(np.max(np.abs(A @ primal - b)))
+                    else:
+                        logging.warning(name+" gave a result but result wasn't feasible. As debugging is off this won't throw an error. Returning None.")
+                        logging.warning("\tLargest recorded error is: "+str(A @ primal - b))
+                        return None, None
+                if not linear_transform_is_gt(-1 * A.T, dual, -1 * c).all():
+                    if DEBUG_SOLVERS:
+                        raise AssertionError(np.max(np.abs(A.T @ dual - c)))
+                    else:
+                        logging.warning(name+" gave a result but dual wasn't feasible. As debugging is off this won't throw an error. Returning None.")
+                        logging.warning("\tLargest recorded error is: "+str(A.T @ dual - c))
+                        return None, None
+                if not np.isclose(np.dot(primal, c), np.dot(dual, b), rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']):
+                    if DEBUG_SOLVERS:
+                        raise AssertionError(np.dot(primal, c) - np.dot(dual, b))
+                    else:
+                        logging.warning(name+" gave a result but didn't forfill strong duality. As debugging is off this won't throw an error. Returning None.")
+                        logging.warning("\tDuality gap is: "+str(np.dot(primal, c))+", "+str(np.dot(dual, b)))
+                        return None, None
+            else:
+                logging.debug("Solver returned None.")
+            return primal, dual
+        except:
+            if DEBUG_SOLVERS:
+                raise RuntimeError(name)
+            logging.warning(name+" threw an error. Returning None.")
+            return None, None
+    return verified
+
+def verified_dense_solver(solver: CallableDenseSolver, name: str) -> CallableDenseSolver:
+    """
+    Returns a instance of the dual solver that verifies the result if given. Also eats errors unless debugging.
+
+    Parameters
+    ----------
+    solver:
+        Optimization function to use. Should solve problems of the form: 
+        A@x>=b, x>=0, minimize c*x.
+        It should also provide the dual solution to:
+        A.T@y<=c, y>=0, minimize b.T*y. 
+        If it cannot solve the problem for whatever reason it should return None.
+    name:
+        What to refer to solver as when giving warnings and throwing errors.
+
+    Returns
+    -------
+    Solver with output verification and error catching added.
+    """
+    def verified(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         try:
             logging.debug("Trying the "+name+" solver.")
             primal, dual = solver(A, b, c=c, g=g)
@@ -288,11 +343,13 @@ ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_
 TIMEING_TEST_DUAL_LP_SOLVERS = list(map(mass_dual_solver_timing_test, DUAL_LP_SOLVERS_PRIMAL))
 #ITERATIVE_DUAL_LP_SOLVERS = list(map(iterative_dual_informed_unrelaxation, DUAL_LP_SOLVERS_PRIMAL))
 
-BEST_LP_SOLVER: CallableDualSolver = verified_dual_solver(generate_pulp_dual_solver(), "pulp CBC")
+#BEST_LP_SOLVER: CallableDualSolver = verified_dual_solver(generate_pulp_dual_solver(), "pulp CBC")
+#BEST_LP_SOLVER: CallableDenseSolver = verified_dense_solver(generate_pulp_dense_solver(), "pulp CBC")
+BEST_LP_SOLVER = pulp_dense_solver
 
 
 def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, p0_j: np.ndarray, priced_indices: np.ndarray, known_technologies: TechnologicalLimitation,
-                                       dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, sparse.csr_matrix, sparse.csr_matrix, np.ndarray]:
+                                       dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
     Attempts to use the various linear programming solvers until one works. 
@@ -334,13 +391,23 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
             raise RuntimeError("Unable to form factory even with slack.")
         
         new_vectors, new_costs, new_idents = construct.reduce(p0_j, priced_indices, dual, known_technologies)
-        true_news = np.array([i for i in range(new_idents.shape[0]) if not any([idents[j]==new_idents[i] for j in range(idents.shape[0])])])
+        #true_news = np.array([i for i in range(new_idents.shape[0]) if not any([idents[j]==new_idents[i] for j in range(idents.shape[0])])]) #pretty slow line
+        new_mask = np.full(new_idents.shape[0], True, dtype=bool)
+        for i in range(new_mask.shape[0]):
+            for j in range(idents.shape[0]):
+                if new_idents[i]==idents[j]:
+                    new_mask = False
+                    break
+                if hash(new_idents[i]) > hash(idents[j]):
+                    break
+        true_news = np.where(new_mask)[0]
         if len(true_news)==0:
             break
-        
+
         suboptimal_columns = (vectors.T @ dual) < .99 * (c_i)
-        vectors = sparse.csr_matrix(sparse.hstack([vectors[np.where(np.logical_not(suboptimal_columns))[0]], new_vectors[true_news]], format="csr"))
-        costs = sparse.csr_matrix(sparse.hstack([costs[np.where(np.logical_not(suboptimal_columns))[0]], new_costs[true_news]], format="csr"))
+
+        vectors = np.concatenate([vectors[:, np.where(np.logical_not(suboptimal_columns))[0]], new_vectors[:, true_news]], axis=1)
+        costs = np.concatenate([costs[:, np.where(np.logical_not(suboptimal_columns))[0]], new_costs[:, true_news]], axis=1)
         idents = np.concatenate((idents[np.where(np.logical_not(suboptimal_columns))[0]], new_idents[true_news]))
         
     return primal, dual, vectors, costs, idents

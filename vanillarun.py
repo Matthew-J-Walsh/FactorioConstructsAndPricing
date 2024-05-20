@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(filename="logfiles\\vanillarun.log", level=logging.INFO)
+logging.basicConfig(filename="logfiles\\vanillarun.log", level=logging.INFO, filemode='w')
 logger = logging.getLogger()
 from tools import *
 

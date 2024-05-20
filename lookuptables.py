@@ -19,7 +19,7 @@ def encode_effects_vector_to_multilinear(effect_vector: np.ndarray):
                 multilinear[i] *= effect_vector[j]
     return multilinear
 
-def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: tuple[str, ...], base_productivity: Fraction):
+def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: tuple[str, ...], base_productivity: Fraction) -> sparse.csr_matrix:
     """
     Takes a CompressedVector of changes and a dictionary of how different effects effect the outcome and returns the multilinear effect form.
     """
@@ -45,8 +45,8 @@ class ModuleLookupTable:
     building_height: int
     avaiable_modules: list[tuple[str, bool, bool]]
     base_productivity: Fraction
-    effect_transform: sparse.csr_matrix
-    cost_transform: sparse.csr_matrix
+    effect_transform: np.ndarray
+    cost_transform: np.ndarray
     module_setups: np.ndarray
     effect_table: np.ndarray
     module_names: list[str]
@@ -67,12 +67,12 @@ class ModuleLookupTable:
 
         count = sum([len(list(module_setup_generator(avaiable_modules, module_count, (self.building_width, self.building_height), beacon))) for beacon in [None]+list(instance.data_raw['beacon'].values())])
 
-        self.effect_transform = sparse.csr_matrix((count, len(MODULE_EFFECT_ORDERING)))
-        self.cost_transform = sparse.csr_matrix((count, len(instance.reference_list)))
+        self.effect_transform = np.zeros((count, len(MODULE_EFFECT_ORDERING)))
+        self.cost_transform = np.zeros((count, len(instance.reference_list)))
         #self.paired_transform = sparse.csr_matrix((count, ))
         self.module_setups = np.zeros((count, len(self.module_names)), dtype=int)
         self.effect_table = np.zeros((count, len(MODULE_EFFECTS)))
-        self.limits = np.array([TechnologicalLimitation([]) for _ in range(count)], dtype=object)
+        self.limits = np.array([TechnologicalLimitation(instance.tech_tree, []) for _ in range(count)], dtype=object)
 
         i = 0
         for beacon in [None]+list(instance.data_raw['beacon'].values()):
@@ -82,7 +82,7 @@ class ModuleLookupTable:
                 for mod, count in module_set.items():
                     module_setup_vector[self.module_names.index(mod)] = count
 
-                self.limits[i] = self.limits[i] + (beacon['limit'] if isinstance(beacon, dict) else TechnologicalLimitation([]))
+                self.limits[i] = self.limits[i] + (beacon['limit'] if isinstance(beacon, dict) else TechnologicalLimitation(instance.tech_tree, []))
 
                 effect_vector = np.ones(len(MODULE_EFFECTS))
                 effect_vector[MODULE_EFFECTS.index("productivity")] += float(self.base_productivity)
@@ -100,14 +100,16 @@ class ModuleLookupTable:
                 
                 self.effect_transform[i, :] = encode_effects_vector_to_multilinear(effect_vector)
                 #the two following lines are very slow. lil_matrix?
-                self.cost_transform[i, :] = sparse.csr_array(([e for e in effected_cost.values()], ([0 for _ in effected_cost], [instance.reference_list.index(d) for d in effected_cost.keys()])), shape=(1, len(instance.reference_list)), dtype=np.longdouble)
+                #self.cost_transform[i, :] = sparse.csr_array(([e for e in effected_cost.values()], ([0 for _ in effected_cost], [instance.reference_list.index(d) for d in effected_cost.keys()])), shape=(1, len(instance.reference_list)), dtype=np.longdouble)
+                for k, v in effected_cost.items():
+                    self.cost_transform[i, instance.reference_list.index(k)] = v
                 self.module_setups[i, :] = module_setup_vector
                 self.effect_table[i, :] = effect_vector
 
                 i += 1
 
     #Total time: 10.8505 s
-    def evaluate(self, effect_vector: sparse.csr_array, cost_vector: np.ndarray, paired_cost_vector: sparse.csr_array, base_cost: float, known_technologies: TechnologicalLimitation) -> int:
+    def evaluate(self, effect_vector: np.ndarray, cost_vector: np.ndarray, priced_indices: np.ndarray, paired_cost_vector: np.ndarray, base_cost: float) -> int:
         """
         Evaluates a effect weighting vector pair to find the best module combination.
 
@@ -124,7 +126,10 @@ class ModuleLookupTable:
         -------
         Index of the optimal module configuration
         """
-        mask = np.where([known_technologies >= self.limits[i] for i in range(self.limits.shape[0])])[0]
+        #mask = np.where([known_technologies >= self.limits[i] for i in range(self.limits.shape[0])])[0] #brutally insanely bad 7986.29/8700s
+        priced_indices_arr = np.ones(self.cost_transform.shape[1])
+        priced_indices_arr[priced_indices] = 0
+        mask = np.logical_not(self.cost_transform @ priced_indices_arr)
         return np.argmax((self.effect_transform @ effect_vector)[mask] / (self.cost_transform @ cost_vector + self.effect_transform @ paired_cost_vector + base_cost)[mask]) # type: ignore
 
     def generate(self, index: int):
@@ -170,9 +175,9 @@ class CompiledConstruct:
     origin: UncompiledConstruct
     lookup_table: ModuleLookupTable
     effect_transform: sparse.csr_matrix
-    base_cost_vector: sparse.csr_array
+    base_cost_vector: np.ndarray
     required_price_indices: np.ndarray
-    paired_cost_transform: sparse.csr_matrix
+    paired_cost_transform: np.ndarray
 
     def __init__(self, origin: UncompiledConstruct, instance):
         self.origin = origin
@@ -185,18 +190,23 @@ class CompiledConstruct:
         for item in instance.catalyst_list:
             if item in origin.base_inputs.keys():
                 true_cost = true_cost + CompressedVector({item: -1 * origin.base_inputs[item]})
-        self.base_cost_vector = sparse.csr_array(([e for e in true_cost.values()], ([instance.reference_list.index(d) for d in true_cost.keys()], [0 for _ in true_cost])), shape=(len(instance.reference_list),1), dtype=np.longdouble)
+        
+        self.base_cost_vector = np.zeros(len(instance.reference_list))
+        for k, v in true_cost.items():
+            self.base_cost_vector[instance.reference_list.index(k)] = v
+        
+        #self.base_cost_vector = sparse.csr_array(([e for e in true_cost.values()], ([instance.reference_list.index(d) for d in true_cost.keys()], [0 for _ in true_cost])), shape=(len(instance.reference_list),1), dtype=np.longdouble)
         
         self.required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
 
-        self.paired_cost_transform = sparse.csr_matrix((len(instance.reference_list), len(MODULE_EFFECT_ORDERING)))
+        self.paired_cost_transform = np.zeros((len(instance.reference_list), len(MODULE_EFFECT_ORDERING)))
         #for transport_building in LOGISTICAL_COST_MULTIPLIERS.keys():
         #    if transport_building=="pipe":
         #        base_throughput = sum([v for k, v in origin.deltas.items() if k in instance.data_raw['fluid'].keys()])
         #    else:
         #        base_throughput = sum([v for k, v in origin.deltas.items() if k not in instance.data_raw['fluid'].keys()])
             
-    def vector(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[sparse.csr_array, sparse.csr_array, str | None]:
+    def vector(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, str | None]:
         """
         Produces the best vector possible given a pricing model.
 
@@ -210,16 +220,18 @@ class CompiledConstruct:
         A column vector, its true cost vector, and its ident.
         If the construct surpasses current tech limits it returns null size vectors and None for ident.
         """
-        if not (known_technologies >= self.origin.limit) or not np.in1d(self.required_price_indices, priced_indices).all():
-            return sparse.csr_array((pricing_vector.shape[0], 0)), sparse.csr_array((pricing_vector.shape[0], 0)), None
+        #TODO: make priced_indices just a mask instead of the np.where-ified version
+        if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
+            return np.zeros((pricing_vector.shape[0], 0)), np.zeros((pricing_vector.shape[0], 0)), None
         if dual_vector is None:
             return self._generate_vector(0)
         else:
-            column, cost, ident = self._generate_vector(self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, self.paired_cost_transform.T @ pricing_vector, (self.base_cost_vector.T @ pricing_vector)[0], known_technologies))
+            #rough multiplications
+            column, cost, ident = self._generate_vector(self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, self.paired_cost_transform.T @ pricing_vector, np.dot(self.base_cost_vector, pricing_vector)))
             return column, cost, ident
 
     #Total time: 341.247 s UM WHAT?
-    def _generate_vector(self, index: int) -> tuple[sparse.csr_array, sparse.csr_array, str]:
+    def _generate_vector(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
         """
         Calculates the vector information of a module setup.
 
@@ -234,23 +246,12 @@ class CompiledConstruct:
         """
         module_setup = self.lookup_table.module_setups[index]
         ident = self.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.lookup_table.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
-        
-        TB1 = self.lookup_table.effect_transform[index]
-        TB2 = self.lookup_table.effect_transform.T
-        TB3 = self.lookup_table.effect_transform[index].T
-        TB4 = self.paired_cost_transform @ self.lookup_table.effect_transform.T
-        TB5 = self.paired_cost_transform @ TB3
-        TBP1 = sparse.csc_array(TB3)
-        TBP2 = sparse.csc_array(self.paired_cost_transform)
-        TBA1 = sparse.csr_array(TBP2 @ TBP1)
-        TBA2 = sparse.csr_array(self.paired_cost_transform @ TBP1)
 
-        costA = self.lookup_table.cost_transform[index].T
-        costB = sparse.csr_array(self.paired_cost_transform @ self.lookup_table.effect_transform[index].T)
-        cost = sparse.csr_array(costA + costB + self.base_cost_vector)
-        column = sparse.csr_matrix((self.lookup_table.effect_transform[index] @ self.effect_transform).T)
+        column: np.ndarray = self.lookup_table.effect_transform[index] @ self.effect_transform #slow line
+        cost: np.ndarray = self.lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, self.lookup_table.effect_transform[index]) + self.base_cost_vector
 
-        return column, cost, ident # type: ignore
+        #return sparse.csr_array(column).T, sparse.csr_array(cost).T, ident # type: ignore
+        return np.reshape(column, (-1, 1)), np.reshape(cost, (-1, 1)), ident
 
     def __repr__(self) -> str:
         return self.origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
@@ -292,7 +293,7 @@ class ComplexConstruct:
         else:
             self.stabilization[row] = direction
 
-    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[sparse.csr_matrix, sparse.csr_matrix, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """
         Produces the best vector possible given a pricing model.
 
@@ -307,8 +308,8 @@ class ComplexConstruct:
         """
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
         vectors, costs, idents = zip(*[sc.vectors(pricing_vector, priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]) # type: ignore
-        vector = sparse.csr_matrix(sparse.hstack(vectors))
-        cost = sparse.csr_matrix(sparse.hstack(costs))
+        vector = np.concatenate(vectors, axis=1)#sparse.csr_matrix(sparse.hstack(vectors))
+        cost = np.concatenate(costs, axis=1)#sparse.csr_matrix(sparse.hstack(costs))
         ident: np.ndarray[CompressedVector, Any] = np.concatenate(idents)
 
         for stab_row, stab_dir in self.stabilization.items():
@@ -316,38 +317,39 @@ class ComplexConstruct:
                 violating_columns = np.where(vector[:, stab_row] < 0)[0]
                 unviolating_columns = np.where(vector[:, stab_row] > 0)[0]
                 assert len(unviolating_columns)>0, "Impossible stabilization? "+str(stab_row)
-                fixed_columns: list[sparse.csr_array | sparse.csr_matrix] = [vector[unviolating_columns]]
-                fixed_costs: list[sparse.csr_array | sparse.csr_matrix] = [cost[unviolating_columns]]
+                fixed_columns: list[np.ndarray] = [vector[unviolating_columns]]
+                fixed_costs: list[np.ndarray] = [cost[unviolating_columns]]
                 fixed_idents: np.ndarray[CompressedVector, Any] = ident[unviolating_columns]
                 for vcol, ucol in itertools.product(violating_columns, unviolating_columns):
-                    fixed_columns.append(sparse.csr_array(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol]))
+                    fixed_columns.append(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol])
                     assert fixed_columns[-1][stab_row]==0 #todo remove me
-                    fixed_costs.append(sparse.csr_array(cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * cost[vcol]))
+                    fixed_costs.append(cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * cost[vcol])
                     fixed_idents = np.concatenate((fixed_idents, np.array([ident[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) *ident[ucol]])))
-                vector = sparse.csr_matrix(sparse.hstack(fixed_columns))
-                cost = sparse.csr_matrix(sparse.hstack(fixed_costs))
+                vector = np.concatenate(fixed_columns, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_columns))
+                cost = np.concatenate(fixed_costs, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_costs))
                 ident = fixed_idents
             if stab_dir <= 0:
                 violating_columns = np.where(vector[:, stab_row] > 0)[0]
                 unviolating_columns = np.where(vector[:, stab_row] < 0)[0]
                 assert len(unviolating_columns)>0, "Impossible stabilization? "+str(stab_row)
-                fixed_columns: list[sparse.csr_array | sparse.csr_matrix] = [vector[unviolating_columns]]
-                fixed_costs: list[sparse.csr_array | sparse.csr_matrix] = [cost[unviolating_columns]]
+                fixed_columns: list[np.ndarray] = [vector[unviolating_columns]]
+                fixed_costs: list[np.ndarray] = [cost[unviolating_columns]]
                 fixed_idents: np.ndarray[CompressedVector, Any] = ident[unviolating_columns]
                 for vcol, ucol in itertools.product(violating_columns, unviolating_columns):
-                    fixed_columns.append(sparse.csr_array(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol]))
+                    fixed_columns.append(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol])
                     assert fixed_columns[-1][stab_row]==0 #todo remove me
-                    fixed_costs.append(sparse.csr_array(cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * cost[vcol]))
+                    fixed_costs.append(cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * cost[vcol])
                     fixed_idents = np.concatenate((fixed_idents, np.array([ident[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) *ident[ucol]])))
-                vector = sparse.csr_matrix(sparse.hstack(fixed_columns))
-                cost = sparse.csr_matrix(sparse.hstack(fixed_costs))
+                vector = np.concatenate(fixed_columns, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_columns))
+                cost = np.concatenate(fixed_costs, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_costs))
                 ident = fixed_idents
 
         return vector, cost, ident
 
-    def reduce(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[sparse.csr_matrix, sparse.csr_matrix, np.ndarray[CompressedVector, Any]]:
+    def reduce(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """
         Produces the best vector possible given a pricing model. Additionally removes columns that cannot be used because their inputs cannot be made.
+        Additionally sorts the columns (based on their hash hehe).
 
         Parameters
         ----------
@@ -374,9 +376,13 @@ class ComplexConstruct:
         cost = cost[:, mask]
         ident = ident[mask]
 
-        return vector, cost, ident
+        ident_hashes = np.array([hash(ide) for ide in ident])
+        sort_list = ident_hashes.argsort()
 
-    def efficiency_analysis(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation) -> float:
+        #return vector, cost, ident
+        return vector[:, sort_list], cost[:, sort_list], ident[sort_list]
+
+    def efficiency_analysis(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, valid_rows: np.ndarray) -> float:
         """
         Determines the best possible realizable efficiency of the construct.
 
@@ -392,9 +398,15 @@ class ComplexConstruct:
         Efficiency decimal, 1 should mean as efficient as optimal factory elements.
         """
         vector, cost, ident = self.vectors(pricing_vector, priced_indices, dual_vector, known_technologies)
+        mask = np.logical_not(np.asarray((vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten())
+        
+        vector = vector[:, mask]
+        cost = cost[:, mask]
+        ident = ident[mask]
+
         if vector.shape[1]==0:
             return np.nan
-        return np.max(vector.T @ dual_vector)
+        return np.max(np.divide(vector.T @ dual_vector, cost.T @ pricing_vector)) # type: ignore
 
     def __repr__(self) -> str:
         return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
@@ -413,7 +425,7 @@ class SingularConstruct(ComplexConstruct):
     def stabilize(self, row: int, direction: int) -> None:
         raise RuntimeError("Cannot stabilize a singular constuct.")
 
-    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[sparse.csr_matrix, sparse.csr_matrix, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """
         Produces the best vector possible given a pricing model.
 
@@ -430,6 +442,6 @@ class SingularConstruct(ComplexConstruct):
         """
         vector, cost, ident = self.subconstructs[0].vector(pricing_vector, priced_indices,  dual_vector, known_technologies) # type: ignore
         if ident is None:
-            return sparse.csr_matrix(vector), sparse.csr_matrix(cost), np.array([])
-        return sparse.csr_matrix(vector), sparse.csr_matrix(cost), np.array([CompressedVector({ident: 1})])
+            return vector, cost, np.array([])
+        return vector, cost, np.array([CompressedVector({ident: 1})])
 
