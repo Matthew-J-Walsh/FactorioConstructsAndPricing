@@ -3,9 +3,9 @@ from constructs import *
 from lpproblems import *
 
 
-def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pricing_model: np.ndarray, initial_pricing_keys: list[int], 
+def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pricing_model: np.ndarray, initial_pricing_keys: np.ndarray, 
                                          output_pricing_model: np.ndarray, zfluxes: list[int], known_technologies: TechnologicalLimitation, 
-                                         targets: dict[int, float], scale: float) -> float | None:
+                                         targets: dict[int, float], scale: float, spatial_mode: bool) -> float | None:
     """
     Computes the efficiency of a complex construct producing a target given a pricing model.
 
@@ -32,14 +32,9 @@ def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pr
     -------
     Decimal Efficiency
     """
-    raise NotImplementedError("Remove me")
-    #logging.info("========================================")
-    #logging.info(construct)
-    #logging.info(known_technologies)
-    #logging.info(initial_pricing_keys)
-    A, C, N1, N0, Recovery = construct.compile(initial_pricing_model, initial_pricing_keys, known_technologies, False)
-    c = C.T @ initial_pricing_model
-    Acsr = A.tocsr()
+    raise ValueError("todo")
+    vectors, costs, idents = construct.vectors(initial_pricing_model, initial_pricing_keys, output_pricing_model, known_technologies, spatial_mode=spatial_mode)
+    c = costs.T @ initial_pricing_model
     valid_rows = list(set(targets.keys()).union(set(zfluxes)))
     valid_rows.sort() #do we really need? This is a disaster
     valid_rows = np.array(valid_rows)
@@ -49,22 +44,6 @@ def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pr
         col_values[np.where(valid_rows == k)[0][0]] = v
     masked_Acsr = Acsr[valid_rows,:]
     masked_A = sparse.coo_matrix(masked_Acsr)
-    #logging.info(targets)
-    #logging.info(zfluxes)
-    #logging.info(valid_rows)
-    #logging.info(col_values)
-    #logging.info(A.shape)
-    #logging.info(c.shape)
-    #logging.info(output_pricing_model.shape)
-    #logging.info(type(masked_A))
-    #logging.info(masked_A.shape)
-    #logging.info(masked_A)
-    #logging.info(type(col_values))
-    #logging.info(col_values.shape)
-    #logging.info(col_values)
-    #logging.info(type(c - (Acsr.T @ output_pricing_model)))
-    #logging.info((c - (Acsr.T @ output_pricing_model)).shape)
-    #logging.info((c - (Acsr.T @ output_pricing_model)))
 
     cost_vec = (c - (Acsr.T @ output_pricing_model)).copy()
 
@@ -75,22 +54,8 @@ def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pr
     
     assert linear_transform_is_gt(masked_A, primal_diluted, col_values).all()
     
-    #logging.info(primal_diluted)
-    #logging.info(dual)
-    
-    #logging.info((cost_vec[None, :]).shape)
-    #logging.info(masked_Acsr.shape)
     modified_A: sparse.coo_matrix = sparse.vstack([cost_vec[None, :], masked_Acsr], format="coo") # type: ignore
-    #logging.info(A)
-    #logging.info(modified_A)
     modified_B = np.concatenate([np.array([np.dot(cost_vec, primal_diluted)]), col_values])
-    #logging.info(col_values)
-    #logging.info(modified_B)
-    #logging.info(type(modified_A))
-    #logging.info(modified_A.shape)
-    #logging.info(modified_B.shape)
-    #logging.info(np.ones(A.shape[1]).shape)
-    #logging.info(primal_diluted.shape)
     assert linear_transform_is_gt(modified_A, primal_diluted, modified_B).all()
     
     primal, dual = BEST_LP_SOLVER(
@@ -99,21 +64,9 @@ def compute_complex_construct_efficiency(construct: ComplexConstruct, initial_pr
     if primal is None or dual is None:
         raise RuntimeError("Alegedly no primal found but we have one.")
     
-    #logging.info(primal)
-    #logging.info(dual)
     assert linear_transform_is_gt(masked_A, primal, col_values).all()
-    #logging.info(np.dot(primal_diluted, cost_vec))
-    #logging.info(np.dot(primal, cost_vec))
-    #assert np.isclose(np.dot(primal_diluted, cost_vec), np.dot(primal, cost_vec), rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']), str(np.dot(primal_diluted, cost_vec))+", "+str(np.dot(primal, cost_vec))
-    #logging.info(output_pricing_model)
-    #logging.info(Acsr.T @ output_pricing_model)
-    #logging.info(primal)
-    #logging.info(np.multiply(Acsr.T @ output_pricing_model, primal))
-    #logging.info(np.dot(Acsr.T @ output_pricing_model, primal))
-    #logging.info(np.dot(c, primal))
     
     return np.dot(Acsr.T @ output_pricing_model, primal) /  np.dot(c, primal) / scale
-    #return np.dot((Acsr / c[:, None]).tocsr().T @ output_pricing_model, primal) / scale # type: ignore
 
 def compute_transportation_densities(data: dict, pricing_model: CompressedVector) -> list[tuple[str, str, Fraction | float]]:
     """

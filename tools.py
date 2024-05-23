@@ -47,6 +47,7 @@ class FactorioInstance():
     compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
     catalyst_list: tuple[str, ...]
+    spatial_pricing: np.ndarray
     COST_MODE: str
     DEFAULT_TARGET_RESEARCH_TIME: Fraction
     RELEVENT_FLUID_TEMPERATURES: dict
@@ -80,6 +81,12 @@ class FactorioInstance():
             DEBUG_REFERENCE_LIST.append(k)
         
         self.disabled_constructs = []
+
+        self.spatial_pricing = np.zeros(len(self.reference_list))
+        for mining_drill in self.data_raw['mining-drill'].values():
+            self.spatial_pricing[self.reference_list.index(mining_drill['name'])] = mining_drill['tile_width'] * mining_drill['tile_height']
+        for beacon in self.data_raw['beacon'].values():
+            self.spatial_pricing[self.reference_list.index(beacon['name'])] = beacon['tile_width'] * beacon['tile_height']
 
         if not nobuild:
             logging.info("Building complex constructs.")
@@ -189,7 +196,8 @@ class FactorioInstance():
         
         return new_name
 
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector]:
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, 
+                         primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None, spatial_mode: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector]:
         """
         Solves for a target output vector given a tech level and reference pricing model.
 
@@ -236,15 +244,21 @@ class FactorioInstance():
             for k, v in dual_guess.items():
                 ginv_j[self.reference_list.index(k)] = v
 
-        logging.info("Starting a dual problem.")
-        s_i, p_j, R_j_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, p0_j, priced_indices, known_technologies, ginv_j)
+        if spatial_mode:
+            logging.info("Starting a two-phase dual problem.")
+            #s_i, p_j, R_j_i, C_j_i, N_i = solve_spatial_mode_factory_optimization_problem(self.compiled, u_j, self.spatial_pricing, p0_j, priced_indices, known_technologies, ginv_j)
+            s_i, p_j, R_j_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, self.spatial_pricing, priced_indices, known_technologies, ginv_j, spatial_mode=True)
+            c_i = C_j_i.T @ self.spatial_pricing
+        else:
+            #raise ValueError("TESTING, REMOVE ME LATER")
+            logging.info("Starting a dual problem.")
+            s_i, p_j, R_j_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, p0_j, priced_indices, known_technologies, ginv_j)
+            c_i = C_j_i.T @ p0_j        
+            assert linear_transform_is_gt(-1 * (R_j_i / c_i[None, :]).T, p_j, -1 * np.ones_like(c_i)).all(), [self.reference_list[i] for i in np.where((R_j_i / c_i[None, :]).T @ p_j > 0)[0]] # type: ignore
         logging.info("Reconstructing factory.")
-        c_i = C_j_i.T @ p0_j
 
         s_i[np.where(s_i < 0)] = 0 #0 is theoretically impossible, so we remove them to remove issues
 
-        assert linear_transform_is_gt(-1 * (R_j_i / c_i[None, :]).T, p_j, -1 * np.ones_like(c_i)).all(), (R_j_i / c_i[None, :]).T @ p_j # type: ignore
-        
         scale = 100 / np.max(p_j) #normalization to prevent massive numbers.
         p = CompressedVector({k: p_j[self.reference_list.index(k)] * scale for k in targets.keys()})
         p_full = CompressedVector({k: p_j[i] * scale for i, k in enumerate(self.reference_list)}) #normalization to prevent massive numbers.
@@ -255,7 +269,7 @@ class FactorioInstance():
             if positives[i]:
                 s = s + s_i[i] * N_i[i]
         valid_rows = np.asarray((R_j_i > 0).sum(axis=1)).flatten() > 0
-        k: CompressedVector = efficiency_analysis(self.compiled, p0_j, priced_indices, p_j, known_technologies, valid_rows)
+        k: CompressedVector = efficiency_analysis(self.compiled, p0_j, priced_indices, p_j, known_technologies, valid_rows, spatial_mode)
 
         fc_i = C_j_i @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
@@ -364,12 +378,13 @@ class FactorioInstance():
         """
         return technological_limitation_from_specification(self, self.COST_MODE, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
-def efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, valid_rows: np.ndarray) -> CompressedVector:
+def efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, 
+                        known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, spatial_mode: bool) -> CompressedVector:
         efficiencies: CompressedVector = CompressedVector({})
         for sc in construct.subconstructs:
             if isinstance(sc, ComplexConstruct):
-                efficiencies.update({sc.ident: sc.efficiency_analysis(pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows)})
-                efficiencies = efficiencies + efficiency_analysis(sc, pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows)
+                efficiencies.update({sc.ident: sc.efficiency_analysis(pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows, spatial_mode)})
+                efficiencies = efficiencies + efficiency_analysis(sc, pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows, spatial_mode)
         return efficiencies
 
 def index_compiled_constructs(constructs: tuple[LinearConstruct, ...], ident: str) -> LinearConstruct:
@@ -451,7 +466,7 @@ class FactorioFactory():
         self.intermediate_scale_factor = 0
         self.true_cost = CompressedVector()
 
-    def calculate_optimal_factory(self, reference_model: CompressedVector) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, ore_area_optimized: bool = False) -> bool:
         """
         Calculates a optimal factory with the now avaiable reference model.
 
@@ -464,7 +479,7 @@ class FactorioFactory():
         -------
         If pricing model has changed.
         """
-        s, p, pf, k, zs, scale, tc = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, self.optimal_factory, self.optimal_pricing_model)
+        s, p, pf, k, zs, scale, tc = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, self.optimal_factory, self.optimal_pricing_model, spatial_mode=ore_area_optimized)
         self.last_pricing_model = reference_model
         same = p==self.optimal_pricing_model
         self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self.inefficient_constructs, self.intermediate_scale_factor, self.true_cost = s, p, pf, k, scale, tc
@@ -498,7 +513,8 @@ class FactorioFactory():
         """
         Computes all the global post run analyses into post_analyses.
         """
-        for construct_name, targets in POST_ANALYSES:
+        
+        """for construct_name, targets in POST_ANALYSES:
             construct = self.instance.search_complex_constructs(construct_name)
 
             initial_pricing_vector = np.zeros(len(self.instance.reference_list))
@@ -507,7 +523,7 @@ class FactorioFactory():
 
             output_pricing_vector = np.zeros(len(self.instance.reference_list))
             for k, v in self.full_optimal_pricing_model.items():
-                output_pricing_vector[self.instance.reference_list.index(k)] = v
+                output_pricing_vector[self.instance.reference_list.index(k)] = v"""
 
         self.transport_densities = compute_transportation_densities(self.instance.data_raw, self.full_optimal_pricing_model)
     
@@ -718,7 +734,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.optimal_pricing_model = pricing_model
         self.inefficient_constructs = CompressedVector()
     
-    def calculate_optimal_factory(self, reference_model: CompressedVector) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, ore_area_optimized: bool = False) -> bool:
         """
         Placeholder. Initial Factories cannot change.
         """
@@ -749,14 +765,19 @@ class FactorioFactoryChain():
         FactorioInstance for this chain.
     chain:
         List containing the chain.
+    ore_area_optimized:
+        Should factories in this chain be forced to minimize ore area before optimizing cost?
+        This in general will FORCE the program to use the most 'productive' choice, so it will stack max level productivities where possible and usually speeds in mining drills.
     """
     instance: FactorioInstance
     chain: list[FactorioFactory]
+    ore_area_optimized: bool
 
-    def __init__(self, instance: FactorioInstance) -> None:
+    def __init__(self, instance: FactorioInstance, ore_area_optimized: bool = False) -> None:
         assert isinstance(instance, FactorioInstance)
         self.instance = instance
         self.chain = []
+        self.ore_area_optimized = ore_area_optimized
 
     def startup(self, base_building_setup: CompressedVector, starting_techs: TechnologicalLimitation) -> None:
         """
@@ -883,7 +904,7 @@ class FactorioFactoryChain():
             last_science = previous_sciences[-1]
             self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
         
-        self.chain[-1].calculate_optimal_factory(last_material.optimal_pricing_model)
+        self.chain[-1].calculate_optimal_factory(last_material.optimal_pricing_model, ore_area_optimized=self.ore_area_optimized)
     
     def retarget_all(self) -> None:
         """
@@ -905,11 +926,11 @@ class FactorioFactoryChain():
                 factory.retarget(updated_targets)
                 assert not last_material is None
                 logging.info(last_material.optimal_pricing_model)
-                factory.calculate_optimal_factory(last_material.optimal_pricing_model)
+                factory.calculate_optimal_factory(last_material.optimal_pricing_model, ore_area_optimized=self.ore_area_optimized)
                 last_material = factory
             elif isinstance(factory, FactorioScienceFactory):
                 assert not last_material is None
-                factory.calculate_optimal_factory(last_material.optimal_pricing_model)
+                factory.calculate_optimal_factory(last_material.optimal_pricing_model, ore_area_optimized=self.ore_area_optimized)
                 pass #we don't update science factories at the moment
 
     def compute_all(self) -> bool:
@@ -925,7 +946,7 @@ class FactorioFactoryChain():
 
         last_reference_model = self.chain[0].optimal_pricing_model
         for i, factory in enumerate(self.chain[1:]):
-            changed: bool = factory.calculate_optimal_factory(last_reference_model) or changed
+            changed: bool = factory.calculate_optimal_factory(last_reference_model, ore_area_optimized=self.ore_area_optimized) or changed
             if isinstance(factory, FactorioMaterialFactory):
                 updated_targets = CompressedVector()
                 for j in range(i+1, len(self.chain)):
@@ -937,7 +958,7 @@ class FactorioFactoryChain():
                 logging.info(last_reference_model)
                 factory_old_pm = factory.optimal_pricing_model
                 try:
-                    changed = factory.calculate_optimal_factory(last_reference_model) or changed
+                    changed = factory.calculate_optimal_factory(last_reference_model, ore_area_optimized=self.ore_area_optimized) or changed
                 except:
                     logging.info(i)
                     logging.info(last_reference_model)
@@ -948,7 +969,7 @@ class FactorioFactoryChain():
                 for k in factory_old_pm.keys():
                     assert k in last_reference_model.keys()
             elif isinstance(factory, FactorioScienceFactory):
-                changed = factory.calculate_optimal_factory(last_reference_model) or changed
+                changed = factory.calculate_optimal_factory(last_reference_model, ore_area_optimized=self.ore_area_optimized) or changed
                 pass #we don't update science factories at the moment
         
         return changed
