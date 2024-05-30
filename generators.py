@@ -130,7 +130,7 @@ def module_specification_calculation(machine: dict, vector_source: dict) -> tupl
     allowed_modules = []
     max_internal_mods: int = machine['module_specification']['module_slots'] #https://lua-api.factorio.com/latest/types/ModuleSpecification.html
     #allowed_modules was populated in link_modules
-    allowed_modules: list[tuple[str, bool, bool]] = [(module['name'], True, "productivity" not in module['name']) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] for eff in module['effect'].keys()])]
+    allowed_modules: list[tuple[str, bool, bool]] = [(module['name'], True, "productivity" not in module['name']) for module in vector_source['allowed_modules'] if all([eff in machine['allowed_effects'] or not eff in MODULE_EFFECTS for eff in module['effect'].keys()])]
     return max_internal_mods, allowed_modules
 
 def fix_temperature_settings(temperature_settings: dict, vector: CompressedVector) -> None:
@@ -539,7 +539,8 @@ def generate_rocket_result_construct(machine: dict, item: dict, data: dict, RELE
             ident = " & ".join([prod['name'] for prod in item['rocket_launch_products']]) + " from launch of "+item['name']+" in "+machine['name']+" via "+fuel_name
 
             vector = CompressedVector({fuel_name: -1 * (machine['energy_usage_raw'] + machine['active_energy_usage_raw']) / fuel_value,
-                                    item['name']: Fraction(-1)})
+                                       item['name']: Fraction(-1),
+                                       data['recipe'][machine['fixed_recipe']]['result']: Fraction(-1 * machine['rocket_parts_required'])})
             if not fuel_burnt_result is None:
                 vector[fuel_burnt_result] = -1 * vector[fuel_name]
 

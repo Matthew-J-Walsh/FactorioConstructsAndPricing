@@ -1,4 +1,5 @@
 from globalsandimports import *
+from utils import *
 
 def generate_pulp_linear_solver(pl_solver = pl.PULP_CBC_CMD(presolve = False)) -> CallableSolver:
     """
@@ -186,7 +187,7 @@ def pulp_dense_solver(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray
     A.T@y>=c, y>=0, minimize b.Ty.
     """
     problem = pl.LpProblem()
-    variables = pl.LpVariable.dicts("x", range(A.shape[1]), 0)
+    variables = pl.LpVariable.dicts("x", range(A.shape[1]), lowBound=0)
     var_arr = np.fromiter(variables.values(), dtype=object) #type: ignore
 
     if not c is None:
@@ -207,7 +208,7 @@ def pulp_dense_solver(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray
         if isinstance(summations[j], Real):
             constraint_mask[j] = False
             #try:
-            #assert np.logical_or(summations[j] >= b[j], np.isclose(summations[j], b[j])), "Invalid row "+str(j)+": "+str(summations[j] - b[j])+", "+str(b[j]) # type: ignore
+            assert np.logical_or(summations[j] >= b[j], np.isclose(summations[j], b[j])), "Invalid row "+str(j)+": "+str(summations[j] - b[j])+", "+str(b[j]) # type: ignore
             #except:
                 #raise ValueError(summation - b[j])
         else:
@@ -215,16 +216,20 @@ def pulp_dense_solver(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray
             problem += summations[j] >= b[j]
 
     if g is None:
-        status = problem.solve(pl.PULP_CBC_CMD(presolve = False))
+        status = problem.solve(pl.PULP_CBC_CMD(presolve = False, gapRel=SOLVER_TOLERANCES['rtol']**2, gapAbs=SOLVER_TOLERANCES['atol']**2))
     else:
         for i, v in enumerate(variables.values()):
             assert v.setInitialValue(g[i])
-        status = problem.solve(pl.PULP_CBC_CMD(presolve = False, warmStart = True))
+        status = problem.solve(pl.PULP_CBC_CMD(presolve = False, warmStart = True, gapRel=SOLVER_TOLERANCES['rtol']**2, gapAbs=SOLVER_TOLERANCES['atol']**2))
     
     if status==1:
         primal = np.array([pl.value(v) if pl.value(v) else 0 for _, v in variables.items()])
         dual = np.zeros(b.shape[0])
-        dual[np.where(constraint_mask)] = np.array([c.pi for name, c in problem.constraints.items()])
+        dual[np.where(constraint_mask)] = np.array([constraint.pi for name, constraint in problem.constraints.items()])
+    
+        assert linear_transform_is_gt(A, primal, b).all()
+        assert linear_transform_is_gt(-1 * A.T, dual, -1 * c).all()
+
         return primal, dual
     
     logging.error("PULP was unable to find a solution. Problem Status: "+pl.LpStatus[status])
@@ -294,3 +299,4 @@ def create_dual_mps_file(filename: str, A: sparse.csr_matrix, b: np.ndarray, c: 
 
     return constraint_mask
 
+BEST_LP_SOLVER = pulp_dense_solver

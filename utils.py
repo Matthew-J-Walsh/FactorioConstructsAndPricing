@@ -1,5 +1,4 @@
 from __future__ import annotations
-from calendar import c
 
 from globalsandimports import *
 
@@ -27,14 +26,14 @@ class CompressedVector(dict):
             new_cv.key_addition(k, v)
         return new_cv
 
-    def __mul__(self, multiplier: Fraction) -> CompressedVector:
+    def __mul__(self, multiplier: Number) -> CompressedVector:
         self.hash_value = None
         dn = CompressedVector()
         for k, v in self.items():
             dn[k] = multiplier * v
         return dn
     
-    def __rmul__(self, multiplier: Fraction) -> CompressedVector:
+    def __rmul__(self, multiplier: Number) -> CompressedVector:
         self.hash_value = None
         return self.__mul__(multiplier)
     
@@ -599,63 +598,6 @@ def beacon_setups_old(building: dict, beacon: dict) -> list[tuple[int, Fraction]
         M_minus = min(building['tile_width'], building['tile_height'])
     except:
         raise ValueError(building['name'])
-    B_plus = max(beacon['tile_width'], beacon['tile_height'])
-    B_minus = min(beacon['tile_width'], beacon['tile_height'])
-    E_plus = int(beacon['supply_area_distance'])*2+B_plus
-    E_minus = int(beacon['supply_area_distance'])*2+B_minus
-
-    setups = []
-    #surrounded buildings: same direction
-    surrounded_buildings_same_direction_side_A = math.floor((E_plus - B_plus - 2 + M_plus)*1.0/B_minus)
-    surrounded_buildings_same_direction_side_B = math.floor((E_minus - B_minus - 2 + M_minus)*1.0/B_minus)
-    setups.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
-                   -1*Fraction(2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
-    #surrounded buildings: opposite direction
-    surrounded_buildings_opp_direction_side_A = math.floor((E_plus - B_plus - 2 + M_minus)*1.0/B_minus)
-    surrounded_buildings_opp_direction_side_B = math.floor((E_minus - B_minus - 2 + M_plus)*1.0/B_minus)
-    setups.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
-                   -1*Fraction(2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
-    #optimized rows: beacons long way
-    setups.append((2*math.ceil((1+math.ceil((E_plus-1)*1.0/M_minus))*1.0/math.ceil(B_plus*1.0/M_minus)),
-                   -1*Fraction(1, math.ceil(B_plus*1.0/M_minus))))
-    #optimized rows: beacons short way
-    setups.append((2*math.ceil((1+math.ceil((E_minus-1)*1.0/M_minus))*1.0/math.ceil(B_minus*1.0/M_minus)),
-                   -1*Fraction(1, math.ceil(B_minus*1.0/M_minus))))
-    
-    mask = [True]*4
-    for i in range(4): #ew
-        for j in range(4):
-            if i!=j:
-                if (setups[i][0] >= setups[j][0] and setups[i][1] > setups[j][1]) or (setups[i][0] > setups[j][0] and setups[i][1] >= setups[j][1]):
-                    mask[j] = False
-    filt_setups = []
-    for i in range(4):
-        if mask[i]:
-            filt_setups.append(setups[i])
-
-    return list(set(filt_setups))
-
-def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[int, Fraction]]:
-    """
-    Determines the possible optimal beacon setups.
-
-    Parameters
-    ----------
-    building_size:
-        Size of building's tile.
-    beacon:
-        Beacon buffing the building.
-    
-    Returns
-    -------
-    list_of_setups:
-        list of tuples with beacons hitting each building and beacons/building in the crystal.
-    """
-    try:
-        M_plus = max(building_size)
-        M_minus = min(building_size)
-    except:
-        raise ValueError(building_size)
     B_plus = max(beacon['tile_width'], beacon['tile_height'])
     B_minus = min(beacon['tile_width'], beacon['tile_height'])
     E_plus = int(beacon['supply_area_distance'])*2+B_plus

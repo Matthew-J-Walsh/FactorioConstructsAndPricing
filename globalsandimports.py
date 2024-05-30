@@ -20,7 +20,7 @@ import highspy
 import pulp as pl
 
 import typing
-from numbers import Real
+from numbers import Real, Number
 from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol
 
 class CallableSolver(Protocol):
@@ -47,7 +47,7 @@ def multilienar_effect_ordering():
     1234 123 124 134 234 12 13 14 23 24 34 1 2 3 4 0
     """
     l = len(MODULE_EFFECTS)
-    ordering: list[set[int]] = [set()]
+    ordering: list[set[int]] = []
     for i in range(l+1):
         for c in itertools.combinations(range(l), i):
             ordering.append(set(c))

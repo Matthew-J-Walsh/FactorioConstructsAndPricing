@@ -188,7 +188,7 @@ class UncompiledConstruct:
 
         return SingularConstruct(ModulatedConstruct(constructs, self.ident))
 
-def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, building_size: tuple[int, int], beacon: dict | None = None) -> Generator[tuple[CompressedVector, CompressedVector, CompressedVector], None, None]:
+def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit: int, building_size: tuple[int, int], beacon: dict | None = None) -> Generator[tuple[CompressedVector, CompressedVector], None, None]:
     """
     Returns an generator over the set of possible module setups.
 
@@ -205,39 +205,96 @@ def module_setup_generator(modules: list[tuple[str, bool, bool]], internal_limit
     
     Yields
     ------
-    vector:
-        Integral CompressedVectors representing module setup options
-    beacon_cost:
-        CompressedVector with keys of beacons and values of beacon count per building
-    external_module_cost:
-        CompressedVector with keys of modules and values of module count per building
+    effect_vector:
+        All the stuff effecting an average building
+    cost_vector:
+        Costs per building
     """
     if len(modules)==0 or DEBUG_BLOCK_MODULES:
-        yield CompressedVector(), CompressedVector(), CompressedVector()
+        yield CompressedVector(), CompressedVector()
     else:
         internal_modules = [m for m, i, _ in modules if i]
         external_modules = [m for m, _, e in modules if e]
 
         if not beacon is None and not DEBUG_BLOCK_BEACONS:
-            for beacon_count, beacon_cost in beacon_setups(building_size, beacon):
+            for effecting_beacon_count, beacons_per_building in beacon_setups(building_size, beacon):
                 for internal_mod_count in range(internal_limit+1):
                     for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
                         #for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, beacon_count*beacon['module_specification']['module_slots']): #too big
                         for external_mod in external_modules:
-                            vector = CompressedVector()
+                            effect_vector = CompressedVector()
+                            cost_vector = CompressedVector()
                             for mod in internal_mod_setup:
-                                vector += CompressedVector({mod+"|i": 1})
-                            yield vector + CompressedVector({external_mod+"|e": beacon_count * beacon['module_specification']['module_slots']}), \
-                                  CompressedVector({beacon['name']: -1 * beacon_cost}), \
-                                  vector + CompressedVector({external_mod+"|e": -1 * beacon_cost * beacon['module_specification']['module_slots']}), 
+                                effect_vector = effect_vector + CompressedVector({mod+"|i": 1})
+                                cost_vector = cost_vector + CompressedVector({mod: 1})
+                            yield effect_vector + CompressedVector({external_mod+"|e": effecting_beacon_count * beacon['module_specification']['module_slots']}), \
+                                  cost_vector + CompressedVector({beacon['name']: 1 * beacons_per_building}) + CompressedVector({external_mod: 1 * beacons_per_building * beacon['module_specification']['module_slots']}) # type: ignore
         else:
             for internal_mod_count in range(internal_limit+1):
                 for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
-                    for external_mod in external_modules:
-                        vector = CompressedVector()
-                        for mod in internal_mod_setup:
-                            vector += CompressedVector({mod+"|i": 1})
-                        yield vector, CompressedVector(), vector
+                    effect_vector = CompressedVector()
+                    cost_vector = CompressedVector()
+                    for mod in internal_mod_setup:
+                        effect_vector = effect_vector + CompressedVector({mod+"|i": 1})
+                        cost_vector = cost_vector + CompressedVector({mod: 1})
+                    yield effect_vector, cost_vector
+
+def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[int, Fraction]]:
+    """
+    Determines the possible optimal beacon setups.
+
+    Parameters
+    ----------
+    building_size:
+        Size of building's tile.
+    beacon:
+        Beacon buffing the building.
+    
+    Returns
+    -------
+    list_of_setups:
+        list of tuples with beacons hitting each building and beacons/building in the tesselation.
+    """
+    try:
+        M_plus = max(building_size)
+        M_minus = min(building_size)
+    except:
+        raise ValueError(building_size)
+    B_plus = max(beacon['tile_width'], beacon['tile_height'])
+    B_minus = min(beacon['tile_width'], beacon['tile_height'])
+    E_plus = int(beacon['supply_area_distance'])*2+B_plus
+    E_minus = int(beacon['supply_area_distance'])*2+B_minus
+
+    setups = []
+    #surrounded buildings: same direction
+    surrounded_buildings_same_direction_side_A = math.floor((E_plus - B_plus - 2 + M_plus)*1.0/B_minus)
+    surrounded_buildings_same_direction_side_B = math.floor((E_minus - B_minus - 2 + M_minus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+                   1*Fraction(2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
+    #surrounded buildings: opposite direction
+    surrounded_buildings_opp_direction_side_A = math.floor((E_plus - B_plus - 2 + M_minus)*1.0/B_minus)
+    surrounded_buildings_opp_direction_side_B = math.floor((E_minus - B_minus - 2 + M_plus)*1.0/B_minus)
+    setups.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+                   1*Fraction(2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
+    #optimized rows: beacons long way
+    setups.append((2*math.ceil((1+math.ceil((E_plus-1)*1.0/M_minus))*1.0/math.ceil(B_plus*1.0/M_minus)),
+                   1*Fraction(1, math.ceil(B_plus*1.0/M_minus))))
+    #optimized rows: beacons short way
+    setups.append((2*math.ceil((1+math.ceil((E_minus-1)*1.0/M_minus))*1.0/math.ceil(B_minus*1.0/M_minus)),
+                   1*Fraction(1, math.ceil(B_minus*1.0/M_minus))))
+    
+    mask = [True]*4
+    for i in range(4): #ew
+        for j in range(4):
+            if i!=j:
+                if (setups[i][0] >= setups[j][0] and setups[i][1] > setups[j][1]) or (setups[i][0] > setups[j][0] and setups[i][1] >= setups[j][1]):
+                    mask[j] = False
+    filt_setups = []
+    for i in range(4):
+        if mask[i]:
+            filt_setups.append(setups[i])
+
+    return list(set(filt_setups))
 
 def create_reference_list(uncompiled_construct_list: tuple[UncompiledConstruct, ...]) -> tuple[str, ...]:
     """

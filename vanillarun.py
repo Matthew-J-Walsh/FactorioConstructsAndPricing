@@ -1,4 +1,5 @@
 import logging
+
 logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
                     level=logging.INFO, 
                     handlers=[
@@ -8,7 +9,7 @@ logging.getLogger().addHandler(logging.StreamHandler())
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main():
+def vanilla_main(ore_area_optimized=False):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
@@ -47,8 +48,14 @@ def vanilla_main():
     tech_level = vanilla.technological_limitation_from_specification(fully_automated=["automation-science-pack"])
     logging.info(tech_level)
 
+    #logging.info("=============================================")
+    #for cc in vanilla.complex_constructs:
+    #    if cc.ident=="utility-science-pack in assembling-machine-3 with electric":
+    #        assert isinstance(cc.subconstructs[0], CompiledConstruct)
+    #        logging.info(cc.subconstructs[0].lookup_table)
+
     logging.info("=============================================")
-    vanilla_chain = FactorioFactoryChain(vanilla, ore_area_optimized=False)
+    vanilla_chain = FactorioFactoryChain(vanilla, ore_area_optimized=ore_area_optimized)
 
     starting_pricing = {}
     starting_pricing['electric'] = .000001
@@ -171,6 +178,23 @@ def vanilla_main():
     vanilla_chain.compute_all()
 
     print("Dumping to Excel.")
+
+    logging.info("=============================================")
+    for cc in vanilla.complex_constructs:
+        if cc.ident in ["steel-plate in electric-furnace with electric", "automation-science-pack in assembling-machine-3 with electric", "logistic-science-pack in assembling-machine-3 with electric"]:
+            assert isinstance(cc.subconstructs[0], CompiledConstruct)
+            p0_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
+            for k, v in vanilla_chain.chain[-3].full_optimal_pricing_model.items():
+                p0_j[vanilla.reference_list.index(k)] = v
+            p_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
+            for k, v in vanilla_chain.chain[-2].full_optimal_pricing_model.items():
+                assert not np.isnan(v), k
+                p_j[vanilla.reference_list.index(k)] = v
+            priced_indices =  np.array([vanilla.reference_list.index(k) for k in vanilla_chain.chain[-3].optimal_pricing_model.keys()])
+            if ore_area_optimized:
+                logging.info(cc.subconstructs[0].efficency_dump(vanilla.spatial_pricing, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies, spatial_mode=ore_area_optimized))
+            else:
+                logging.info(cc.subconstructs[0].efficency_dump(p0_j, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies, spatial_mode=ore_area_optimized))
 
     vanilla_chain.dump_to_excel(output_file)
 
