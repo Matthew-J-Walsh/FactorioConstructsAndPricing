@@ -34,8 +34,6 @@ class FactorioInstance():
         List of all catalytic item/fluids.
     COST_MODE:
         What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
-    DEFAULT_TARGET_RESEARCH_TIME:
-        Default time that should science factories should complete their science in.
     RELEVENT_FLUID_TEMPERATURES:
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities.
     """
@@ -49,10 +47,9 @@ class FactorioInstance():
     catalyst_list: tuple[str, ...]
     spatial_pricing: np.ndarray
     COST_MODE: str
-    DEFAULT_TARGET_RESEARCH_TIME: Fraction
     RELEVENT_FLUID_TEMPERATURES: dict
 
-    def __init__(self, filename: str, COST_MODE: str = 'normal', DEFAULT_TARGET_RESEARCH_TIME: Fraction = Fraction(10000), nobuild: bool = False) -> None:
+    def __init__(self, filename: str, COST_MODE: str = 'normal', nobuild: bool = False) -> None:
         """
         Parameters
         ----------
@@ -69,14 +66,14 @@ class FactorioInstance():
             self.data_raw = json.load(f)
         
         self.COST_MODE = COST_MODE
-        self.DEFAULT_TARGET_RESEARCH_TIME = DEFAULT_TARGET_RESEARCH_TIME
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
         self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         logging.info("Building uncompiled constructs.")
         self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         logging.info("Building reference and catalyst lists.")
-        self.reference_list, self.catalyst_list = generate_references_and_catalysts(self.uncompiled_constructs)
+        self.reference_list = create_reference_list(self.uncompiled_constructs)
+        self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
         for k in self.reference_list:
             DEBUG_REFERENCE_LIST.append(k)
         
@@ -398,26 +395,6 @@ def efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray,
                 efficiencies = efficiencies + efficiency_analysis(sc, pricing_vector, priced_indices, dual_vector, known_technologies, valid_rows, spatial_mode)
         return efficiencies
 
-def index_compiled_constructs(constructs: tuple[LinearConstruct, ...], ident: str) -> LinearConstruct:
-    """
-    Finds the LinearConstruct referenced by an ident.
-
-    Parameters
-    ----------
-    constructs:
-        List of LinearConstructs to search.
-    ident:
-        Identification string to look for.
-
-    Returns
-    -------
-    LinearConstruct that's ident matches ident.
-    """
-    for construct in constructs:
-        if construct.ident==ident:
-            return construct
-    raise ValueError(ident)
-
 
 class FactorioFactory():
     """
@@ -652,16 +629,14 @@ class FactorioScienceFactory(FactorioFactory):
     """
     last_material_factory: FactorioMaterialFactory
     previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation
-    time_target: Fraction
     clear: list[str]
 
     def __init__(self, instance: FactorioInstance, previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation, last_material_factory: FactorioMaterialFactory | InitialFactory, 
-                 science_targets: CompressedVector, time_target: Fraction | None = None) -> None:
+                 science_targets: CompressedVector) -> None:
         assert isinstance(instance, FactorioInstance)
         assert isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, InitialFactory) or isinstance(previous_science, TechnologicalLimitation)
         assert isinstance(last_material_factory, FactorioMaterialFactory) or isinstance(last_material_factory, InitialFactory)
         assert isinstance(science_targets, CompressedVector)
-        assert isinstance(time_target, Fraction) or time_target is None
         self.instance = instance
         self.clear = [target for target in science_targets.keys() if target in self.instance.data_raw['tool'].keys()]
         self.previous_science = previous_science
@@ -670,12 +645,7 @@ class FactorioScienceFactory(FactorioFactory):
         
         last_coverage = self._previous_coverage()
 
-        if time_target is None:
-            self.time_target = self.instance.DEFAULT_TARGET_RESEARCH_TIME
-        else:
-            self.time_target = time_target
-
-        targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 / self.time_target for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+        targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 
         super().__init__(instance, last_coverage, targets)
         #super().__init__(instance, last_coverage, science_targets)
@@ -920,7 +890,7 @@ class FactorioFactoryChain():
             last_science = previous_sciences[-1]
             self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
         
-        self.chain[-1].calculate_optimal_factory(last_material.optimal_pricing_model, ore_area_optimized=self.ore_area_optimized)
+        self.chain[-1].calculate_optimal_factory(last_material.optimal_pricing_model, ore_area_optimized=self.ore_area_optimized) #TODO: don't do this.
     
     def retarget_all(self) -> None:
         """

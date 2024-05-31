@@ -8,9 +8,18 @@ from lpsolvers import *
 from utils import *
 
 
-def encode_effects_vector_to_multilinear(effect_vector: np.ndarray):
-    """
-    Takes an effects vector and puts it into multilinear effect form.
+def encode_effects_vector_to_multilinear(effect_vector: np.ndarray) -> np.ndarray:
+    """Takes an effects vector and puts it into multilinear effect form
+
+    Parameters
+    ----------
+    effect_vector : np.ndarray
+        Input effect vector to put into multilinear form
+
+    Returns
+    -------
+    np.ndarray
+        Vector in multilinear form
     """
     multilinear = np.full(len(MODULE_EFFECT_ORDERING), np.nan)
     for i in range(len(MODULE_EFFECT_ORDERING)):
@@ -20,13 +29,26 @@ def encode_effects_vector_to_multilinear(effect_vector: np.ndarray):
                 multilinear[i] *= effect_vector[j]
     return multilinear
 
-def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: tuple[str, ...], base_productivity: Fraction) -> sparse.csr_matrix:
-    """
-    Takes a CompressedVector of changes and a dictionary of how different effects effect the outcome and returns the multilinear effect form.
+def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: tuple[str, ...]) -> sparse.csr_matrix:
+    """Calculates the multilinear effect form of deltas
+
+    Parameters
+    ----------
+    deltas : CompressedVector
+        Changes imbued by a construct
+    effect_effects : dict[str, list[str]]
+        Specifies how the construct is affected by module effects
+    reference_list : tuple[str, ...]
+        Ordering for reference items
+
+    Returns
+    -------
+    sparse.csr_matrix
+        Multilinear form of the deltas
     """
     multilinear = sparse.lil_matrix((len(MODULE_EFFECT_ORDERING), len(reference_list)))
     for k, v in deltas.items():
-        keffects = set([MODULE_EFFECTS.index(eff_name) for eff_name, effeff in effect_effects.items() if k in effeff])
+        keffects = set([ACTIVE_MODULE_EFFECTS.index(eff_name) for eff_name, effeff in effect_effects.items() if k in effeff])
         for i in range(len(MODULE_EFFECT_ORDERING)):
             if MODULE_EFFECT_ORDERING[i]==keffects:
                 multilinear[i, reference_list.index(k)] = v #pretty slow for csr_matrix, should we speed up with lil and convert back?
@@ -35,10 +57,35 @@ def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects
 
 
 class ModuleLookupTable:
-    """
-    A lookup table for many CompiledConstructs, used to determine the optimal module setups.
+    """A lookup table for many CompiledConstructs, used to determine the optimal module setups
+    Left ([0], [0, :]) value is the baseline
 
-    'Left' most value is the baseline.
+    Members
+    -------
+    module_count : int
+        Number of modules in this lookup table
+    building_width : int
+        Smaller side of building
+    building_height : int
+        Larger side of building
+    avaiable_modules : list[tuple[str, bool, bool]]
+        Modules that can be used for this lookup table
+    instance : FactorioInstance
+        Origin FactorioInstance
+    base_productivity : Fraction
+        Base productivity for this lookup table
+    effect_transform : np.ndarray
+        Effect transformation table for this lookup table
+    cost_transform : np.ndarray
+        Cost transformation table for this lookup table
+    module_setups : np.ndarray
+        Module setup table for this lookup table
+    effect_table : np.ndarray
+        Module effect table for this lookup table
+    module_names : list[str]
+        Reference for modules in this lookup table
+    limits : np.ndarray
+        Array of required technologies for each potential module and beacon setup
     """
     module_count: int
     building_width: int
@@ -52,7 +99,21 @@ class ModuleLookupTable:
     module_names: list[str]
     limits: np.ndarray
 
-    def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance, base_productivity: Fraction):
+    def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance, base_productivity: Fraction) -> None:
+        """
+        Parameters
+        ----------
+        module_count : int
+            Number of modules in this lookup table
+        building_size : tuple[int, int]
+            Size of building for this lookup table
+        avaiable_modules : list[tuple[str, bool, bool]]
+            Modules that can be used for this lookup table
+        instance : FactorioInstance
+            Origin FactorioInstance
+        base_productivity : Fraction
+            Base productivity for this lookup table
+        """        
         self.module_count = module_count
         self.building_width = min(building_size)
         self.building_height = max(building_size)
@@ -72,7 +133,7 @@ class ModuleLookupTable:
         self.cost_transform = np.zeros((count, len(instance.reference_list)))
         #self.paired_transform = sparse.csr_matrix((count, ))
         self.module_setups = np.zeros((count, len(self.module_names)), dtype=int)
-        self.effect_table = np.zeros((count, len(MODULE_EFFECTS)))
+        self.effect_table = np.zeros((count, len(ACTIVE_MODULE_EFFECTS)))
         self.limits = np.array([TechnologicalLimitation(instance.tech_tree, []) for _ in range(count)], dtype=object)
 
         i = 0
@@ -86,8 +147,8 @@ class ModuleLookupTable:
 
                 self.limits[i] = self.limits[i] + (beacon['limit'] if isinstance(beacon, dict) else TechnologicalLimitation(instance.tech_tree, []))
 
-                effect_vector = np.ones(len(MODULE_EFFECTS))
-                effect_vector[MODULE_EFFECTS.index("productivity")] += float(self.base_productivity)
+                effect_vector = np.ones(len(ACTIVE_MODULE_EFFECTS))
+                effect_vector[ACTIVE_MODULE_EFFECTS.index("productivity")] += float(self.base_productivity)
                 for mod, count in module_setup.items():
                     mod_name, mod_region = mod.split("|")
                     if mod_region=="i":
@@ -112,25 +173,28 @@ class ModuleLookupTable:
                 
         assert (self.cost_transform>=0).all()
 
-    #Total time: 10.8505 s
     def evaluate(self, effect_vector: np.ndarray, cost_vector: np.ndarray, priced_indices: np.ndarray, paired_cost_vector: np.ndarray, base_cost: float) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Evaluates a effect weighting vector pair to find the best module combination.
+        """Evaluates a effect weighting vector pair to find the best module combination
 
         Parameters
         ----------
-        effect_vector:
-            A vector containing the weighting of each multilinear combination of effects.
-        paired_vector:
-            A vector containing the paired effect->cost costs.
-        cost_vector:
-            A vector containing the weighting of the cost each module.
+        effect_vector : np.ndarray
+            A vector containing the weighting of each multilinear combination of effects
+        cost_vector : np.ndarray
+            A vector containing the weighting of the cost each module
+        priced_indices : np.ndarray
+            Indicies of cost vector elements that are priced
+        paired_cost_vector : np.ndarray
+            A vector containing the paired effect->cost costs
+        base_cost : float
+            Baseline cost of the instance
 
         Returns
         -------
-        Index of the optimal module configuration
+        tuple[np.ndarray, np.ndarray]
+            Numerator of evaluations (-np.inf if cannot be made),
+            Denominator of evaluations
         """
-        #mask = np.where([known_technologies >= self.limits[i] for i in range(self.limits.shape[0])])[0] #brutally insanely bad 7986.29/8700s
         inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
         inverse_priced_indices_arr[priced_indices] = 0
         mask = self.cost_transform @ inverse_priced_indices_arr > 0
@@ -138,32 +202,30 @@ class ModuleLookupTable:
         e[mask] = -np.inf
         return e, c
 
-    def generate(self, index: int):
-        """
-        Generates components for a column vector given a setup.
-        """
-        raise RuntimeError("Dont use")
-        module_setup = self.module_setups[index]
-        ident = (" with module setup: " + " & ".join([str(v)+"x "+self.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
-        return np.maximum(self.effect_table[index], MODULE_EFFECT_MINIMUMS_NUMPY), ident
-    
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str(self.cost_transform.shape[0])
 
 _LOOKUP_TABLES: list[ModuleLookupTable] = []
 def link_lookup_table(module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance, base_productivity: Fraction) -> ModuleLookupTable:
-    """
-    Finds or creates a ModuleLookupTable to return.
+    """Finds or creates a ModuleLookupTable to return
 
     Parameters
     ----------
-    module_count:
-        Number of modules in the construct class
-    building_size:
-        Width and Height of the building in the construct class
-    avaiable_modules:
-        What modules can be used in the constuct class
+    module_count : int
+        Number of modules in the lookup table
+    building_size : tuple[int, int]
+        Size of building for the lookup table
+    avaiable_modules : list[tuple[str, bool, bool]]
+        Modules that can be used for the lookup table
+    instance : FactorioInstance
+        Origin FactorioInstance
+    base_productivity : Fraction
+        Base productivity for the lookup table
 
+    Returns
+    -------
+    ModuleLookupTable
+        The specified module lookup table
     """
     for table in _LOOKUP_TABLES:
         if module_count == table.module_count and min(building_size) == table.building_width and \
@@ -188,11 +250,19 @@ class CompiledConstruct:
     spatially_resticted: bool
 
     def __init__(self, origin: UncompiledConstruct, instance):
+        """
+        Parameters
+        ----------
+        origin : UncompiledConstruct
+            Construct to compile
+        instance : FactorioInstance
+            Origin FactorioInstance
+        """        
         self.origin = origin
 
         self.lookup_table = link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity)
 
-        self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list, origin.base_productivity)
+        self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list)
         
         true_cost: CompressedVector = copy.deepcopy(origin.cost)
         for item in instance.catalyst_list:
@@ -243,14 +313,7 @@ class CompiledConstruct:
             else:
                 cost = np.dot(self.base_cost_vector, pricing_vector)
         else:
-            if spatial_mode:
-                if self.spatially_resticted: #placement restricted so we take out the paired cost transform and send it TODO: paired_cost_transform
-                    e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, np.zeros(self.paired_cost_transform.shape[1]), np.dot(self.base_cost_vector, pricing_vector))
-                else: #no placement restrictions so we set pricing vector to zero (as we don't add in any more costs) and everything has a cost of 1. This means evaluate will give us the column maximizing the dual vector without considering the cost.
-                    e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, np.zeros_like(pricing_vector), priced_indices, np.zeros(self.paired_cost_transform.shape[1]), 0)
-            else:
-                assert np.dot(self.base_cost_vector, pricing_vector) != 0
-                e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, self.paired_cost_transform.T @ pricing_vector, np.dot(self.base_cost_vector, pricing_vector))
+            e, c = self.evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
                 
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
@@ -266,6 +329,17 @@ class CompiledConstruct:
             assert cost==0
         
         return column, cost, true_cost, ident
+
+    def evaluate(self, pricing_vector, priced_indices, dual_vector, spatial_mode) -> tuple[np.ndarray, np.ndarray]:
+        if spatial_mode:
+            if self.spatially_resticted: #placement restricted so we take out the paired cost transform and send it TODO: paired_cost_transform
+                e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, np.zeros(self.paired_cost_transform.shape[1]), np.dot(self.base_cost_vector, pricing_vector))
+            else: #no placement restrictions so we set pricing vector to zero (as we don't add in any more costs) and everything has a cost of 1. This means evaluate will give us the column maximizing the dual vector without considering the cost.
+                e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, np.zeros_like(pricing_vector), priced_indices, np.zeros(self.paired_cost_transform.shape[1]), 0)
+        else:
+            assert np.dot(self.base_cost_vector, pricing_vector) != 0
+            e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, self.paired_cost_transform.T @ pricing_vector, np.dot(self.base_cost_vector, pricing_vector))
+        return e,c
 
     #Total time: 341.247 s UM WHAT?
     def _generate_vector(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
@@ -299,17 +373,9 @@ class CompiledConstruct:
         if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
             return CompressedVector()
         else:
-            if spatial_mode:
-                if self.spatially_resticted: #placement restricted so we take out the paired cost transform and send it TODO: paired_cost_transform
-                    e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, np.zeros(self.paired_cost_transform.shape[1]), np.dot(self.base_cost_vector, pricing_vector))
-                else: #no placement restrictions so we set pricing vector to zero (as we don't add in any more costs) and everything has a cost of 1. This means evaluate will give us the column maximizing the dual vector without considering the cost.
-                    e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, np.zeros_like(pricing_vector), priced_indices, np.zeros(self.paired_cost_transform.shape[1]), 0)
-            else:
-                assert np.dot(self.base_cost_vector, pricing_vector) != 0
-                e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, self.paired_cost_transform.T @ pricing_vector, np.dot(self.base_cost_vector, pricing_vector))
+            e, c = self.evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
-            """
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
                 assert spatial_mode and not self.spatially_resticted
@@ -326,7 +392,7 @@ class CompiledConstruct:
                 logging.info(c)
                 raise ValueError(self.origin.ident)
             for i in range(evaluation.shape[0]):
-                output.update({self._generate_vector(i)[2]: evaluation[i]})"""
+                output.update({self._generate_vector(i)[2]: evaluation[i]})
 
             return output
 
@@ -503,7 +569,7 @@ class ComplexConstruct:
             u = np.concatenate([np.array([v for v in POST_ANALYSES[self.ident].values()]), np.zeros_like(stabilizable_rows)])
             c = cost - (vector.T @ dual_vector)
 
-            primal_diluted, dual = BEST_LP_SOLVER(R, u, c) #is 1 an appropriate number TODO
+            primal_diluted, dual = BEST_LP_SOLVER(R, u, c)
             if primal_diluted is None or dual is None:
                 logging.info("Efficiency analysis for "+self.ident+" was unable to solve initial problem, returning nan.")
                 return np.nan

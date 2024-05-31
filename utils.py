@@ -199,7 +199,6 @@ class TechnologicalLimitation:
         """
         Parameters
         ----------
-        TODO
         """
         assert len(sets_of_researches)==0 or len(sets_of_references)==0, "Can't take both input types"
         self.tree = tree
@@ -419,7 +418,7 @@ def evaluate_formulaic_count(expression: str, level: int) -> int:
     """
     fixed_expression = expression.replace("l", str(level)).replace("L", str(level)).replace("^", "**")
     fixed_expression = re.sub(r'(\d)\(', r'\1*(', fixed_expression)
-    value = numexpr.evaluate(fixed_expression).item() #TODO: is this line as safe as i hope?
+    value = numexpr.evaluate(fixed_expression).item()
     if value <= 0:
         raise ValueError("Found a negative count. PANIC.")
     return value

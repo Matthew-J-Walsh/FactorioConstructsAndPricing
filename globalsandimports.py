@@ -37,7 +37,8 @@ class CallableDenseSolver(Protocol):
 
 BEST_LP_SOLVER: CallableDenseSolver
 
-MODULE_EFFECTS = ['consumption', 'speed', 'productivity'] 
+ALL_MODULE_EFFECTS = ['consumption', 'speed', 'productivity', 'pollution'] 
+ACTIVE_MODULE_EFFECTS = ['consumption', 'speed', 'productivity'] 
 MODULE_EFFECT_MINIMUMS = {'consumption': Fraction(1, 5), 'speed': Fraction(1, 5), 'productivity': Fraction(1)} 
 
 def multilienar_effect_ordering():
@@ -46,7 +47,7 @@ def multilienar_effect_ordering():
     123 12 13 23 1 2 3 0
     1234 123 124 134 234 12 13 14 23 24 34 1 2 3 4 0
     """
-    l = len(MODULE_EFFECTS)
+    l = len(ACTIVE_MODULE_EFFECTS)
     ordering: list[set[int]] = []
     for i in range(l+1):
         for c in itertools.combinations(range(l), i):
@@ -54,7 +55,7 @@ def multilienar_effect_ordering():
     return ordering
 MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
 
-MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in MODULE_EFFECTS])
+MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in ACTIVE_MODULE_EFFECTS])
 DEBUG_SOLVERS: bool = True #Should be set to True for debugging of solvers, will cause solvers that give infesible results to throw errors instead of being ignored.
 DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
