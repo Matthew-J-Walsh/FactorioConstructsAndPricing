@@ -5,8 +5,9 @@ from globalsandimports import *
 T = TypeVar('T')
 
 class CompressedVector(dict):
-    """
-    CompressedVector's are dicts where the values are all numbers and the values represent a dimension.
+    """CompressedVector's are dicts where the values are all numbers and the values represent some dimension
+
+    They also have hashes for easier search through collections
     """
     hash_value: int | None
 
@@ -67,19 +68,19 @@ class CompressedVector(dict):
         return hash(self) < hash(other)
 
 def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lambda x: True) -> int:
-    """
-    Counting helper for lists. Counts how many elements in the list return true when passed to function func.
+    """Counting helper for lists or dicts, counts how many elements in the list return true when passed to function func
 
     Parameters
     ----------
-    l:
-        The list.
-    func:
-        A function with 1 list element as input.
-    
+    l : list[T] | dict[Any, T]
+        The list or dict
+    func : _type_, optional
+        A function with 1 list element as input, by default lambdax:True
+
     Returns
     -------
-    Number of instances where func returned Truthy on list elements.
+    int
+        Number of instances where func returned Truthy on list elements
     """
     if isinstance(l, list):
         return sum([1 if func(e) else 0 for e in l])
@@ -89,14 +90,19 @@ def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lamb
 class TechnologyTree:
     """
     A representation of the technology tree for more effective technology limitations.
-    Now we only need to store the 'caps' of the tree.
+    We only need to store the 'caps' of the tree.
     We want to be able to, given a cap researches of a technological limitation, add two tech limits, subtract them, 
     and most importantly determine if all researches imply another tech limit (>=).
     The fastest way to do this will be to provide a function that determines if a research is greater than, less than, equal to, or skew to another research.
+
     Let A and B be researches.
-    A > B iff B is a prerequisite of A
-    A = B iff they are the same research
-    A < B iff A is a prerequisite of B
+
+    A > B iff B is a prerequisite of A.
+
+    A = B iff they are the same research.
+
+    A < B iff A is a prerequisite of B.
+
     A X B (X = 'skew') iff None of the above 3 apply.
     """
     reference_map: dict[str, int]

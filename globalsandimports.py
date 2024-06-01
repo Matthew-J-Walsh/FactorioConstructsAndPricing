@@ -27,7 +27,7 @@ class CallableSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         return None
 
-class CallableDualSolver(Protocol):
+class CallableSparseSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
@@ -60,7 +60,6 @@ DEBUG_SOLVERS: bool = True #Should be set to True for debugging of solvers, will
 DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 SUPRESS_EXCEL_ERRORS: bool = False #Should Excel errors be supressed to prevent future factories from being dumped.
-DEBUG_REFERENCE_LIST = [] #copy of reference list for debugging difficult construct problems.
 WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
 
 SOLVER_TOLERANCES = {'rtol': 1e-4, 'atol': 1e-6}

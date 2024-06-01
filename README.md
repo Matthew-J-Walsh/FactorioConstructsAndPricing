@@ -20,7 +20,7 @@ This project is exclusively written in python and all relevent imports are in (g
  - numexpr
 
 ## Usage
-An example usage is provided in (vanillarun.py). Logging is mostly done with the logging module. The vanilla Factorio data.raw file is saved in (vanilla-rawdata.json). The general pipeline for using this tools is as follows:
+An example usage is provided in (vanillarun.py). Logging is done with the logging module. The vanilla Factorio data.raw file should be saved in (vanilla-rawdata.json). The general pipeline for using this tools is as follows:
 1. Initialize an instance of FactorioInstance from a data.raw file.
 2. Create a FactorioFactoryChain instance to hold the chain of created factories.
 3. Create an initial pricing model as a CompressedVector of Fractions and an initial tech level using FactorioInstance.technological_limitation_from_specification.

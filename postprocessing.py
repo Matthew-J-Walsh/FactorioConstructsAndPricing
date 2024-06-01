@@ -2,20 +2,22 @@ from globalsandimports import *
 from constructs import *
 from lpproblems import *
 
-def compute_transportation_densities(data: dict, pricing_model: CompressedVector) -> list[tuple[str, str, Fraction | float]]:
-    """
-    Calculates the transporation densities of all relevent items given a pricing model.
+def compute_transportation_densities(pricing_model: CompressedVector, data: dict) -> list[tuple[str, str, float]]:
+    """Calculates the transporation densities of all relevent items/fluids given a pricing model
 
     Parameters
     ----------
-    data:
+    pricing_model : CompressedVector
+        Pricing model obtained of calculated factory
+    data : dict
         The entire data.raw
-    pricing_model:
-        Pricing model obtained of calculated factory. Should be stripped of all non-relevent or unwanted items.
 
     Returns
     -------
-    CompressedVector of the various labeled transportation densities.
+    list[tuple[str, str, float]]
+        Name of item/fluid,
+        Transport type,
+        Density in type
     """
     output: list[tuple[str, str, float]] = []
     for ident, value in pricing_model.items():
@@ -29,10 +31,10 @@ def compute_transportation_densities(data: dict, pricing_model: CompressedVector
             for wagon in data['cargo-wagon'].values():
                 output.append((ident, wagon['name']+" cargo-wagon", value * data[item_cata][ident]['stack_size'] * wagon['inventory_size']))
         elif ident in data['fluid'].keys():
-            fluid_transport_density_helper(ident, value, output, data)
+            output = output + fluid_transport_density_helper(ident, value, data)
         elif '@' in ident:
             if ident.split('@')[0] in data['fluid'].keys():
-                fluid_transport_density_helper(ident.split('@')[0], value, output, data)
+                output = output + fluid_transport_density_helper(ident.split('@')[0], value, data)
             else:
                 logging.error("Unknown object with temperature: "+ident)
         elif ident in ["electric", "heat"]:
@@ -40,12 +42,28 @@ def compute_transportation_densities(data: dict, pricing_model: CompressedVector
         else:
             logging.error("Object without known type: "+ident)
 
-    return output # type: ignore
+    return output
 
-def fluid_transport_density_helper(ident: str, value: float, output: list[tuple[str, str, float]], data: dict):
+def fluid_transport_density_helper(ident: str, value: float, data: dict) -> list[tuple[str, str, float]]:
+    """Calculates the transport density for fluids
+
+    Parameters
+    ----------
+    ident : str
+        name of fluid
+    value : float
+        density of fluid
+    data : dict
+        The entire data.raw
+
+    Returns
+    -------
+    list[tuple[str, str, Fraction | float]]
+        Name of fluid,
+        Transport type,
+        Density in type
     """
-    Helper function for compute_transportation_density for fluids
-    """
+    output: list[tuple[str, str, float]] = []
     container_size, container_stacks = find_fluid_container_size(data, data['fluid'][ident])
     if not container_size is None and not container_stacks is None:
         output.append((ident, "belt", value * container_size))
@@ -55,10 +73,12 @@ def fluid_transport_density_helper(ident: str, value: float, output: list[tuple[
     output.append((ident, "pipe", value * PIPE_EXPECTED_SPEED))
     for wagon in data['fluid-wagon'].values():
         output.append((ident, wagon['name']+" fluid-wagon", value * wagon['capacity'] * (wagon['tank_count'] if 'tank_count' in wagon.keys() else 3)))
+    return output
 
 def find_fluid_container_size(data: dict, fluid: dict) -> tuple[int, int] | tuple[None, None]:
     """
     Finds the fluid container size and stack size.
+    TODO: move this to preprocessing
     """
     assert 'name' in fluid.keys(), fluid
     direct_ancestors_list: set[str] = set()

@@ -238,8 +238,24 @@ def link_lookup_table(module_count: int, building_size: tuple[int, int], avaiabl
             
 
 class CompiledConstruct:
-    """
-    A compiled UncompiledConstruct for fast and low memory column generation.
+    """A compiled UncompiledConstruct for high speed and low memory column generation.
+
+    Members
+    -------
+    origin : UncompiledConstruct
+        Construct to compile
+    lookup_table:  ModuleLookupTable
+        Lookup table associated with this Construct
+    effect_transform : sparse.csr_matrix
+        Effect this construct has in multilinear form
+    base_cost_vector : np.ndarray
+        Cost vector associated with the module-less and beacon-less construct
+    required_price_indices : np.ndarray
+        TODO: Do this differently
+    paired_cost_transform : np.ndarray
+        Additional cost vector from effects, Currently 0 for various reasons
+    isa_mining_drill : bool
+        If this construct should be priced based on size when calculating in size restricted mode
     """
     origin: UncompiledConstruct
     lookup_table: ModuleLookupTable
@@ -247,7 +263,7 @@ class CompiledConstruct:
     base_cost_vector: np.ndarray
     required_price_indices: np.ndarray
     paired_cost_transform: np.ndarray
-    spatially_resticted: bool
+    isa_mining_drill: bool
 
     def __init__(self, origin: UncompiledConstruct, instance):
         """
@@ -273,8 +289,6 @@ class CompiledConstruct:
         for k, v in true_cost.items():
             self.base_cost_vector[instance.reference_list.index(k)] = v
         
-        #self.base_cost_vector = sparse.csr_array(([e for e in true_cost.values()], ([instance.reference_list.index(d) for d in true_cost.keys()], [0 for _ in true_cost])), shape=(len(instance.reference_list),1), dtype=np.longdouble)
-        
         self.required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
 
         self.paired_cost_transform = np.zeros((len(instance.reference_list), len(MODULE_EFFECT_ORDERING)))
@@ -284,81 +298,114 @@ class CompiledConstruct:
         #    else:
         #        base_throughput = sum([v for k, v in origin.deltas.items() if k not in instance.data_raw['fluid'].keys()])
 
-        self.spatially_resticted = origin.building['type']=="mining-drill"
+        self.isa_mining_drill = origin.building['type']=="mining-drill"
             
     def vector(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation, spatial_mode: bool) -> tuple[np.ndarray, float, np.ndarray, str | None]:
-        """
-        Produces the best vector possible given a pricing model.
+        """Produces the best vector possible given a pricing model
 
         Parameters
         ----------
-        pricing_vector:
-            Pricing model to use. If none is given, give the un-modded version.
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        spatial_mode : bool
+            TODO
 
         Returns
         -------
-        A column vector, its true cost vector, and its ident.
-        If the construct surpasses current tech limits it returns null size vectors and None for ident.
+        tuple[np.ndarray, float, np.ndarray, str | None]
+            Best construct values:
+            Effect Vector,
+            Scalar Cost,
+            True Cost Vector,
+            Name
+
+            Returns empty arrays, nans, and None if construct cannot be made
         """
         #TODO: make priced_indices just a mask instead of the np.where-ified version
         if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
-            column, cost, true_cost, ident = np.zeros((pricing_vector.shape[0], 0)), 0, np.zeros((pricing_vector.shape[0], 0)), None
+            column, cost, true_cost, ident = np.zeros((pricing_vector.shape[0], 0)), np.nan, np.zeros((pricing_vector.shape[0], 0)), None
         elif dual_vector is None:
             column, true_cost, ident = self._generate_vector(0)
             if spatial_mode:
-                if self.spatially_resticted:
+                if self.isa_mining_drill:
                     cost = np.dot(self.base_cost_vector, pricing_vector)
                 else:
                     cost = 0
             else:
                 cost = np.dot(self.base_cost_vector, pricing_vector)
         else:
-            e, c = self.evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
+            e, c = self._evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
                 
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
-                assert spatial_mode and not self.spatially_resticted
+                assert spatial_mode and not self.isa_mining_drill
                 index = int(np.argmax(e))
             else:
-                assert not spatial_mode or self.spatially_resticted
+                assert not spatial_mode or self.isa_mining_drill
                 index = int(np.argmax(e / c))
             cost = c[index]
             column, true_cost, ident = self._generate_vector(index)
 
-        if spatial_mode and not self.spatially_resticted:
+        if spatial_mode and not self.isa_mining_drill:
             assert cost==0
         
         return column, cost, true_cost, ident
 
-    def evaluate(self, pricing_vector, priced_indices, dual_vector, spatial_mode) -> tuple[np.ndarray, np.ndarray]:
+    def _evaluate(self, pricing_vector, priced_indices, dual_vector, spatial_mode) -> tuple[np.ndarray, np.ndarray]:
+        """Evaluation of this construct
+
+        Parameters
+        ----------
+        pricing_vector : _type_
+            Pricing model to use
+        priced_indices : _type_
+            What indices of the pricing vector are actually priced
+        dual_vector : _type_
+            Dual vector to calculate with
+        spatial_mode : _type_
+            TODO
+            
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray]
+            Numerator of evaluations (-np.inf if cannot be made),
+            Denominator of evaluations
+        """        
         if spatial_mode:
-            if self.spatially_resticted: #placement restricted so we take out the paired cost transform and send it TODO: paired_cost_transform
+            if self.isa_mining_drill: #placement restricted so we take out the paired cost transform and send it TODO: paired_cost_transform
                 e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, np.zeros(self.paired_cost_transform.shape[1]), np.dot(self.base_cost_vector, pricing_vector))
             else: #no placement restrictions so we set pricing vector to zero (as we don't add in any more costs) and everything has a cost of 1. This means evaluate will give us the column maximizing the dual vector without considering the cost.
                 e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, np.zeros_like(pricing_vector), priced_indices, np.zeros(self.paired_cost_transform.shape[1]), 0)
         else:
             assert np.dot(self.base_cost_vector, pricing_vector) != 0
             e, c = self.lookup_table.evaluate(self.effect_transform @ dual_vector, pricing_vector, priced_indices, self.paired_cost_transform.T @ pricing_vector, np.dot(self.base_cost_vector, pricing_vector))
-        return e,c
+        return e, c
 
-    #Total time: 341.247 s UM WHAT?
     def _generate_vector(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
-        """
-        Calculates the vector information of a module setup.
+        """Calculates the vector information of a module setup
 
         Parameters
         ----------
-        index:
-            Index of the module setup to use.
-        
+        index : int
+            Index of the module setup to use
+
         Returns
         -------
-        A column vector, its true cost vector, and its ident.
+        tuple[np.ndarray, np.ndarray, str]
+            A column vector, 
+            its true cost vector, 
+            its ident
         """
         module_setup = self.lookup_table.module_setups[index]
         ident = self.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.lookup_table.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
         
-        column: np.ndarray = self.lookup_table.effect_transform[index] @ self.effect_transform #slow line
+        column: np.ndarray = self.lookup_table.effect_transform[index] @ self.effect_transform
         cost: np.ndarray = self.lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, self.lookup_table.effect_transform[index]) + self.base_cost_vector
 
         assert (cost>=0).all(), self.origin.ident
@@ -367,29 +414,51 @@ class CompiledConstruct:
         return np.reshape(column, (-1, 1)), np.reshape(cost, (-1, 1)), ident
     
     def efficency_dump(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, spatial_mode: bool = False) -> CompressedVector:
-        """
-        Dumps the efficiency of all possible constructs.
+        """Dumps the efficiency of all possible constructs
+
+        Parameters
+        ----------
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        spatial_mode : bool
+            TODO
+
+        Returns
+        -------
+        CompressedVector
+            Efficiency Table
+
+        Raises
+        ------
+        ValueError
+            Debugging issues
         """
         if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
             return CompressedVector()
         else:
-            e, c = self.evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
+            e, c = self._evaluate(pricing_vector, priced_indices, dual_vector, spatial_mode)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
-                assert spatial_mode and not self.spatially_resticted
+                assert spatial_mode and not self.isa_mining_drill
                 evaluation = e
             else:
                 evaluation = (e / c)
             try:
                 assert not np.isnan(evaluation).any()
             except:
-                logging.info(self.effect_transform @ dual_vector)
-                logging.info(np.dot(self.base_cost_vector, pricing_vector))
-                logging.info(np.isclose(c, 0))
-                logging.info(e)
-                logging.info(c)
+                logging.debug(self.effect_transform @ dual_vector)
+                logging.debug(np.dot(self.base_cost_vector, pricing_vector))
+                logging.debug(np.isclose(c, 0))
+                logging.debug(e)
+                logging.debug(c)
                 raise ValueError(self.origin.ident)
             for i in range(evaluation.shape[0]):
                 output.update({self._generate_vector(i)[2]: evaluation[i]})
@@ -400,35 +469,43 @@ class CompiledConstruct:
         return self.origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
 
 class ComplexConstruct:
-    """
-    A true construct. A formation of subconstructs with stabilization values.
+    """A true construct. A formation of subconstructs with stabilization values.
 
     Members
     -------
-    subconstructs:
-        Other ComplexConstructs that make up this construct
-    stabilization:
-        What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct.
+    subconstructs : list[ComplexConstruct] | list[CompiledConstruct]
+        ComplexConstructs that makeup this Complex Construct
+    stabilization : dict
+        What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct
+    ident : str
+        Name for this construct
     """
     subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
     stabilization: dict
     ident: str
 
     def __init__(self, subconstructs: list[ComplexConstruct], ident: str) -> None:
+        """
+        Parameters
+        ----------
+        subconstructs : list[ComplexConstruct]
+            ComplexConstructs that makeup this Complex Construct
+        ident : str
+            Name for this construct
+        """
         self.subconstructs = subconstructs
         self.stabilization = {}
         self.ident = ident
 
     def stabilize(self, row: int, direction: int) -> None:
-        """
-        Applies stabilization on this ComplexConstruct.
+        """Applies stabilization on this ComplexConstruct
 
         Parameters
         ----------
-        row:
-            Which row to stabilize.
-        direction:
-            Direction of stabilization. 1: Positive, 0: Positive and Negative, -1: Negative.
+        row : int
+            Which row to stabilize
+        direction : int
+            Direction of stabilization. 1: Positive, 0: Positive and Negative, -1: Negative
         """
         if row in self.stabilization.keys():
             if direction==0 or self.stabilization[row]==0 or direction!=self.stabilization[row]:
@@ -437,17 +514,28 @@ class ComplexConstruct:
             self.stabilization[row] = direction
 
     def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation, spatial_mode: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
-        """
-        Produces the best vector possible given a pricing model.
+        """Produces the best vectors possible given a pricing model
 
         Parameters
         ----------
-        pricing_vector:
-            Pricing model to use. If none is given, give the un-modded version.
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        spatial_mode : bool
+            TODO
 
         Returns
         -------
-        A column vector, its true cost vector, and its ident.
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
+            Matrix of effect vectors,
+            Vector of costs,
+            Matrix of exact costs,
+            Ident vectors
         """
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
         vectors, costs, true_costs, idents = zip(*[sc.vectors(pricing_vector, priced_indices, dual_vector, known_technologies, spatial_mode) for sc in self.subconstructs]) # type: ignore
@@ -494,30 +582,42 @@ class ComplexConstruct:
         return vector, cost, true_cost, ident
 
     def reduce(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation, spatial_mode: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
-        """
-        Produces the best vectors possible given a pricing model. Additionally removes columns that cannot be used because their inputs cannot be made.
+        """Produces the best vectors possible given a pricing model. 
+        Additionally removes columns that cannot be used because their inputs cannot be made.
         Additionally sorts the columns (based on their hash hehe).
 
         Parameters
         ----------
-        pricing_vector:
-            Pricing model to use. If none is given, give the un-modded version.
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        spatial_mode : bool
+            TODO
 
         Returns
         -------
-        A column vector, its true cost vector, and its ident.
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
+            Matrix of effect vectors,
+            Vector of costs,
+            Matrix of exact costs,
+            Ident vectors
         """
         vector, cost, true_cost, ident = self.vectors(pricing_vector, priced_indices, dual_vector, known_technologies, spatial_mode)
         mask = np.full(vector.shape[1], True, dtype=bool)
 
         valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
-        logging.info("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+        logging.debug("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
         last_mask = np.full(vector.shape[1], False, dtype=bool)
         while (last_mask!=mask).any():
             last_mask = mask.copy()
             valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0
             mask = np.logical_and(mask, np.logical_not(np.asarray((vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
-            logging.info("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+            logging.debug("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
     
         vector = vector[:, mask]
         cost = cost[mask]
@@ -530,21 +630,33 @@ class ComplexConstruct:
         #return vector, cost, ident
         return vector[:, sort_list], cost[sort_list], true_cost[:, sort_list], ident[sort_list]
 
-
     def efficiency_analysis(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, spatial_mode: bool = False) -> float:
-        """
-        Determines the best possible realizable efficiency of the construct. 
+        """Determines the best possible realizable efficiency of the construct
 
         Parameters
         ----------
-        pricing_vector:
-            Pricing model to use.
-        dual_vector:
-            Dual pricing model to use. If none is given, give the un-modded version.
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        valid_rows : np.ndarray
+            Outputing rows of the dual
+        spatial_mode : bool
+            TODO
 
         Returns
         -------
-        Efficiency decimal, 1 should mean as efficient as optimal factory elements.
+        float
+            Efficiency decimal, 1 should mean as efficient as optimal factory elements
+
+        Raises
+        ------
+        RuntimeError
+            Error with optimization that shouldn't happen
         """
         vector, cost, true_cost, ident = self.vectors(pricing_vector, priced_indices, dual_vector, known_technologies, spatial_mode)
 
@@ -561,7 +673,7 @@ class ComplexConstruct:
         if not self.ident in POST_ANALYSES.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
             return np.max(np.divide(vector.T @ dual_vector, cost)) # type: ignore
         else:
-            logging.info("Doing special post analysis calculating for: "+self.ident)
+            logging.debug("Doing special post analysis calculating for: "+self.ident)
             stabilizable_rows = np.where(np.logical_and(np.asarray((vector > 0).sum(axis=1)), np.asarray((vector < 0).sum(axis=1))))[0]
             stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(POST_ANALYSES[self.ident].keys())))[0])
 
@@ -571,7 +683,7 @@ class ComplexConstruct:
 
             primal_diluted, dual = BEST_LP_SOLVER(R, u, c)
             if primal_diluted is None or dual is None:
-                logging.info("Efficiency analysis for "+self.ident+" was unable to solve initial problem, returning nan.")
+                logging.debug("Efficiency analysis for "+self.ident+" was unable to solve initial problem, returning nan.")
                 return np.nan
 
             Rp = np.concatenate([c.reshape((1, -1)), R], axis=0)
@@ -590,32 +702,61 @@ class ComplexConstruct:
                ("\n\tWith Stabilization: "+str(self.stabilization) if len(self.stabilization.keys()) > 0 else "")
 
 class SingularConstruct(ComplexConstruct):
-    """
-    Base case ComplexConstruct, only a single UncompiledConstruct is used to create.
+    """Base case ComplexConstruct, only a single UncompiledConstruct is used to create.
     """
 
     def __init__(self, subconstruct: CompiledConstruct) -> None:
+        """_summary_
+
+        Parameters
+        ----------
+        subconstruct : CompiledConstruct
+            The singular element of this construct.
+        """        
         self.subconstructs = [subconstruct]
         self.stabilization = {}
         self.ident = subconstruct.origin.ident
 
     def stabilize(self, row: int, direction: int) -> None:
-        raise RuntimeError("Cannot stabilize a singular constuct.")
-
-    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation, spatial_mode: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
-        """
-        Produces the best vector possible given a pricing model.
+        """Cannot stabilize a singular constuct
 
         Parameters
         ----------
-        pricing_vector:
-            Pricing model to use.
-        dual_vector:
-            Dual pricing model to use. If none is given, give the un-modded version.
+        row : int
+            Don't use
+        direction : int
+            Don't use
+
+        Raises
+        ------
+        RuntimeError
+            Cannot stabilize a singular constuct
+        """        
+        raise RuntimeError("Cannot stabilize a singular constuct.")
+
+    def vectors(self, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation, spatial_mode: bool) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+        """Produces the best vector possible given a pricing model
+
+        Parameters
+        ----------
+        pricing_vector : np.ndarray
+            Pricing model to use
+        priced_indices : np.ndarray
+            What indices of the pricing vector are actually priced
+        dual_vector : np.ndarray | None
+            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+        spatial_mode : bool
+            TODO
 
         Returns
         -------
-        A column vector, its true cost vector, and its ident.
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
+            Matrix of effect vectors,
+            Vector of costs,
+            Matrix of exact costs,
+            Ident vectors
         """
         vector, cost, true_cost, ident = self.subconstructs[0].vector(pricing_vector, priced_indices,  dual_vector, known_technologies, spatial_mode) # type: ignore
         if ident is None:

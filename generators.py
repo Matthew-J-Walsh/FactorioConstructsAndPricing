@@ -608,7 +608,7 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
     all_uncompiled_constructs = []
 
     for building_type in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']:
-        logging.info("Starting construct generation of machines in category: %s", building_type)
+        logging.debug("Starting construct generation of machines in category: %s", building_type)
         for machine in data[building_type].values():
             logging.log(5, "Starting processing of machine: %s", machine['name'])
 

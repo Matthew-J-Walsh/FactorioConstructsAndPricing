@@ -132,7 +132,7 @@ def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
     enabled_technologies = list(filter(lambda tech: not 'enabled' in tech.keys() or tech['enabled'], data['technology'].values()))
     #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html#enabled
 
-    logging.info("Beginning the linking of technologies. %d technologies found.", len(enabled_technologies))
+    logging.debug("Beginning the linking of technologies. %d technologies found.", len(enabled_technologies))
     for tech in enabled_technologies:
         tech['prereq_set'] = [] #will eventually contain technologies that are direct requirements to unlocking this one
         tech['prereq_of'] = [] #will eventually contain technologies that this is a direct unlock requirement of
@@ -181,7 +181,7 @@ def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
             machine['limit'] = TechnologicalLimitation(tech_tree)
             for recipe in data['recipe'].values():
                 if any([k==machine["name"] and v > 0 for k, v in recipe['vector'].items()]):
-                    logging.info("Found machine "+machine['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
+                    logging.debug("Found machine "+machine['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                     machine['limit'] = machine['limit'] + recipe['limit']
                 
     logging.debug("Linking of all modules to their technologies.")
@@ -189,7 +189,7 @@ def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
         module['limit'] = TechnologicalLimitation(tech_tree)
         for recipe in data['recipe'].values():
             if any([k==module["name"] and v > 0 for k, v in recipe['vector'].items()]):
-                logging.info("Found module "+module['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
+                logging.debug("Found module "+module['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 module['limit'] = module['limit'] + recipe['limit']
                 
     logging.debug("Linking of all beacons to their technologies.")
@@ -197,7 +197,7 @@ def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
         beacon['limit'] = TechnologicalLimitation(tech_tree)
         for recipe in data['recipe'].values():
             if any([k==beacon["name"] and v > 0 for k, v in recipe['vector'].items()]):
-                logging.info("Found module "+beacon['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
+                logging.debug("Found module "+beacon['name']+" being made via "+recipe['name']+" which has a limit of "+str(recipe['limit']))
                 beacon['limit'] = beacon['limit'] + recipe['limit']
                 
     logging.debug("Generating blank resource tech limits.")
@@ -225,7 +225,7 @@ def standardize_power(data: dict) -> None:
     data : dict
         Entire data.raw https://wiki.factorio.com/Data.raw
     """
-    logging.info("Beginning the standardization of power. Adds a raw (in Joules) version energy values.")
+    logging.debug("Beginning the standardization of power. Adds a raw (in Joules) version energy values.")
     
     for crafting_machine_type in ['assembling-machine', 'rocket-silo', 'furnace']:
         for machine in data[crafting_machine_type].values(): #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
