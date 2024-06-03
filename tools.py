@@ -303,7 +303,7 @@ class FactorioInstance():
         TechnologicalLimitation
             Specified TechnologicalLimitation
         """
-        return technological_limitation_from_specification(self, self.COST_MODE, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
+        return technological_limitation_from_specification(self, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
 def _efficiency_analysis(construct: ComplexConstruct, pricing_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray, 
                         known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, spatial_mode: bool) -> CompressedVector:
@@ -608,7 +608,7 @@ class FactorioScienceFactory(FactorioFactory):
         """
         #assert not any([target in self.instance.data_raw['tool'].keys() for target in targets.keys()]), "retarget should NEVER be given a tool. Only researches."
         assert all([t in self.targets.keys() for t in targets]), "retarget should never add new targets... yet."
-        covering_to: TechnologicalLimitation = technological_limitation_from_specification(self.instance, self.instance.COST_MODE, fully_automated=self.clear) + \
+        covering_to: TechnologicalLimitation = self.instance.technological_limitation_from_specification(fully_automated=self.clear) + \
                       TechnologicalLimitation(self.instance.tech_tree, [set([target for target in targets.keys()])])
         last_coverage: TechnologicalLimitation = self._previous_coverage()
 
