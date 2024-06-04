@@ -66,6 +66,18 @@ class CompressedVector(dict):
 
     def __lt__(self, other: CompressedVector) -> bool:
         return hash(self) < hash(other)
+    
+    def norm(self) -> CompressedVector:
+        """Returns a version of self with unit length 1.
+
+        Returns
+        -------
+        CompressedVector
+            A version of self with unit length 1
+        """
+        scale = 1#float(1000000 / np.linalg.norm([float(v) for v in self.values()]))
+        return CompressedVector({k: v * scale for k, v in self.items()})
+
 
 def count_via_lambda(l: list[T] | dict[Any, T], func: Callable[[T], bool] = lambda x: True) -> int:
     """Counting helper for lists or dicts, counts how many elements in the list return true when passed to function func
@@ -634,8 +646,6 @@ def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
             mask[i] = True #mask[i] will compute to false in last line because its not strictly greater than every point in self.
     
     return np.where(mask)[0]
-
-
 
 
 

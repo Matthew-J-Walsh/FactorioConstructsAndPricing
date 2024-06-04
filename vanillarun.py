@@ -9,12 +9,26 @@ logging.getLogger().addHandler(logging.StreamHandler())
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(ore_area_optimized=False):
+def vanilla_main(optimization_mode: dict | str = 'spatial'):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
     vanilla = FactorioInstance(gamefiles_filename)
     print("Instance built.")
+
+    if isinstance(optimization_mode, dict):
+        uncompiled_cost_function = hybrid_cost_function(optimization_mode, vanilla)
+    elif optimization_mode in ['standard', 'basic', 'simple', 'baseline', 'dual']:
+        uncompiled_cost_function = standard_cost_function
+    elif optimization_mode in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
+        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies: spatial_cost_function(vanilla.spatial_pricing, construct, lookup_indicies)
+    elif optimization_mode in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
+        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies: ore_cost_function(vanilla.raw_ore_pricing, construct, lookup_indicies)
+    else:
+        raise ValueError(optimization_mode)
+    
+    logging.info("Ore mode info")
+    logging.info(vanilla.raw_ore_pricing)
 
     nuclear_targets = [
     "heat from nuclear-reactor via uranium-fuel-cell", 
@@ -55,7 +69,7 @@ def vanilla_main(ore_area_optimized=False):
     #        logging.info(cc.subconstructs[0].lookup_table)
 
     logging.info("=============================================")
-    vanilla_chain = FactorioFactoryChain(vanilla, ore_area_optimized=ore_area_optimized)
+    vanilla_chain = FactorioFactoryChain(vanilla, uncompiled_cost_function)
 
     starting_pricing = {}
     starting_pricing['electric'] = .000001
@@ -186,15 +200,13 @@ def vanilla_main(ore_area_optimized=False):
             p0_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
             for k, v in vanilla_chain.chain[-3].full_optimal_pricing_model.items():
                 p0_j[vanilla.reference_list.index(k)] = v
+            cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies)
             p_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
             for k, v in vanilla_chain.chain[-2].full_optimal_pricing_model.items():
                 assert not np.isnan(v), k
                 p_j[vanilla.reference_list.index(k)] = v
             priced_indices =  np.array([vanilla.reference_list.index(k) for k in vanilla_chain.chain[-3].optimal_pricing_model.keys()])
-            if ore_area_optimized:
-                logging.info(cc.subconstructs[0].efficency_dump(vanilla.spatial_pricing, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies, spatial_mode=ore_area_optimized))
-            else:
-                logging.info(cc.subconstructs[0].efficency_dump(p0_j, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies, spatial_mode=ore_area_optimized))
+            logging.info(cc.subconstructs[0].efficency_dump(cost_function, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies))
 
     vanilla_chain.dump_to_excel(output_file)
 

@@ -4,8 +4,8 @@ from lookuptables import *
 from utils import *
 from lpsolvers import *
 
-def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, p0_j: np.ndarray, priced_indices: np.ndarray, known_technologies: TechnologicalLimitation,
-                                       dual_guess: np.ndarray | None = None, spatial_mode: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, known_technologies: TechnologicalLimitation,
+                                       dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
 
     Parameters
@@ -22,8 +22,6 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         Current tech level
     dual_guess : np.ndarray | None, optional
         Guess for the dual vector, by default None
-    spatial_mode : bool, optional
-        _description_, by default False
 
     Returns
     -------
@@ -42,7 +40,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
     """
     primal, dual = None, dual_guess
 
-    vectors, costs, true_costs, idents = construct.reduce(p0_j, priced_indices, dual, known_technologies, spatial_mode=spatial_mode)
+    vectors, costs, true_costs, idents = construct.reduce(cost_function, priced_indices, dual, known_technologies)
     i = 0
     vc = vectors.copy()
     vc[vc < 0] = 0
@@ -68,7 +66,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         assert not np.isclose(np.dot(c_i, primal), 0)
         assert not np.isclose(dual, 0).all()
         
-        new_vectors, new_costs, new_true_costs, new_idents = construct.reduce(p0_j, priced_indices, dual, known_technologies, spatial_mode=spatial_mode)
+        new_vectors, new_costs, new_true_costs, new_idents = construct.reduce(cost_function, priced_indices, dual, known_technologies)
         optimal_new_columns = linear_transform_is_gt(new_vectors.T, dual, .99 * new_costs)
         new_vectors, new_costs, new_true_costs, new_idents = new_vectors[:, optimal_new_columns], new_costs[optimal_new_columns], new_true_costs[:, optimal_new_columns], new_idents[optimal_new_columns]
         new_mask = true_new_column_mask(idents, new_idents)
@@ -80,17 +78,10 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
 
         optimal_columns = linear_transform_is_gt(vectors.T, dual, .99 * c_i)
 
-        if spatial_mode:
-            vectorsMinus = vectors.copy()
-            vectorsMinus[vectorsMinus > 0] = 0
-            vectorsPlus = vectors.copy()
-            vectorsPlus[vectorsPlus < 0] = 0
-            evalt = ((vectors.T @ dual) - c_i)
-            evall = ((vectorsMinus.T @ dual))
-            evalh = ((vectorsPlus.T @ dual))
-            logging.debug("Suboptimal columns removed are: "+"\n\t".join([repr(ident)+" with relative value: "+str(val)+" ; "+str(val_h)+" ; "+str(val_l)+" ; "+str(val_c) for ident, val, val_h, val_l, val_c in zip(idents[np.where(np.logical_not(optimal_columns))[0]], evalt[np.where(np.logical_not(optimal_columns))[0]], evall[np.where(np.logical_not(optimal_columns))[0]], evalh[np.where(np.logical_not(optimal_columns))[0]], c_i[np.where(np.logical_not(optimal_columns))[0]])]))
-        else:
-            logging.debug("Suboptimal columns removed are: "+"\n\t".join([repr(ident)+" with relative value: "+str(val) for ident, val in zip(idents[np.where(np.logical_not(optimal_columns))[0]], ((vectors.T @ dual) / c_i)[np.where(np.logical_not(optimal_columns))[0]])]))
+        #if spatial_mode:
+        #    logging.debug("Suboptimal columns removed are: "+"\n\t".join([repr(ident)+" with relative value: "+str(val)+" ; "+str(val_h)+" ; "+str(val_l)+" ; "+str(val_c) for ident, val, val_h, val_l, val_c in zip(idents[np.where(np.logical_not(optimal_columns))[0]], evalt[np.where(np.logical_not(optimal_columns))[0]], evall[np.where(np.logical_not(optimal_columns))[0]], evalh[np.where(np.logical_not(optimal_columns))[0]], c_i[np.where(np.logical_not(optimal_columns))[0]])]))
+        #else:
+        #    logging.debug("Suboptimal columns removed are: "+"\n\t".join([repr(ident)+" with relative value: "+str(val) for ident, val in zip(idents[np.where(np.logical_not(optimal_columns))[0]], ((vectors.T @ dual) / c_i)[np.where(np.logical_not(optimal_columns))[0]])]))
 
         vectors = np.concatenate([vectors[:, np.where(optimal_columns)[0]], new_vectors[:, true_news]], axis=1)
         costs = np.concatenate((costs[np.where(optimal_columns)[0]], new_costs[true_news]))
