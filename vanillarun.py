@@ -9,7 +9,7 @@ logging.getLogger().addHandler(logging.StreamHandler())
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(optimization_mode: dict | str = 'spatial'):
+def vanilla_main(optimization_mode: dict | str = 'standard'):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
@@ -42,9 +42,9 @@ def vanilla_main(optimization_mode: dict | str = 'spatial'):
     ("uranium-ore in electric-mining-drill", False)]
 
     nuclear_construct = vanilla.bind_complex_constructs(nuclear_targets)
-    POST_ANALYSES.update({nuclear_construct: {vanilla.reference_list.index("electric"): 1e10}})
-    POST_ANALYSES.update({"solar-panel": {vanilla.reference_list.index("electric"): 1e10}})
-    POST_ANALYSES.update({"electric from steam-engine via steam@165": {vanilla.reference_list.index("electric"): 1e10}})
+    vanilla.add_post_analysis(nuclear_construct, {vanilla.reference_list.index("electric"): 1e10})
+    vanilla.add_post_analysis("solar-panel", {vanilla.reference_list.index("electric"): 1e10})
+    vanilla.add_post_analysis("electric from steam-engine via steam@165", {vanilla.reference_list.index("electric"): 1e10})
 
     logging.info("=============================================")
     logging.info(str(list(enumerate(vanilla.reference_list))))

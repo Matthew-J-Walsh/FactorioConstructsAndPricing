@@ -628,20 +628,13 @@ def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
     np.ndarray
         Indicies of the list that are pareto frontier elements
     """
+    raise DeprecationWarning("Pareto frontier not updated")
     if len(l)==0:
         return np.array([])
     revelent_points = np.vstack([p.data for p in l])
     mask = np.full(revelent_points.shape[0], True, dtype=bool)
     for i in range(revelent_points.shape[0]):
         if mask[i]:
-            #if len(l)>5:
-            #    print(len(l))#10
-            #    print(mask.shape)#(10,)
-            #    print(l[0].shape)#(397, 1)
-            #    print(revelent_points.shape)#(10, 2)
-            #    print(revelent_points[i, :].shape)#(2,)
-            #    print((revelent_points > revelent_points[i, :]).shape)#(10,2)
-            #    print(np.any(revelent_points > revelent_points[i, :], axis=1).shape)#(10,)
             mask = np.logical_and(mask, np.any(revelent_points > revelent_points[i, :], axis=1))
             mask[i] = True #mask[i] will compute to false in last line because its not strictly greater than every point in self.
     

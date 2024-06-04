@@ -42,6 +42,8 @@ class FactorioInstance():
         What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     RELEVENT_FLUID_TEMPERATURES : dict
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities
+    post_analyses : dict[str, dict[int, float]]
+        Post analysis calculations to run, construct name and target outputs
     """
     data_raw: dict
     tech_tree: TechnologyTree
@@ -55,6 +57,7 @@ class FactorioInstance():
     raw_ore_pricing: np.ndarray
     COST_MODE: str
     RELEVENT_FLUID_TEMPERATURES: dict
+    post_analyses: dict[str, dict[int, float]]
 
     def __init__(self, filename: str, COST_MODE: str = 'normal', nobuild: bool = False, raw_ore_pricing: dict[str, Real] | CompressedVector | None = None) -> None:
         """
@@ -103,6 +106,8 @@ class FactorioInstance():
                     self.raw_ore_pricing[self.reference_list.index(resource['name'])] = 1
                 else:
                     raise ValueError(resource)
+                
+        self.post_analyses = {}
 
         if not nobuild:
             logging.debug("Building complex constructs.")
@@ -286,7 +291,7 @@ class FactorioInstance():
                 s = s + s_i[i] * N_i[i]
         valid_rows = np.asarray((R_j_i > 0).sum(axis=1)).flatten() > 0
         
-        k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, priced_indices, p_j, known_technologies, valid_rows)
+        k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, priced_indices, p_j, known_technologies, valid_rows, self.post_analyses)
 
         fc_i = C_j_i @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
@@ -319,8 +324,21 @@ class FactorioInstance():
         """
         return technological_limitation_from_specification(self, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
+    def add_post_analysis(self, target_name: str, target_outputs: dict[int, float]):
+        """Adds a construct to the special post analysis list
+
+        Parameters
+        ----------
+        target_name : str
+            Construct ident
+        target_outputs : dict[int, float]
+            Output targets to optimize on for the target
+        """        
+        self.post_analyses.update({target_name: target_outputs})
+
+
 def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, 
-                        known_technologies: TechnologicalLimitation, valid_rows: np.ndarray) -> CompressedVector:
+                        known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> CompressedVector:
     """Constructs an efficency analysis of a ComplexConstruct recursively
 
     Parameters
@@ -346,8 +364,8 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[C
     efficiencies: CompressedVector = CompressedVector({})
     for sc in construct.subconstructs:
         if isinstance(sc, ComplexConstruct):
-            efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, priced_indices, dual_vector, known_technologies, valid_rows)})
-            efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, priced_indices, dual_vector, known_technologies, valid_rows)
+            efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)})
+            efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)
     return efficiencies
 
 
@@ -454,7 +472,7 @@ class FactorioFactory():
 
         return not same
 
-    def retarget(self, targets: CompressedVector, retainment: float = RETAINMENT_VALUE) -> None:
+    def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Rebuilds targets. This is useful if iteratively optimizing a built chain.
         After this, one should re-run calculate_optimal_factory and if it returns False then the pricing model didn't change even after retargeting.
 
@@ -612,7 +630,7 @@ class FactorioScienceFactory(FactorioFactory):
         """
         return self._previous_coverage() + TechnologicalLimitation(self.instance.tech_tree, [set([targ[:targ.rfind("=")] for targ in self.targets.keys()])])
 
-    def retarget(self, targets: CompressedVector, retainment: float = RETAINMENT_VALUE) -> None:
+    def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Rebuilds targets. This is useful if iteratively optimizing a built chain.
         After this, one should re-run calculate_optimal_factory and if it returns False then the pricing model didn't change even after retargeting.
         Will make sure all technologies cleared by self.clear set are still in targets.
@@ -677,7 +695,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         """
         return self.known_technologies
     
-    def retarget(self, targets: CompressedVector, retainment: float = RETAINMENT_VALUE) -> None:
+    def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Placeholder. Initial Factories cannot change.
         """
         return None
@@ -794,9 +812,9 @@ class FactorioFactoryChain():
                         continue #skip tools in material factories
                     for item in self.instance.data_raw[item_cata].keys():
                         if not item in self.instance.reference_list:
-                            if not item in WARNING_LIST:
+                            if not item in OUTPUT_WARNING_LIST:
                                 logging.warning("Detected some a weird "+item_cata+": "+item)
-                                WARNING_LIST.append(item)
+                                OUTPUT_WARNING_LIST.append(item)
                         elif self.instance.reference_list.index(item) in R_j_i.row:
                             targets_dict[item] = Fraction(1)
                 for fluid in self.instance.data_raw['fluid'].keys():
@@ -808,16 +826,16 @@ class FactorioFactoryChain():
                                 targets_dict[fluid+'@'+str(temp)] = Fraction(1)
                     else:
                         if not fluid in self.instance.reference_list:
-                            if not fluid in WARNING_LIST:
+                            if not fluid in OUTPUT_WARNING_LIST:
                                 logging.warning("Detected some a weird fluid: "+fluid)
-                                WARNING_LIST.append(fluid)
+                                OUTPUT_WARNING_LIST.append(fluid)
                         elif self.instance.reference_list.index(fluid) in R_j_i.row:
                             targets_dict[fluid] = Fraction(1)
                 for other in ['electric', 'heat']:
                     if not other in self.instance.reference_list:
-                        if not other in WARNING_LIST:
+                        if not other in OUTPUT_WARNING_LIST:
                             logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
-                            WARNING_LIST.append(other)
+                            OUTPUT_WARNING_LIST.append(other)
                     if self.instance.reference_list.index(other) in R_j_i.row:
                         targets_dict[other] = Fraction(1)
             logging.info("Auto-targets:\n\t"+str(list(targets_dict.keys())))

@@ -77,7 +77,8 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
 def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray], np.ndarray]:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)
-    'spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space'
+    'spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space' specify the spatial cost method
+    'ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count' specify the ore used cost method
 
     Parameters
     ----------

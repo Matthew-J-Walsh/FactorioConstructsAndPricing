@@ -599,7 +599,8 @@ class ComplexConstruct:
         #return vector, cost, ident
         return vector[:, sort_list], cost[sort_list], true_cost[:, sort_list], ident[sort_list]
 
-    def efficiency_analysis(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation, valid_rows: np.ndarray) -> float:
+    def efficiency_analysis(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, 
+                            known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> float:
         """Determines the best possible realizable efficiency of the construct
 
         Parameters
@@ -637,15 +638,15 @@ class ComplexConstruct:
         if vector.shape[1]==0:
             return np.nan
         
-        if not self.ident in POST_ANALYSES.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
+        if not self.ident in post_analyses.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
             return np.max(np.divide(vector.T @ dual_vector, cost)) # type: ignore
         else:
             logging.debug("Doing special post analysis calculating for: "+self.ident)
             stabilizable_rows = np.where(np.logical_and(np.asarray((vector > 0).sum(axis=1)), np.asarray((vector < 0).sum(axis=1))))[0]
-            stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(POST_ANALYSES[self.ident].keys())))[0])
+            stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(post_analyses[self.ident].keys())))[0])
 
-            R = vector[np.concatenate([np.array([k for k in POST_ANALYSES[self.ident].keys()]), stabilizable_rows]), :]
-            u = np.concatenate([np.array([v for v in POST_ANALYSES[self.ident].values()]), np.zeros_like(stabilizable_rows)])
+            R = vector[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
+            u = np.concatenate([np.array([v for v in post_analyses[self.ident].values()]), np.zeros_like(stabilizable_rows)])
             c = cost - (vector.T @ dual_vector)
 
             primal_diluted, dual = BEST_LP_SOLVER(R, u, c)

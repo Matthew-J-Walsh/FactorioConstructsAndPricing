@@ -58,10 +58,10 @@ MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff
 DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 
-WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
+OUTPUT_WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
 
 SOLVER_TOLERANCES = {'rtol': 1e-4, 'atol': 1e-6}
-RETAINMENT_VALUE = 1e-2
+BASELINE_RETAINMENT_VALUE = 1e-2
 
 #How item's per second a single logistical mobility tool can handle from a construct, solids need both a belt and an inserter, liquids need just pipes.
 #A value of 1 on belts means that for every 15 items a second we need 1 yellow transport belt.
@@ -74,7 +74,4 @@ ITEM_SUB_PROTOTYPES = ['item', 'ammo', 'capsule', 'gun', 'item-with-entity-data'
                        'blueprint', 'copy-paste-tool', 'deconstruction-item', 'upgrade-item', 'module', 'rail-planner', 'spidertron-remote', 'tool', 'armor', 'mining-tool', 'repair-tool']
 #Special identifier for research names so that they don't overlap with other items.
 RESEARCH_SPECIAL_STRING = "=research"
-
-#List of runtime efficiency analyses to do, in the form of tuples of complex construct ident and target dictionary
-POST_ANALYSES: dict[str, dict[int, float]] = {}
 
