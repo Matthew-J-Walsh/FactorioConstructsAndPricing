@@ -15,8 +15,6 @@ import Levenshtein
 import numexpr
 import pandas as pd
 
-import pyscipopt as scip
-import highspy
 import pulp as pl
 
 import typing

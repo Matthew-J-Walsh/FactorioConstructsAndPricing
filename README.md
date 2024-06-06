@@ -14,10 +14,9 @@ The purpose of this project is the implementation of price modeling in Factorio 
 
 ## Installation
 This project is exclusively written in python and all relevent imports are in (globalsandimports.py). Notable non-standard imports are:
- - highspy
- - pulp
- - pyscipopt
  - numexpr
+ - pulp
+ - Levenshtein
 
 ## Usage
 An example usage is provided in (vanillarun.py). Logging is done with the logging module. The vanilla Factorio data.raw file should be saved in (vanilla-rawdata.json). The general pipeline for using this tools is as follows:
