@@ -54,5 +54,5 @@ For detailed information and the full text of the license, please refer to the [
 ## Acknowledgements
  - My parents for letting me work on this project while living in their house.
  - eigenchris on youtube for his amazing series that taught me Tensor Algebra and Tensor Calculus. (https://www.youtube.com/playlist?list=PLJHszsWbB6hrkmmq57lX8BV-o-YIOFsiG) (https://www.youtube.com/playlist?list=PLJHszsWbB6hpk5h8lSfBkVrpjsqvUGTCx)
- - All the legendary Mathmaticians that contributed to humanities understanding of Mathematical Optimization such as Harold W. Kuhn, Albert W. Tucker, William Karush, and Gyula Farkas.
+ - All the legendary mathmaticians that contributed to humanities' understanding of Mathematical Optimization such as Harold W. Kuhn, Albert W. Tucker, William Karush, and Gyula Farkas.
  - All the contributors to the HiGHS, PuLP, and SCIP open source Linear Programming solvers.
