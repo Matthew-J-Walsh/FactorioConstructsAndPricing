@@ -93,6 +93,7 @@ class FactorioInstance():
         for beacon in self.data_raw['beacon'].values():
             self.spatial_pricing[self.reference_list.index(beacon['name'])] = beacon['tile_width'] * beacon['tile_height']
             logging.debug(beacon['name']+" point:"+str(self.reference_list.index(beacon['name']))+" area:"+str(beacon['tile_width'] * beacon['tile_height']))
+        self.spatial_pricing = self.spatial_pricing / np.linalg.norm(self.spatial_pricing)
 
         self.raw_ore_pricing = np.zeros(len(self.reference_list))
         if not raw_ore_pricing is None:
@@ -106,6 +107,7 @@ class FactorioInstance():
                     self.raw_ore_pricing[self.reference_list.index(resource['name'])] = 1
                 else:
                     raise ValueError(resource)
+        self.raw_ore_pricing = self.raw_ore_pricing / np.linalg.norm(self.raw_ore_pricing)
                 
         self.post_analyses = {}
 
@@ -678,7 +680,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.known_technologies = known_technologies
         self.targets = CompressedVector() #TODO can we remove these weird lines?
         self.optimal_factory = CompressedVector()
-        self.optimal_pricing_model = pricing_model
+        self.optimal_pricing_model = pricing_model.norm()
         self.construct_efficiencies = CompressedVector()
     
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray]) -> bool:
