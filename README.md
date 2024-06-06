@@ -1,7 +1,7 @@
 # FactorioConstructsAndPricing
  
 ## Description
-The purpose of this project is the implementation of price modeling in Factorio in order to find and analyze optimal factories in the game Factorio. This project is the implementation of a set of articles which can be accessed here: (https://drive.google.com/drive/folders/1G-ogarwaSEfp_JFCDxrdPlC4wEbExnSA?usp=sharing).
+The purpose of this project is the implementation of price modeling in Factorio in order to find and analyze optimal factories. This project is the implementation of a set of articles which can be accessed here: (https://drive.google.com/drive/folders/1G-ogarwaSEfp_JFCDxrdPlC4wEbExnSA?usp=sharing).
 
 ## Table of Contents
 - [Installation](#installation)
