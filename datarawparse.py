@@ -176,7 +176,7 @@ def link_techs(data: dict, COST_MODE: str) -> TechnologyTree:
         recipe['limit'] = TechnologicalLimitation(tech_tree, recipe_techs)
 
     logging.debug("Linking of all machines to their technologies.")
-    for cata in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']: #https://lua-api.factorio.com/latest/prototypes/EntityWithOwnerPrototype.html
+    for cata in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab', 'accumulator']: #https://lua-api.factorio.com/latest/prototypes/EntityWithOwnerPrototype.html
         for machine in data[cata].values():
             machine['limit'] = TechnologicalLimitation(tech_tree)
             for recipe in data['recipe'].values():
@@ -272,6 +272,9 @@ def standardize_power(data: dict) -> None:
     for fluid in data['fluid'].values(): #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html
         if 'fuel_value' in fluid.keys():
             fluid['fuel_value_raw'] = convert_value_to_base_units(fluid['fuel_value'])
+
+    for accumulator in data['accumulator'].values():
+        accumulator['energy_source']['buffer_capacity_raw'] = convert_value_to_base_units(accumulator['energy_source']['buffer_capacity'])
 
 def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """Adds a base_inputs and vector component to each recipe. 

@@ -669,9 +669,18 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
 
 
             elif machine['type']=='solar-panel': #https://lua-api.factorio.com/latest/prototypes/SolarPanelPrototype.html
-                all_uncompiled_constructs.append(UncompiledConstruct(machine['name'], CompressedVector(), CompressedVector({'electric': machine['production_raw']}), 
-                                                                     {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0,
-                                                                     CompressedVector(), CompressedVector({machine['name']: Fraction(1)}), machine['limit'], machine))
+                for accumulator in data['accumulator'].values():
+                    #For more information on these calculations see https://forums.factorio.com/viewtopic.php?f=5&t=5594
+                    total_day_time = (DAYTIME_VARIABLES['daytime'] + DAYTIME_VARIABLES['nighttime'] + 2 * DAYTIME_VARIABLES['dawntime/dusktime'])
+                    energy_gain_time = (DAYTIME_VARIABLES['daytime'] + DAYTIME_VARIABLES['dawntime/dusktime'])
+                    energy_backup_factor = (DAYTIME_VARIABLES['nighttime'] + DAYTIME_VARIABLES['dawntime/dusktime'] * energy_gain_time / total_day_time) / total_day_time
+                    all_uncompiled_constructs.append(UncompiledConstruct(machine['name']+" with "+accumulator['name'], CompressedVector(), 
+                                                                         CompressedVector({'electric': machine['production_raw'] * energy_gain_time/total_day_time}), 
+                                                                         {'speed': [], 'productivity': [], 'consumption': [], 'pollution': []}, [], 0,
+                                                                         CompressedVector(), 
+                                                                         CompressedVector({machine['name']: Fraction(1), 
+                                                                                           accumulator['name']: energy_gain_time * energy_backup_factor * machine['production_raw'] / accumulator['energy_source']['buffer_capacity_raw']}), 
+                                                                         machine['limit'] + accumulator['limit'], machine))
 
 
             elif machine['type']=='lab': #https://lua-api.factorio.com/latest/prototypes/LabPrototype.html

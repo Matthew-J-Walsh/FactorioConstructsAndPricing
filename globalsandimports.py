@@ -53,8 +53,8 @@ def multilienar_effect_ordering():
 MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
 MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in ACTIVE_MODULE_EFFECTS])
 
-DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
-DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_MODULES: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_BEACONS: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
 
 OUTPUT_WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
 
@@ -73,3 +73,7 @@ ITEM_SUB_PROTOTYPES = ['item', 'ammo', 'capsule', 'gun', 'item-with-entity-data'
 #Special identifier for research names so that they don't overlap with other items.
 RESEARCH_SPECIAL_STRING = "=research"
 
+#Unfortunatly there is really no other way to do this, the day duration information seems to be runtime only so its not avaiable in prototype stage.
+#If daytime is being modified somehow it will need to be adjusted in this global (TODO: move to FactorioInstance? or FactoryChain?)
+#For more information on this calculation see https://forums.factorio.com/viewtopic.php?f=5&t=5594
+DAYTIME_VARIABLES: dict[str, Fraction] = {"daytime": Fraction(25000,60*2), "nighttime": Fraction(25000,60*10), "dawntime/dusktime": Fraction(25000,60*5)} # type: ignore
