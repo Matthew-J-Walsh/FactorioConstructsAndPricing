@@ -6,10 +6,6 @@ This file is a todo list of things with various levels of importance. List is in
 
 We need to add in the effect of research on mining productivity and research in labs. My current idea for this is: every mining productivity level needs it own lookuptable. We make a special CompiledConstruct inheriting class that chooses its lookuptable and effect_transform based on the tech level its given. Mining drills will use the lookuptables, while labs only need to multiply the effect_transform.
 
-## Remove autocalc on add
-
-Currently for various reasons FactoryChain.add() automatically calculates the pricing model, we dont need to do this so a few changes can make it wait.
-
 ## Autocalculate factory chain
 
 Add functionality to continously add science factories if more science will be unlocked, otherwise material factories, all the way until 1 material factory after the last possible science factory is done.
@@ -25,10 +21,6 @@ Add in functionality to pickle and unpickle a FactorioInstance. Will allow for f
 ## Manual Crafting
 
 Sometimes manual crafting is needed (luckily not much in base gamea after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.
-
-## New Cost Mode: Space platform
-
-Cost optimization strategy for space platforms, mostly just the size of the buildings.
 
 ## Optimization of table lookups
 
@@ -57,6 +49,10 @@ Idea for decay: constructs with no cost that decays a decaying entity into its o
 ## Fourth effect: Quality
 
 Implement quality modules.
+
+## Inverted efficiency evaluations
+
+Instead of just the (most of the time negative) efficiency value, it would be better to output a second value: How many more times expensive the factory would approximately be using this.
 
 
 

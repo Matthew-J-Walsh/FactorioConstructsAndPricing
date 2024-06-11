@@ -678,7 +678,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         assert isinstance(known_technologies, TechnologicalLimitation)
         self.instance = instance
         self.known_technologies = known_technologies
-        self.targets = CompressedVector() #TODO can we remove these weird lines?
+        self.targets = pricing_model
         self.optimal_factory = CompressedVector()
         self.optimal_pricing_model = pricing_model.norm()
         self.construct_efficiencies = CompressedVector()
@@ -782,66 +782,11 @@ class FactorioFactoryChain():
             elif list(targets.keys())[0] in self.instance.data_raw['item'].keys() or list(targets.keys())[0] in self.instance.data_raw['fluid'].keys():
                 factory_type = "material"
         else:
-            last_pricing_model = last_material.optimal_pricing_model 
-            if DEBUG_BLOCK_MODULES:
-                last_pricing_model = CompressedVector({k: v for k, v in last_pricing_model.items() if not '-module' in k})
-
-            p0_j = np.zeros(len(self.instance.reference_list), dtype=np.longdouble)
-            for k, v in last_pricing_model.items():
-                p0_j[self.instance.reference_list.index(k)] = v
-            cost_function = lambda construct, lookup_indicies: self.uncompiled_cost_function(p0_j, construct, lookup_indicies)
-            
-            self.instance.compile()
-            assert not self.instance.compiled is None
-            R_j_i, c_i, C_j_i, N_i = self.instance.compiled.reduce(cost_function, 
-                                                                np.array([self.instance.reference_list.index(k) for k in last_pricing_model.keys()]), 
-                                                                None, known_technologies)
-            R_j_i = sparse.coo_matrix(R_j_i) #TODO: remove
-
-            targets_dict = CompressedVector()
-            
             if targets=="all tech":
                 factory_type = "science"
-                for tool in self.instance.data_raw['tool'].keys():
-                    if self.instance.reference_list.index(tool) in R_j_i.row:
-                        targets_dict[tool] = Fraction(1)
-
-            elif targets=="all materials":
+            else: #elif targets=="all materials":
                 factory_type = "material"
-                #only actually craftable materials
-                for item_cata in ITEM_SUB_PROTOTYPES:
-                    if item_cata=='tool':
-                        continue #skip tools in material factories
-                    for item in self.instance.data_raw[item_cata].keys():
-                        if not item in self.instance.reference_list:
-                            if not item in OUTPUT_WARNING_LIST:
-                                logging.warning("Detected some a weird "+item_cata+": "+item)
-                                OUTPUT_WARNING_LIST.append(item)
-                        elif self.instance.reference_list.index(item) in R_j_i.row:
-                            targets_dict[item] = Fraction(1)
-                for fluid in self.instance.data_raw['fluid'].keys():
-                    if fluid in self.instance.RELEVENT_FLUID_TEMPERATURES.keys():
-                        for temp in self.instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
-                            if not fluid+'@'+str(temp) in self.instance.reference_list:
-                                raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
-                            if self.instance.reference_list.index(fluid+'@'+str(temp)) in R_j_i.row:
-                                targets_dict[fluid+'@'+str(temp)] = Fraction(1)
-                    else:
-                        if not fluid in self.instance.reference_list:
-                            if not fluid in OUTPUT_WARNING_LIST:
-                                logging.warning("Detected some a weird fluid: "+fluid)
-                                OUTPUT_WARNING_LIST.append(fluid)
-                        elif self.instance.reference_list.index(fluid) in R_j_i.row:
-                            targets_dict[fluid] = Fraction(1)
-                for other in ['electric', 'heat']:
-                    if not other in self.instance.reference_list:
-                        if not other in OUTPUT_WARNING_LIST:
-                            logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
-                            OUTPUT_WARNING_LIST.append(other)
-                    if self.instance.reference_list.index(other) in R_j_i.row:
-                        targets_dict[other] = Fraction(1)
-            logging.info("Auto-targets:\n\t"+str(list(targets_dict.keys())))
-            targets = targets_dict
+            targets = _calculate_new_full_factory_targets(factory_type, last_material, known_technologies, self.instance)
 
         if factory_type == "science":
             for target in targets.keys():
@@ -852,11 +797,28 @@ class FactorioFactoryChain():
             logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(set(targets.keys()).difference(set(last_material.targets.keys()))))
             last_science = previous_sciences[-1]
             self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
-        
-        self.chain[-1].calculate_optimal_factory(last_material.optimal_pricing_model, self.uncompiled_cost_function) #TODO: don't do this.
 
     def compute_all(self) -> bool:
         """Computes all pricing models for chain iteratively and returns if the pricing models changed
+
+        Returns
+        -------
+        bool
+            If pricing model has been changed in any factory
+        """
+        changed = False
+
+        last_reference_model = self.chain[0].optimal_pricing_model
+        for i, factory in enumerate(self.chain[1:]):
+            logging.info("Computing factory "+str(i))
+            changed = factory.calculate_optimal_factory(last_reference_model, self.uncompiled_cost_function) or changed
+            if isinstance(factory, FactorioMaterialFactory):
+                last_reference_model = factory.optimal_pricing_model
+
+        return changed
+
+    def retarget_all(self) -> bool:
+        """Retargets and recomputes all pricing models for chain iteratively and returns if the pricing models changed.
 
         Returns
         -------
@@ -916,3 +878,87 @@ class FactorioFactoryChain():
                 science_factory_ident += 1
             #else: #if isinstance(factory, InitialFactory):
         writer.close()
+
+def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Literal["material"], last_material: FactorioMaterialFactory, 
+                                        known_technologies: TechnologicalLimitation, instance: FactorioInstance) -> CompressedVector:
+    """Calculates the targets for a full factory type
+
+    Parameters
+    ----------
+    factory_type : Literal["science"] | Literal["material"]
+        What factory type to create
+    last_material : FactorioMaterialFactory
+        The last material factory for pricing
+    known_technologies : TechnologicalLimitation
+        The tech level of the factory
+    instance : FactorioInstance
+        The Factorio instance to use
+
+    Returns
+    -------
+    CompressedVector
+        Targets in a compressed vector
+
+    Raises
+    ------
+    ValueError
+        Various issues with Factorio instance setup
+    """    
+    output_items = list(last_material.targets.keys())
+    logging.info(output_items)
+
+    cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray] = lambda construct, lookup_indicies: np.zeros_like(lookup_indicies)
+        
+    instance.compile()
+    assert not instance.compiled is None
+    R_j_i, c_i, C_j_i, N_i = instance.compiled.reduce(cost_function, 
+                                                            np.array([instance.reference_list.index(k) for k in output_items]), 
+                                                            None, known_technologies)
+    valid_rows = (R_j_i != 0).sum(axis=1) > 0
+
+    targets = CompressedVector()
+        
+    if factory_type=="science":
+        for tool in instance.data_raw['tool'].keys():
+            if valid_rows[instance.reference_list.index(tool)]:
+                targets[tool] = Fraction(1)
+
+    elif factory_type=="material":
+            #only actually craftable materials
+        for item_cata in ITEM_SUB_PROTOTYPES:
+            if item_cata=='tool':
+                continue #skip tools in material factories
+            for item in instance.data_raw[item_cata].keys():
+                if not item in instance.reference_list:
+                    if not item in OUTPUT_WARNING_LIST:
+                        logging.warning("Detected some a weird "+item_cata+": "+item)
+                        OUTPUT_WARNING_LIST.append(item)
+                elif valid_rows[instance.reference_list.index(item)]:
+                    targets[item] = Fraction(1)
+        for fluid in instance.data_raw['fluid'].keys():
+            if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
+                for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
+                    if not fluid+'@'+str(temp) in instance.reference_list:
+                        raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
+                    if valid_rows[instance.reference_list.index(fluid+'@'+str(temp))]:
+                        targets[fluid+'@'+str(temp)] = Fraction(1)
+            else:
+                if not fluid in instance.reference_list:
+                    if not fluid in OUTPUT_WARNING_LIST:
+                        logging.warning("Detected some a weird fluid: "+fluid)
+                        OUTPUT_WARNING_LIST.append(fluid)
+                elif valid_rows[instance.reference_list.index(fluid)]:
+                    targets[fluid] = Fraction(1)
+        for other in ['electric', 'heat']:
+            if not other in instance.reference_list:
+                if not other in OUTPUT_WARNING_LIST:
+                    logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
+                    OUTPUT_WARNING_LIST.append(other)
+            if valid_rows[instance.reference_list.index(other)]:
+                targets[other] = Fraction(1)
+
+    else:
+        raise ValueError("Unknown factory type: "+str(factory_type))
+
+    logging.info("Auto-targets:\n\t"+str(list(targets.keys())))
+    return targets

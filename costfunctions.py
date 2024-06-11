@@ -74,6 +74,28 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
         return np.array([out])
     return out
 
+def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+    """Cost function based on tiles taken up. Useful for space platforms
+
+    Parameters
+    ----------
+    pricing_vector : np.ndarray
+        Cost imposed for space usage
+    construct : luts.CompiledConstruct
+        Construct being priced
+    lookup_indicies : np.ndarray
+        Indicies in lookup table to calculate for
+
+    Returns
+    -------
+    np.ndarray
+        Cost array
+    """    
+    out = construct.lookup_table.effective_area_table[lookup_indicies] + construct.effective_area
+    if not isinstance(out, np.ndarray):
+        return np.array([out])
+    return out
+
 def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray], np.ndarray]:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)

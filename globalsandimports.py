@@ -19,7 +19,7 @@ import pulp as pl
 
 import typing
 from numbers import Real, Number
-from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol
+from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol, Literal
 
 class CallableSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
@@ -53,8 +53,8 @@ def multilienar_effect_ordering():
 MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
 MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in ACTIVE_MODULE_EFFECTS])
 
-DEBUG_BLOCK_MODULES: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
-DEBUG_BLOCK_BEACONS: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 
 OUTPUT_WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
 

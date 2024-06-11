@@ -187,9 +187,13 @@ def vanilla_main(optimization_mode: dict | str = 'standard'):
     vanilla_chain.add("all materials")
     logging.info(len(vanilla_chain.chain)-1)
 
-    print("Retarget and computing.")
+    print("Computing.")
 
     vanilla_chain.compute_all()
+
+    print("Retarget and computing.")
+
+    vanilla_chain.retarget_all()
 
     print("Dumping to Excel.")
 

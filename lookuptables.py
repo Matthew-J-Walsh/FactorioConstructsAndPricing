@@ -82,6 +82,8 @@ class ModuleLookupTable:
         Module setup table for this lookup table
     effect_table : np.ndarray
         Module effect table for this lookup table
+    effective_area_table : np.ndarray
+        Area usage table, the size of the beacons in the setup
     module_names : list[str]
         Reference for modules in this lookup table
     limits : np.ndarray
@@ -96,6 +98,7 @@ class ModuleLookupTable:
     cost_transform: np.ndarray
     module_setups: np.ndarray
     effect_table: np.ndarray
+    effective_area_table: np.ndarray
     module_names: list[str]
     limits: np.ndarray
 
@@ -134,6 +137,7 @@ class ModuleLookupTable:
         #self.paired_transform = sparse.csr_matrix((count, ))
         self.module_setups = np.zeros((count, len(self.module_names)), dtype=int)
         self.effect_table = np.zeros((count, len(ACTIVE_MODULE_EFFECTS)))
+        self.effective_area_table = np.zeros(count)
         self.limits = np.array([TechnologicalLimitation(instance.tech_tree, []) for _ in range(count)], dtype=object)
 
         i = 0
@@ -166,6 +170,8 @@ class ModuleLookupTable:
                 for k, v in module_costs.items():
                     assert v >= 0, module_costs
                     self.cost_transform[i, instance.reference_list.index(k)] = v
+                    if beacon is not None and beacon['name']==k:
+                        self.effective_area_table[i] += v * beacon['tile_width'] * beacon['tile_height']
                 self.module_setups[i, :] = module_setup_vector
                 self.effect_table[i, :] = effect_vector
 
@@ -254,6 +260,8 @@ class CompiledConstruct:
         TODO: Do this differently
     paired_cost_transform : np.ndarray
         Additional cost vector from effects, Currently 0 for various reasons
+    effective_area : int
+        Area usage of an instance without beacons.
     isa_mining_drill : bool
         If this construct should be priced based on size when calculating in size restricted mode
     """
@@ -263,6 +271,7 @@ class CompiledConstruct:
     base_cost_vector: np.ndarray
     required_price_indices: np.ndarray
     paired_cost_transform: np.ndarray
+    effective_area: int
     isa_mining_drill: bool
 
     def __init__(self, origin: UncompiledConstruct, instance):
@@ -297,6 +306,8 @@ class CompiledConstruct:
         #        base_throughput = sum([v for k, v in origin.deltas.items() if k in instance.data_raw['fluid'].keys()])
         #    else:
         #        base_throughput = sum([v for k, v in origin.deltas.items() if k not in instance.data_raw['fluid'].keys()])
+
+        self.effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
 
         self.isa_mining_drill = origin.building['type']=="mining-drill"
             
