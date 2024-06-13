@@ -34,6 +34,8 @@ class FactorioInstance():
         Every relevent item, fluid, and research identifier (sorted)
     catalyst_list : tuple[str, ...]
         All catalytic refrence_list elements
+    active_list : tuple[str, ...]
+        All items that can be used in building a factory
     spatial_pricing : np.ndarray
         Pricing model for ore space consumption
     raw_ore_pricing : np.ndarray
@@ -53,6 +55,7 @@ class FactorioInstance():
     compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
     catalyst_list: tuple[str, ...]
+    active_list: tuple[str, ...]
     spatial_pricing: np.ndarray
     raw_ore_pricing: np.ndarray
     COST_MODE: str
@@ -82,6 +85,7 @@ class FactorioInstance():
         self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         self.reference_list = create_reference_list(self.uncompiled_constructs)
         self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
+        self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)
         
         self.disabled_constructs = []
 
@@ -119,10 +123,24 @@ class FactorioInstance():
     
     @staticmethod
     def load(filename: str) -> FactorioInstance:
+        """Loads a FactorioInstance from memory
+
+        Parameters
+        ----------
+        filename : str
+            File with FactorioInstance in it
+        """
         with open(filename, 'rb') as file:
             return pickle.load(file)
         
     def save(self, filename: str) -> None:
+        """Saves a FactorioInstance to memory
+
+        Parameters
+        ----------
+        filename : str
+            File to place FactorioInstance into
+        """
         self.compiled = None
         with open(filename, 'wb') as file:
             pickle.dump(self, file)
@@ -308,6 +326,8 @@ class FactorioInstance():
         fc_i = C_j_i @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
         full_material_cost = CompressedVector({self.reference_list[i]: fc_i[i] for i in range(fc_i.shape[0]) if fc_i[i]>0})
+        for tempk, tempv in full_material_cost.items():
+            assert tempk in self.active_list, str(tempk)+": "+str(tempv)+", "+str(N_i[np.where(C_j_i[self.reference_list.index(tempk)]!=0)])
 
         nmv, nmc, nmtc, nmi = self.compiled.reduce(cost_function, priced_indices, None, known_technologies)
         nme = (nmv.T @ p_j) / nmc
@@ -843,6 +863,8 @@ class FactorioFactoryChain():
             if isinstance(factory, FactorioMaterialFactory):
                 updated_targets = CompressedVector()
                 for j in range(i+1, len(self.chain)):
+                    for k, v in self.chain[j].true_cost.items():
+                        assert k in self.instance.active_list, str(k)+": "+str(v)+", "+str(j)+" t: "+str(type(self.chain[j]))
                     updated_targets = updated_targets + self.chain[j].true_cost
                     if isinstance(self.chain[j], FactorioMaterialFactory):
                         break #done with this material factories outputs
@@ -850,7 +872,7 @@ class FactorioFactoryChain():
                 logging.debug(updated_targets)
                 logging.debug(factory.optimal_pricing_model)
                 factory.retarget(updated_targets)
-                for k in updated_targets.keys():
+                for k, v in updated_targets.items():
                     assert k in factory.optimal_pricing_model.keys(), k
 
                 changed = factory.calculate_optimal_factory(last_reference_model, self.uncompiled_cost_function) or changed
@@ -943,28 +965,28 @@ def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Liter
                     if not item in OUTPUT_WARNING_LIST:
                         logging.warning("Detected some a weird "+item_cata+": "+item)
                         OUTPUT_WARNING_LIST.append(item)
-                elif valid_rows[instance.reference_list.index(item)]:
+                elif valid_rows[instance.reference_list.index(item)] and item in instance.active_list:
                     targets[item] = Fraction(1)
         for fluid in instance.data_raw['fluid'].keys():
             if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
                 for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
                     if not fluid+'@'+str(temp) in instance.reference_list:
                         raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
-                    if valid_rows[instance.reference_list.index(fluid+'@'+str(temp))]:
+                    if valid_rows[instance.reference_list.index(fluid+'@'+str(temp))] and fluid+'@'+str(temp) in instance.active_list:
                         targets[fluid+'@'+str(temp)] = Fraction(1)
             else:
                 if not fluid in instance.reference_list:
                     if not fluid in OUTPUT_WARNING_LIST:
                         logging.warning("Detected some a weird fluid: "+fluid)
                         OUTPUT_WARNING_LIST.append(fluid)
-                elif valid_rows[instance.reference_list.index(fluid)]:
+                elif valid_rows[instance.reference_list.index(fluid)] and fluid in instance.active_list:
                     targets[fluid] = Fraction(1)
         for other in ['electric', 'heat']:
             if not other in instance.reference_list:
                 if not other in OUTPUT_WARNING_LIST:
                     logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
                     OUTPUT_WARNING_LIST.append(other)
-            if valid_rows[instance.reference_list.index(other)]:
+            if valid_rows[instance.reference_list.index(other)] and other in instance.active_list:
                 targets[other] = Fraction(1)
 
     else:

@@ -14,13 +14,9 @@ Add functionality to continously add science factories if more science will be u
 
 Sometimes RELEVENT_FLUID_TEMPERATURES is given in the wrong order in a function definition.
 
-## Pickle FactorioInstance
-
-Add in functionality to pickle and unpickle a FactorioInstance. Will allow for faster iteration with various chain setups without taking up lots of memory and needing to run continuously.
-
 ## Manual Crafting
 
-Sometimes manual crafting is needed (luckily not much in base gamea after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.
+Sometimes manual crafting is needed (luckily not much in base game after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.
 
 ## Optimization of table lookups
 
@@ -49,9 +45,5 @@ Implement quality modules.
 ## Inverted efficiency evaluations
 
 Instead of just the (most of the time negative) efficiency value, it would be better to output a second value: How many more times expensive the factory would approximately be using this.
-
-## Remove non-catalyst non-buildings from material factories
-
-Self Explanatory
 
 

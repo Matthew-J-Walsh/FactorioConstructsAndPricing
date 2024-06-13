@@ -293,3 +293,35 @@ def determine_catalysts(uncompiled_construct_list: Collection[UncompiledConstruc
     logging.debug("Catalysts found: %s", str(catalyst_list))
     return catalyst_list
 
+def calculate_actives(reference_list: tuple[str, ...],catalyst_list: tuple[str, ...], data: dict) -> tuple[str, ...]:
+    """Calculates all items that should be actively produce in a material factory. 
+    Includes catalysts and any item that can be placed on the ground
+
+    Parameters
+    ----------
+    reference_list : tuple[str, ...]
+        The universal reference list
+    catalyst_list : tuple[str, ...]
+        The catalyst list
+    data : dict
+        The whole of data.raw
+
+    Returns
+    -------
+    tuple[str, ...]
+        Items that need to be actively produced in a material factory
+    """    
+    actives = set(copy.deepcopy(catalyst_list))
+
+    for item in data['item'].values():
+        if 'place_result' in item.keys() and item['name'] in reference_list:
+            actives.add(item['name'])
+    
+    for module in data['module'].values():
+        if module['name'] in reference_list:
+            actives.add(module['name'])
+        
+    actives = list(actives)
+    actives.sort()
+
+    return tuple(actives)

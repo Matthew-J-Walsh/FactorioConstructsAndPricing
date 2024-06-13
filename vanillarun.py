@@ -5,7 +5,7 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
                     handlers=[
                         logging.FileHandler(filename="logfiles\\vanillarun.log", mode='w'),
                     ])
-logging.getLogger().addHandler(logging.StreamHandler())
+#logging.getLogger().addHandler(logging.StreamHandler())
 logger = logging.getLogger()
 from tools import *
 
@@ -15,10 +15,11 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     output_file = "RunResultsSave.xlsx"
     if os.path.isfile(instance_filename):
         vanilla = FactorioInstance.load(instance_filename)
+        print("Instance loaded.")
     else:
         vanilla = FactorioInstance(gamefiles_filename)
         vanilla.save(instance_filename)
-    print("Instance built.")
+        print("Instance built and saved.")
 
     if isinstance(optimization_mode, dict):
         uncompiled_cost_function = hybrid_cost_function(optimization_mode, vanilla)
