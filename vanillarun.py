@@ -62,11 +62,11 @@ def vanilla_main(optimization_mode: dict | str = 'standard'):
     tech_level = vanilla.technological_limitation_from_specification(fully_automated=["automation-science-pack"])
     logging.info(tech_level)
 
-    #logging.info("=============================================")
-    #for cc in vanilla.complex_constructs:
-    #    if cc.ident=="utility-science-pack in assembling-machine-3 with electric":
-    #        assert isinstance(cc.subconstructs[0], CompiledConstruct)
-    #        logging.info(cc.subconstructs[0].lookup_table)
+    logging.info("=============================================")
+    for cc in vanilla.complex_constructs:
+        if cc.ident=="utility-science-pack in assembling-machine-3 with electric":
+            assert isinstance(cc.subconstructs[0], CompiledConstruct)
+            logging.info(cc.subconstructs[0].lookup_table.effect_transform)
 
     logging.info("=============================================")
     vanilla_chain = FactorioFactoryChain(vanilla, uncompiled_cost_function)

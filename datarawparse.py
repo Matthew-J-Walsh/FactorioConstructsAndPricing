@@ -276,6 +276,9 @@ def standardize_power(data: dict) -> None:
     for accumulator in data['accumulator'].values():
         accumulator['energy_source']['buffer_capacity_raw'] = convert_value_to_base_units(accumulator['energy_source']['buffer_capacity'])
 
+    for beacon in data['beacon'].values():
+        beacon['energy_usage_raw'] = convert_value_to_base_units(beacon['energy_usage'])
+
 def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """Adds a base_inputs and vector component to each recipe. 
     The vector component represents how the recipe function.

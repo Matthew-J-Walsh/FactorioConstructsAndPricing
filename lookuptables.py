@@ -74,10 +74,12 @@ class ModuleLookupTable:
         Origin FactorioInstance
     base_productivity : Fraction
         Base productivity for this lookup table
+    multilinear_effect_transform : np.ndarray
+        Multilinear effect transformation for this lookup table
     effect_transform : np.ndarray
-        Effect transformation table for this lookup table
+        Effect transformation for this lookup table
     cost_transform : np.ndarray
-        Cost transformation table for this lookup table
+        Cost transformation for this lookup table
     module_setups : np.ndarray
         Module setup table for this lookup table
     effect_table : np.ndarray
@@ -94,7 +96,8 @@ class ModuleLookupTable:
     building_height: int
     avaiable_modules: list[tuple[str, bool, bool]]
     base_productivity: Fraction
-    effect_transform: np.ndarray
+    multilinear_effect_transform: np.ndarray
+    effect_transform: sparse.csr_matrix
     cost_transform: np.ndarray
     module_setups: np.ndarray
     effect_table: np.ndarray
@@ -132,7 +135,8 @@ class ModuleLookupTable:
         beacon_module_setups = [(beacon, list(module_setup_generator(avaiable_modules, module_count, (self.building_width, self.building_height), beacon))) for beacon in [None]+list(instance.data_raw['beacon'].values())]
         count = sum([len(bms[1]) for bms in beacon_module_setups])
 
-        self.effect_transform = np.zeros((count, len(MODULE_EFFECT_ORDERING)))
+        self.multilinear_effect_transform = np.zeros((count, len(MODULE_EFFECT_ORDERING)))
+        effect_transform = sparse.lil_matrix((count, len(instance.reference_list)))
         self.cost_transform = np.zeros((count, len(instance.reference_list)))
         #self.paired_transform = sparse.csr_matrix((count, ))
         self.module_setups = np.zeros((count, len(self.module_names)), dtype=int)
@@ -164,7 +168,7 @@ class ModuleLookupTable:
                 effect_vector = np.maximum(effect_vector, MODULE_EFFECT_MINIMUMS_NUMPY.astype(float))
 
                 
-                self.effect_transform[i, :] = encode_effects_vector_to_multilinear(effect_vector)
+                self.multilinear_effect_transform[i, :] = encode_effects_vector_to_multilinear(effect_vector)
                 #the two following lines are very slow. lil_matrix?
                 #self.cost_transform[i, :] = sparse.csr_array(([e for e in effected_cost.values()], ([0 for _ in effected_cost], [instance.reference_list.index(d) for d in effected_cost.keys()])), shape=(1, len(instance.reference_list)), dtype=np.longdouble)
                 for k, v in module_costs.items():
@@ -172,28 +176,26 @@ class ModuleLookupTable:
                     self.cost_transform[i, instance.reference_list.index(k)] = v
                     if beacon is not None and beacon['name']==k:
                         self.effective_area_table[i] += v * beacon['tile_width'] * beacon['tile_height']
+                        effect_transform[i, instance.reference_list.index('electric')] = -1 * v * beacon['energy_usage_raw']
                 self.module_setups[i, :] = module_setup_vector
                 self.effect_table[i, :] = effect_vector
 
                 i += 1
                 
+        self.effect_transform = sparse.csr_matrix(effect_transform)
         assert (self.cost_transform>=0).all()
 
-    def evaluate(self, effect_vector: np.ndarray, priced_indices: np.ndarray) -> np.ndarray:
+    def evaluate(self, effect_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray) -> np.ndarray:
         """Evaluates a effect weighting vector pair to find the best module combination
 
         Parameters
         ----------
         effect_vector : np.ndarray
             A vector containing the weighting of each multilinear combination of effects
-        cost_vector : np.ndarray
-            A vector containing the weighting of the cost each module
         priced_indices : np.ndarray
             Indicies of cost vector elements that are priced
-        paired_cost_vector : np.ndarray
-            A vector containing the paired effect->cost costs
-        base_cost : float
-            Baseline cost of the instance
+        dual_vector : np.ndarray
+            Dual vector to calculate with (for beacon energy costs)
 
         Returns
         -------
@@ -204,7 +206,7 @@ class ModuleLookupTable:
         inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
         inverse_priced_indices_arr[priced_indices] = 0
         mask = self.cost_transform @ inverse_priced_indices_arr > 0
-        e = (self.effect_transform @ effect_vector) # type: ignore
+        e = (self.multilinear_effect_transform @ effect_vector) + self.effect_transform @ dual_vector # type: ignore
         e[mask] = -np.inf
         return e
 
@@ -373,8 +375,8 @@ class CompiledConstruct:
             Numerator of evaluations (-np.inf if cannot be made),
             Denominator of evaluations
         """
-        e = self.lookup_table.evaluate(self.effect_transform @ dual_vector, priced_indices)
-        c = cost_function(self, np.arange(self.lookup_table.effect_transform.shape[0]))
+        e = self.lookup_table.evaluate(self.effect_transform @ dual_vector, priced_indices, dual_vector)
+        c = cost_function(self, np.arange(self.lookup_table.multilinear_effect_transform.shape[0]))
         return e, c
 
     def _generate_vector(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
@@ -395,8 +397,8 @@ class CompiledConstruct:
         module_setup = self.lookup_table.module_setups[index]
         ident = self.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.lookup_table.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
         
-        column: np.ndarray = self.lookup_table.effect_transform[index] @ self.effect_transform
-        cost: np.ndarray = self.lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, self.lookup_table.effect_transform[index]) + self.base_cost_vector
+        column: np.ndarray = (self.lookup_table.multilinear_effect_transform[index] @ self.effect_transform + np.asarray(self.lookup_table.effect_transform[index].todense())).flatten()
+        cost: np.ndarray = self.lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, self.lookup_table.multilinear_effect_transform[index]) + self.base_cost_vector
 
         assert (cost>=0).all(), self.origin.ident
 

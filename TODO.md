@@ -34,10 +34,6 @@ Find containers that are missing from transport cost analysis (atleast sulfuic a
 
 Find a way of handling containers and catalysts properly. Also improve catalyst classification if possible (should iron really be a catalyst?... if not, why not?)
 
-## Beacon power costs
-
-Find a way to include beacon power costs.
-
 ## Expansion Beacon setups
 
 What updates have to be done to handle diminishing beacons?
@@ -54,8 +50,8 @@ Implement quality modules.
 
 Instead of just the (most of the time negative) efficiency value, it would be better to output a second value: How many more times expensive the factory would approximately be using this.
 
+## Remove non-catalyst non-buildings from material factories
 
-
-
+Self Explanatory
 
 

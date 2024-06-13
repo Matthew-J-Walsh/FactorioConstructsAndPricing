@@ -69,7 +69,7 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
     effect_transform_positive = construct.effect_transform.copy()
     effect_transform_positive[effect_transform_positive < 0] = 0
     effect_vector = effect_transform_positive @ pricing_vector
-    out = construct.lookup_table.effect_transform[lookup_indicies, :] @ effect_vector
+    out = construct.lookup_table.multilinear_effect_transform[lookup_indicies, :] @ effect_vector
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
