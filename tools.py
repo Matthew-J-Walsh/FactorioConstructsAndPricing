@@ -117,6 +117,16 @@ class FactorioInstance():
             self.compiled = None
             self.compile()
     
+    @staticmethod
+    def load(filename: str) -> FactorioInstance:
+        with open(filename, 'rb') as file:
+            return pickle.load(file)
+        
+    def save(self, filename: str) -> None:
+        self.compiled = None
+        with open(filename, 'wb') as file:
+            pickle.dump(self, file)
+
     def compile(self) -> ComplexConstruct:
         """Populates FactorioInstance.compiled and returns it.
         """

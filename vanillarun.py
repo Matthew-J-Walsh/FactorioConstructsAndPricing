@@ -9,11 +9,15 @@ logging.getLogger().addHandler(logging.StreamHandler())
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(optimization_mode: dict | str = 'standard'):
+def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle"):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
-    vanilla = FactorioInstance(gamefiles_filename)
+    if os.path.isfile(instance_filename):
+        vanilla = FactorioInstance.load(instance_filename)
+    else:
+        vanilla = FactorioInstance(gamefiles_filename)
+        vanilla.save(instance_filename)
     print("Instance built.")
 
     if isinstance(optimization_mode, dict):
