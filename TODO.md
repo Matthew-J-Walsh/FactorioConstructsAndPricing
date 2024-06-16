@@ -10,10 +10,6 @@ We need to add in the effect of research on mining productivity and research in 
 
 Add functionality to continously add science factories if more science will be unlocked, otherwise material factories, all the way until 1 material factory after the last possible science factory is done.
 
-## Fix RELEVENT_FLUID_TEMPERATURES orderings
-
-Sometimes RELEVENT_FLUID_TEMPERATURES is given in the wrong order in a function definition.
-
 ## Manual Crafting
 
 Sometimes manual crafting is needed (luckily not much in base game after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.

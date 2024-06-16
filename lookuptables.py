@@ -254,6 +254,7 @@ class ModuleLookupTable:
     
     def _point_search_nnzc(self, start_point: int, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], 
                            priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+        raise NotImplementedError()
         inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
         inverse_priced_indices_arr[priced_indices] = 0
         mask = self.cost_transform @ inverse_priced_indices_arr > 0
