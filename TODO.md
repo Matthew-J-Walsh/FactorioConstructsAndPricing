@@ -46,4 +46,6 @@ Implement quality modules.
 
 Instead of just the (most of the time negative) efficiency value, it would be better to output a second value: How many more times expensive the factory would approximately be using this.
 
+## inverse_priced_indices_arr optimization
+
 

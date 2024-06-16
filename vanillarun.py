@@ -13,7 +13,7 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
-    if os.path.isfile(instance_filename):
+    if False: #os.path.isfile(instance_filename):
         vanilla = FactorioInstance.load(instance_filename)
         print("Instance loaded.")
     else:

@@ -96,6 +96,10 @@ def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCons
         return np.array([out])
     return out
 
+def throughput_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+    """TODO: Based on item throughput rate in trains?"""
+    raise NotImplementedError()
+
 def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray], np.ndarray]:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)
@@ -132,4 +136,5 @@ def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarr
             break
     
     return func
+
 

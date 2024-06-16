@@ -156,7 +156,107 @@ def module_setup_generator(allowed_modules: list[tuple[str, bool, bool]], intern
                         cost_vector = cost_vector + CompressedVector({mod: 1})
                     yield effect_vector, cost_vector
 
-def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[int, Fraction]]:
+def model_point_generator(allowed_internal_module_count: int, internal_module_limit: int, 
+                          allowed_external_module_count: int, beacon_module_limit: int, 
+                          beacon_dimensions: tuple[int, ...]) -> np.ndarray:
+    if allowed_internal_module_count==0:
+        return np.zeros((0, 0))
+    #print(allowed_internal_module_count)
+    #print(internal_module_limit)
+    #print(allowed_external_module_count)
+    #print(beacon_module_limit)
+    #print(beacon_dimensions)
+    internal_module_setups = np.column_stack([g.ravel() for g in np.meshgrid(*([np.arange(internal_module_limit+1)]*allowed_internal_module_count))])
+    internal_module_setups = internal_module_setups[internal_module_setups.sum(axis=1)<=internal_module_limit,:]
+    #print(internal_module_setups.shape)
+
+    external_module_internals = np.column_stack([g.ravel() for g in np.meshgrid(*([np.arange(beacon_module_limit+1)]*allowed_external_module_count))])
+    external_module_internals = external_module_internals[
+        np.logical_and(external_module_internals.sum(axis=1)<=beacon_module_limit, (external_module_internals==beacon_module_limit).sum(axis=1)>0)
+        ,:]
+    #print(external_module_internals.shape)
+
+    beacon_designs = np.zeros((1+sum(beacon_dimensions), len(beacon_dimensions)))
+    i = 1
+    for j in range(len(beacon_dimensions)):
+        for k in range(1, 1+beacon_dimensions[j]):
+            beacon_designs[i, j] = k
+    #print(beacon_designs.shape)
+    
+    internals = np.repeat(internal_module_setups, external_module_internals.shape[0] * beacon_designs.shape[0], axis=0)
+    externals = np.repeat(external_module_internals, internal_module_setups.shape[0] * beacon_designs.shape[0], axis=0)
+    beacons = np.repeat(beacon_designs, internal_module_setups.shape[0] * external_module_internals.shape[0], axis=0)
+    #print(internals.shape)
+    #print(externals.shape)
+    #print(beacons.shape)
+    return np.concatenate([internals, externals, beacons], axis=1)
+
+def generate_module_vector_lambdas(allowed_internal_modules: tuple[dict, ...], allowed_external_modules: tuple[dict, ...], beacon_designs: tuple[tuple[dict, tuple[tuple[Fraction, Fraction], ...]], ...],
+                                   reference_list: tuple[str, ...]) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    allowed_internal_module_count = len(allowed_internal_modules)
+    allowed_external_module_count = len(allowed_external_modules)
+
+    beacon_design_effect_table = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])))
+    beacon_design_cost_table = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])))
+    beacon_design_beacon_cost = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])), dtype=int)
+    beacon_design_electric_cost = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])), dtype=int)
+    for i, (beacon, designs) in enumerate(beacon_designs):
+        for j, design in enumerate(designs):
+            beacon_design_effect_table[i, j] = design[0]
+            beacon_design_cost_table[i, j] = design[1]
+            beacon_design_beacon_cost[i, j] = reference_list.index(beacon['name'])
+            beacon_design_electric_cost[i, j] = -1 * beacon['energy_usage_raw']
+    electric_index = reference_list.index('electric')
+
+    internal_effect_matrix = np.zeros((len(ALL_MODULE_EFFECTS), allowed_internal_module_count))
+    internal_cost_matrix = np.zeros((len(reference_list), allowed_internal_module_count))
+    for i, module in enumerate(allowed_internal_modules):
+        for j, effect_name in enumerate(ALL_MODULE_EFFECTS):
+            if effect_name in module['effect'].keys():
+                internal_effect_matrix[j, i] = module['effect'][effect_name]['bonus']
+
+    external_effect_matrix = np.zeros((len(ALL_MODULE_EFFECTS), allowed_external_module_count))
+    external_cost_matrix = np.zeros((len(reference_list), allowed_external_module_count))
+    for i, module in enumerate(allowed_external_modules):
+        for j, effect_name in enumerate(ALL_MODULE_EFFECTS):
+            if effect_name in module['effect'].keys():
+                external_effect_matrix[j, i] = module['effect'][effect_name]['bonus']
+
+    def dual_func(points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if len(points.shape)==1 or points.shape[1]==1:
+            points = points.reshape((1, -1))
+
+        if points.shape[1]==0:
+            return np.zeros((0, len(ALL_MODULE_EFFECTS))), np.zeros((0, len(reference_list))), np.zeros((0, len(ALL_MODULE_EFFECTS)))
+
+        internal_module_portion = points[:, :allowed_internal_module_count]
+        beacon_module_portion = points[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count]
+        beacon_design_portion = points[:, allowed_internal_module_count+allowed_external_module_count:]
+
+        chosen_beacon_design = (-1 * beacon_design_portion.sum(axis=1)==0 + np.argmax(beacon_design_portion, axis=1) + 1).astype(int)
+        chosen_beacon_design_index = beacon_design_portion.sum(axis=1).astype(int)
+        beacon_effect_multi = beacon_design_effect_table[chosen_beacon_design, chosen_beacon_design_index]
+        beacon_cost_multi = beacon_design_cost_table[chosen_beacon_design, chosen_beacon_design_index]
+        beacon_direct_cost = np.zeros((len(reference_list), points.shape[0]))
+        beacon_direct_cost[beacon_design_beacon_cost[chosen_beacon_design, chosen_beacon_design_index], :] = beacon_cost_multi
+        beacon_electric_effect = np.zeros((len(reference_list), points.shape[0]))
+        beacon_electric_effect[electric_index, :] = beacon_cost_multi * beacon_design_electric_cost[chosen_beacon_design, chosen_beacon_design_index]
+
+        internal_effect = internal_effect_matrix @ internal_module_portion.T
+        internal_cost = internal_cost_matrix @ internal_module_portion.T
+
+        external_effect = (external_effect_matrix @ beacon_module_portion.T) * beacon_effect_multi
+        external_cost = (external_cost_matrix @ beacon_module_portion.T) * beacon_cost_multi + beacon_direct_cost
+
+        multilinear_effect = np.ones([points.shape[0]]+[2]*len(ALL_MODULE_EFFECTS))
+        for i in range(points.shape[0]):
+            multilinear_effect[i] += MODULE_MULTILINEAR_EFFECT_SELECTORS[i] * (internal_effect + external_effect) #mins and maxes
+
+        return multilinear_effect.reshape((points.shape[0], -1)), beacon_electric_effect.T, (internal_cost + external_cost).T
+
+    return dual_func
+
+def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[Fraction, Fraction]]:
     """Determines the possible optimal beacon setups for a building and beacon
 
     Parameters

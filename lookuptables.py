@@ -104,6 +104,8 @@ class ModuleLookupTable:
     effective_area_table: np.ndarray
     module_names: list[str]
     limits: np.ndarray
+    connected_points: list[np.ndarray]
+    extreme_points: np.ndarray
 
     def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance, base_productivity: Fraction) -> None:
         """
@@ -185,6 +187,26 @@ class ModuleLookupTable:
         self.effect_transform = sparse.csr_matrix(effect_transform)
         assert (self.cost_transform>=0).all()
 
+        return #TODO: Finish later.
+        allowed_internal_modules = tuple([instance.data_raw['module'][mod] for mod, i, e in self.avaiable_modules if i])
+        allowed_external_modules = tuple([instance.data_raw['module'][mod] for mod, i, e in self.avaiable_modules if e])
+        beacon_designs: tuple[tuple[dict, tuple[tuple[Fraction, Fraction], ...]], ...] = tuple([(beacon, tuple(beacon_setups((self.building_height, self.building_height), beacon))) for beacon in instance.data_raw['beacon'].values()])
+        new_effects, new_added_effect, new_cost = generate_module_vector_lambdas(allowed_internal_modules, allowed_external_modules, 
+                                                                                 beacon_designs, instance.reference_list)(model_point_generator(len(allowed_internal_modules), self.module_count, len(allowed_external_modules), 2, 
+                                                                                                                                                tuple([len(designs) for beacon, designs in beacon_designs])))
+
+        if len(self.avaiable_modules) > 3:
+            print(self.multilinear_effect_transform.shape)
+            print(self.effect_transform.shape)
+            print(self.cost_transform.shape)
+
+            print(new_effects.shape)
+            print(new_added_effect.shape)
+            print(new_cost.shape)
+
+            raise ValueError()
+
+
     def evaluate(self, effect_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray) -> np.ndarray:
         """Evaluates a effect weighting vector pair to find the best module combination
 
@@ -206,9 +228,61 @@ class ModuleLookupTable:
         inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
         inverse_priced_indices_arr[priced_indices] = 0
         mask = self.cost_transform @ inverse_priced_indices_arr > 0
-        e = (self.multilinear_effect_transform @ effect_vector) + self.effect_transform @ dual_vector # type: ignore
+        e = self.multilinear_effect_transform @ effect_vector + self.effect_transform @ dual_vector # type: ignore
         e[mask] = -np.inf
         return e
+    
+    def search(self, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+        if cost_function(construct, np.array([0]))[0]==0:
+            extremes = [self._point_search_zc(start_point, construct, cost_function, priced_indices, dual_vector) for start_point in self.extreme_points]
+            argmax = 0
+            maxval = extremes[0][0] @ dual_vector
+            for i in range(1, len(extremes)):
+                if extremes[i][0] @ dual_vector > maxval:
+                    argmax = i
+                    maxval = extremes[i][0] @ dual_vector
+            return extremes[argmax]
+        else:
+            extremes = [self._point_search_nnzc(start_point, construct, cost_function, priced_indices, dual_vector) for start_point in self.extreme_points]
+            argmax = 0
+            maxval = extremes[0][0] @ dual_vector / extremes[0][1]
+            for i in range(1, len(extremes)):
+                if extremes[i][0] @ dual_vector / extremes[i][1] > maxval:
+                    argmax = i
+                    maxval = extremes[i][0] @ dual_vector / extremes[i][1]
+            return extremes[argmax]
+    
+    def _point_search_nnzc(self, start_point: int, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], 
+                           priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+        inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
+        inverse_priced_indices_arr[priced_indices] = 0
+        mask = self.cost_transform @ inverse_priced_indices_arr > 0
+        effect_transform = (construct.effect_transform @ dual_vector)
+
+        current_point = start_point
+        current_eval: float = self.multilinear_effect_transform[current_point] @ effect_transform + self.effect_transform[current_point] @ dual_vector
+        current_cost: float = cost_function(construct, np.array([current_point]))[0]
+        while True:
+            new_points = self.connected_points[current_point]
+            new_evals: np.ndarray = self.multilinear_effect_transform[new_points] @ effect_transform + self.effect_transform[new_points] @ dual_vector 
+            new_costs: np.ndarray = cost_function(construct, new_points)
+            new_best_local: int = int(np.argmax(new_evals/new_costs))
+            new_best_global: int = new_points[new_best_local]
+
+            if new_evals[new_best_local]/new_costs[new_best_local]>=current_eval/current_cost:
+                current_point = new_best_global
+                current_eval = new_evals[new_best_local]
+                current_cost = new_costs[new_best_local]
+            else:
+                break
+
+        return self.multilinear_effect_transform[current_point] @ construct.effect_transform + self.effect_transform[current_point], \
+               current_cost, self.cost_transform[current_point] + np.dot(construct.paired_cost_transform, self.multilinear_effect_transform[current_point]) + construct.base_cost_vector, \
+               construct.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.module_names[i] for i, v in enumerate(self.module_setups[current_point]) if v>0]) if np.sum(self.module_setups[current_point])>0 else "")
+
+    def _point_search_zc(self, start_point: int, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], 
+                           priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+        raise NotImplementedError()
 
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str(self.cost_transform.shape[0])
