@@ -4,6 +4,7 @@ from scipy import linalg
 from scipy import sparse
 from scipy import optimize
 import itertools
+import functools
 import copy
 import re
 import logging

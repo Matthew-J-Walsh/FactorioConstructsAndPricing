@@ -35,6 +35,8 @@ class UncompiledConstruct:
         Baseline productivity effect of the building
         https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
         https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
+    research_effected : list[str]
+        What research modifiers effect this construct
     """
     ident: str
     drain: CompressedVector
@@ -47,10 +49,11 @@ class UncompiledConstruct:
     cost: CompressedVector
     limit: TechnologicalLimitation
     building: dict
+    research_effected: list[str]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, bool, bool]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
-                 limit: TechnologicalLimitation, building: dict, base_productivity: Fraction = Fraction(0)) -> None:
+                 limit: TechnologicalLimitation, building: dict, base_productivity: Fraction = Fraction(0), research_effected: list[str] | None = None) -> None:
         """
         Parameters
         ----------
@@ -81,6 +84,8 @@ class UncompiledConstruct:
             https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
             https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
             , by default Fraction(0)
+        research_effected : list[str], optional
+            What research modifiers effect this construct
         """
         self.ident = ident
         self.drain = drain
@@ -93,6 +98,10 @@ class UncompiledConstruct:
         self.limit = limit
         self.building = building
         self.base_productivity = base_productivity
+        if not research_effected is None:
+            self.research_effected = research_effected
+        else:
+            self.research_effected = []
         
     def __repr__(self) -> str:
         return str(self.ident)+\

@@ -235,7 +235,9 @@ class TechnologyTree:
         -------
         bool
             If B will always be researched if A has been
-        """        
+        """
+        if len(A.canonical_form)==0 and len(B.canonical_form)!=0: #special case when comparing if nothing is greater than something
+            return False
         for Asubsets in A.canonical_form:
             for Bsubsets in B.canonical_form:
                 for Bresearch in Bsubsets:
@@ -284,7 +286,15 @@ class TechnologicalLimitation:
             self.canonical_form = self.tree.simplify(sets_of_references)
         
     def __repr__(self) -> str:
-        return str(self.canonical_form)
+        if len(self.canonical_form)==0:
+            return "No-tech"
+        out = ""
+        for outer in self.canonical_form:
+            out += "Technology set of:"
+            for inner in outer:
+                out += "\n\t"+self.tree.inverse_map[inner]
+                
+        return out
 
     def __add__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
         """Addition betwen two TechnologicalLimitations, an AND operation between disjunctive normal forms

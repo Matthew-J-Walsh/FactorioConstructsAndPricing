@@ -1,11 +1,9 @@
-from ast import Call
-
-from numpy import ndarray
 from globalsandimports import *
+from utils import *
 import lookuptables as luts
 
 
-def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
     """Cost function based on previous dual vector
 
     Parameters
@@ -16,18 +14,20 @@ def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledC
         Construct being priced
     lookup_indicies : np.ndarray
         Indicies in lookup table to calculate for
+    known_technologies : TechnologicalLimitation
+        Current tech level to calculate for 
 
     Returns
     -------
     np.ndarray
         Cost array
     """    
-    out = construct.lookup_table.cost_transform[lookup_indicies, :] @ pricing_vector + np.dot(construct.base_cost_vector, pricing_vector)
+    out = construct.lookup_table(known_technologies).cost_transform[lookup_indicies, :] @ pricing_vector + np.dot(construct.base_cost_vector, pricing_vector)
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
 
-def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
     """Cost function based on ore tiles used
 
     Parameters
@@ -38,6 +38,8 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
         Construct being priced
     lookup_indicies : np.ndarray
         Indicies in lookup table to calculate for
+    known_technologies : TechnologicalLimitation
+        Current tech level to calculate for 
 
     Returns
     -------
@@ -45,12 +47,13 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
         Cost array
     """    
     if construct.isa_mining_drill:
-        return standard_cost_function(pricing_vector, construct, lookup_indicies)
+        return standard_cost_function(pricing_vector, construct, lookup_indicies, known_technologies)
     else:
         return np.zeros(lookup_indicies.shape[0])
 
-def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
-    """Cost function based on ore mined
+def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
+    """Cost function based on ore produced (not mined).
+    Doesn't account for productivity
 
     Parameters
     ----------
@@ -60,21 +63,23 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
         Construct being priced
     lookup_indicies : np.ndarray
         Indicies in lookup table to calculate for
+    known_technologies : TechnologicalLimitation
+        Current tech level to calculate for 
 
     Returns
     -------
     np.ndarray
         Cost array
-    """    
+    """
     effect_transform_positive = construct.effect_transform.copy()
     effect_transform_positive[effect_transform_positive < 0] = 0
     effect_vector = effect_transform_positive @ pricing_vector
-    out = construct.lookup_table.multilinear_effect_transform[lookup_indicies, :] @ effect_vector
+    out = construct.lookup_table(known_technologies).multilinear_effect_transform[lookup_indicies, :] @ effect_vector
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
 
-def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
     """Cost function based on tiles taken up. Useful for space platforms
 
     Parameters
@@ -85,13 +90,15 @@ def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCons
         Construct being priced
     lookup_indicies : np.ndarray
         Indicies in lookup table to calculate for
+    known_technologies : TechnologicalLimitation
+        Current tech level to calculate for 
 
     Returns
     -------
     np.ndarray
         Cost array
     """    
-    out = construct.lookup_table.effective_area_table[lookup_indicies] + construct.effective_area
+    out = construct.lookup_table(known_technologies).effective_area_table[lookup_indicies] + construct.effective_area
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
@@ -100,7 +107,7 @@ def throughput_cost_function(pricing_vector: np.ndarray, construct: luts.Compile
     """TODO: Based on item throughput rate in trains?"""
     raise NotImplementedError()
 
-def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray], np.ndarray]:
+def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)
     'spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space' specify the spatial cost method
@@ -115,24 +122,29 @@ def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarr
 
     Returns
     -------
-    Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray], np.ndarray]
+    Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
         Uncompiled cost function
     """    
-    func = lambda pricing_vector, construct, lookup_indicies: np.zeros(lookup_indicies.shape[0])
+    func = lambda pricing_vector, construct, lookup_indicies, known_technologies: np.zeros(lookup_indicies.shape[0])
 
     for phrase in ['standard', 'basic', 'simple', 'baseline', 'dual']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies: func(pricing_vector, construct, lookup_indicies) + input[phrase] * standard_cost_function(pricing_vector, construct, lookup_indicies)
+            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
+                func(pricing_vector, construct, lookup_indicies, known_technologies) + \
+                    input[phrase] * standard_cost_function(pricing_vector, construct, lookup_indicies, known_technologies)
             break
 
     for phrase in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies: func(pricing_vector, construct, lookup_indicies) + input[phrase] * spatial_cost_function(instance.spatial_pricing, construct, lookup_indicies)
+            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
+                func(pricing_vector, construct, lookup_indicies, known_technologies) + input[phrase] * spatial_cost_function(instance.spatial_pricing, construct, lookup_indicies, known_technologies)
             break
     
     for phrase in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies: func(pricing_vector, construct, lookup_indicies) + input[phrase] * ore_cost_function(instance.raw_ore_pricing, construct, lookup_indicies)
+            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
+                func(pricing_vector, construct, lookup_indicies, known_technologies) + \
+                    input[phrase] * ore_cost_function(instance.raw_ore_pricing, construct, lookup_indicies, known_technologies)
             break
     
     return func

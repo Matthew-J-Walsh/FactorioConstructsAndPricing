@@ -44,6 +44,9 @@ class FactorioInstance():
         What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     RELEVENT_FLUID_TEMPERATURES : dict
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities
+    research_modifiers : dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
+        Research modifier technology tables
+        Currently ModuleLookupTables use "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed"
     post_analyses : dict[str, dict[int, float]]
         Post analysis calculations to run, construct name and target outputs
     """
@@ -60,6 +63,7 @@ class FactorioInstance():
     raw_ore_pricing: np.ndarray
     COST_MODE: str
     RELEVENT_FLUID_TEMPERATURES: dict
+    research_modifiers: dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
     post_analyses: dict[str, dict[int, float]]
 
     def __init__(self, filename: str, COST_MODE: str = 'normal', nobuild: bool = False, raw_ore_pricing: dict[str, Real] | CompressedVector | None = None) -> None:
@@ -82,6 +86,7 @@ class FactorioInstance():
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
         self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.research_modifiers = generate_research_effect_tables(self.data_raw, self.tech_tree)
         self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         self.reference_list = create_reference_list(self.uncompiled_constructs)
         self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
@@ -247,7 +252,7 @@ class FactorioInstance():
         
         return new_name
 
-    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray], 
+    def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], 
                          primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector]:
         """Solves for a target factory given a tech level and reference pricing model
 
@@ -287,7 +292,7 @@ class FactorioInstance():
         for k, v in reference_model.items():
             p0_j[self.reference_list.index(k)] = v
         priced_indices =  np.array([self.reference_list.index(k) for k in reference_model.keys()])
-        cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies)
+        cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies, known_technologies)
 
         u_j = np.zeros(n, dtype=np.longdouble)
         for k, v in targets.items():
@@ -469,20 +474,21 @@ class FactorioFactory():
         self.true_cost = CompressedVector()
         self.no_module_value = CompressedVector()
 
-    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray]) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]) -> bool:
         """Calculates a optimal factory with the the reference model
 
         Parameters
         ----------
         reference_model : CompressedVector
             CompressedVector of reference pricing model
-        ore_area_optimized : bool, optional
-            TODO
+        uncompiled_cost_function : Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
+            Cost function to use for this factory optimization
+        
 
         Returns
         -------
         bool
-            If pricing model has changed since this function last ran TODO
+            If pricing model has changed since this factory was last optimized
         """
         s, p, pf, k, zs, scale, tc, nmv = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.optimal_factory, self.optimal_pricing_model)
         same = p==self.optimal_pricing_model
@@ -713,7 +719,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.optimal_pricing_model = pricing_model.norm()
         self.construct_efficiencies = CompressedVector()
     
-    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray]) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]) -> bool:
         """Placeholder. Initial Factories cannot change.
         """
         return False
@@ -751,16 +757,16 @@ class FactorioFactoryChain():
     """
     instance: FactorioInstance
     chain: list[FactorioFactory]
-    uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray]
+    uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
 
-    def __init__(self, instance: FactorioInstance, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray], np.ndarray]) -> None:
+    def __init__(self, instance: FactorioInstance, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]) -> None:
         """
         Parameters
         ----------
         instance : FactorioInstance
             Instance for this chain
-        ore_area_optimized : bool, optional
-            TODO
+        uncompiled_cost_function : Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
+            Cost function to use for this factory chain
         """
         assert isinstance(instance, FactorioInstance)
         self.instance = instance

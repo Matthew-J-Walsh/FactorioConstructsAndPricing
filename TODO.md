@@ -2,10 +2,6 @@
 
 This file is a todo list of things with various levels of importance. List is in no particular order.
 
-## Research Affecting Constructs
-
-We need to add in the effect of research on mining productivity and research in labs. My current idea for this is: every mining productivity level needs it own lookuptable. We make a special CompiledConstruct inheriting class that chooses its lookuptable and effect_transform based on the tech level its given. Mining drills will use the lookuptables, while labs only need to multiply the effect_transform.
-
 ## Autocalculate factory chain
 
 Add functionality to continously add science factories if more science will be unlocked, otherwise material factories, all the way until 1 material factory after the last possible science factory is done.
@@ -44,4 +40,7 @@ Instead of just the (most of the time negative) efficiency value, it would be be
 
 ## inverse_priced_indices_arr optimization
 
+## Retargeting uses old optimization
+
+Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
 

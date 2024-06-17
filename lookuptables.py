@@ -327,8 +327,10 @@ class CompiledConstruct:
     -------
     origin : UncompiledConstruct
         Construct to compile
-    lookup_table:  ModuleLookupTable
-        Lookup table associated with this Construct
+    technological_lookup_tables : tuple[tuple[TechnologicalLimitation, ModuleLookupTable], ...]
+        Table containing lookup tables associated with this Construct given a Tech Level
+    technological_speed_multipliers : tuple[tuple[TechnologicalLimitation, float], ...]
+        Table containing speed multipliers associated with this Construct given a Tech Level
     effect_transform : sparse.csr_matrix
         Effect this construct has in multilinear form
     base_cost_vector : np.ndarray
@@ -343,7 +345,8 @@ class CompiledConstruct:
         If this construct should be priced based on size when calculating in size restricted mode
     """
     origin: UncompiledConstruct
-    lookup_table: ModuleLookupTable
+    technological_lookup_tables: tuple[tuple[TechnologicalLimitation, ModuleLookupTable], ...]
+    technological_speed_multipliers: tuple[tuple[TechnologicalLimitation, float], ...]
     effect_transform: sparse.csr_matrix
     base_cost_vector: np.ndarray
     required_price_indices: np.ndarray
@@ -362,7 +365,16 @@ class CompiledConstruct:
         """        
         self.origin = origin
 
-        self.lookup_table = link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity)
+        if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
+            self.technological_lookup_tables = tuple([(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod)) for limit, base_prod in instance.research_modifiers['laboratory-productivity']])
+        elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
+            self.technological_lookup_tables = tuple([(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod)) for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']])
+        else:
+            self.technological_lookup_tables = ((origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity)),)
+        if "laboratory-speed" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratorySpeedModifier.html
+            self.technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
+        else:
+            self.technological_speed_multipliers = ((origin.limit, 1),)
 
         self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list)
         
@@ -388,6 +400,54 @@ class CompiledConstruct:
 
         self.isa_mining_drill = origin.building['type']=="mining-drill"
             
+    def lookup_table(self, known_technologies: TechnologicalLimitation) -> ModuleLookupTable:
+        """Calculate the highest ModuleLookupTable that has been unlocked
+
+        Parameters
+        ----------
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for 
+
+        Returns
+        -------
+        ModuleLookupTable
+            The highest unlocked lookup table
+        """
+        if len(self.technological_lookup_tables)==1:
+            return self.technological_lookup_tables[0][1]
+        highest_lookup_table: ModuleLookupTable = self.technological_lookup_tables[0][1]
+        for tech_req, lookup_table in self.technological_lookup_tables[1:]:
+            if known_technologies>=tech_req:
+                highest_lookup_table = lookup_table
+            else:
+                break
+            
+        return highest_lookup_table
+    
+    def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
+        """Calculate the speed multiplier at a technological level
+
+        Parameters
+        ----------
+        known_technologies : TechnologicalLimitation
+            Current tech level to calculate for
+
+        Returns
+        -------
+        float
+            Multiplier
+        """
+        if len(self.technological_speed_multipliers)==1:
+            return self.technological_speed_multipliers[0][1]
+        highest_speed_multiplier: float = self.technological_speed_multipliers[0][1]
+        for tech_req, speed_multi in self.technological_speed_multipliers[1:]:
+            if known_technologies>=tech_req:
+                highest_speed_multiplier = speed_multi
+            else:
+                break
+            
+        return highest_speed_multiplier
+
     def vector(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, np.ndarray, str | None]:
         """Produces the best vector possible given a pricing model
 
@@ -413,14 +473,15 @@ class CompiledConstruct:
 
             Returns empty arrays, nans, and None if construct cannot be made
         """
-        #TODO: make priced_indices just a mask instead of the np.where-ified version
+        lookup_table = self.lookup_table(known_technologies)
+        speed_multi = self.speed_multiplier(known_technologies)
         if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost_vector.shape[0], 0)), np.nan, np.zeros((self.base_cost_vector.shape[0], 0)), None
         elif dual_vector is None:
-            column, true_cost, ident = self._generate_vector(0)
+            column, true_cost, ident = self._generate_vector(0, lookup_table, speed_multi)
             cost = cost_function(self, np.array([0]))[0]
         else:
-            e, c = self._evaluate(cost_function, priced_indices, dual_vector)
+            e, c = self._evaluate(cost_function, priced_indices, dual_vector, lookup_table, speed_multi)
                 
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
@@ -428,11 +489,11 @@ class CompiledConstruct:
             else:
                 index = int(np.argmax(e / c))
             cost = c[index]
-            column, true_cost, ident = self._generate_vector(index)
+            column, true_cost, ident = self._generate_vector(index, lookup_table, speed_multi)
         
         return column, cost, true_cost, ident
 
-    def _evaluate(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _evaluate(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, lookup_table: ModuleLookupTable, speed_multi: float) -> tuple[np.ndarray, np.ndarray]:
         """Evaluation of this construct
 
         Parameters
@@ -443,6 +504,10 @@ class CompiledConstruct:
             What indices of the pricing vector are actually priced
         dual_vector : dual_vector
             Dual vector to calculate with
+        lookup_table : ModuleLookupTable 
+            Lookup table to use for this evaluation
+        speed_multi : float
+            Speed multiplier to use for this evaluation
             
         Returns
         -------
@@ -450,17 +515,21 @@ class CompiledConstruct:
             Numerator of evaluations (-np.inf if cannot be made),
             Denominator of evaluations
         """
-        e = self.lookup_table.evaluate(self.effect_transform @ dual_vector, priced_indices, dual_vector)
-        c = cost_function(self, np.arange(self.lookup_table.multilinear_effect_transform.shape[0]))
+        e = lookup_table.evaluate(self.effect_transform @ dual_vector, priced_indices, dual_vector) * speed_multi
+        c = cost_function(self, np.arange(lookup_table.multilinear_effect_transform.shape[0]))
         return e, c
 
-    def _generate_vector(self, index: int) -> tuple[np.ndarray, np.ndarray, str]:
+    def _generate_vector(self, index: int, lookup_table: ModuleLookupTable, speed_multi: float) -> tuple[np.ndarray, np.ndarray, str]:
         """Calculates the vector information of a module setup
 
         Parameters
         ----------
         index : int
             Index of the module setup to use
+        lookup_table : ModuleLookupTable 
+            Lookup table to use for this column generation
+        speed_multi : float
+            Speed multiplier to use for this column generation
 
         Returns
         -------
@@ -469,11 +538,11 @@ class CompiledConstruct:
             its true cost vector, 
             its ident
         """
-        module_setup = self.lookup_table.module_setups[index]
-        ident = self.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.lookup_table.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
+        module_setup = lookup_table.module_setups[index]
+        ident = self.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+lookup_table.module_names[i] for i, v in enumerate(module_setup) if v>0]) if np.sum(module_setup)>0 else "")
         
-        column: np.ndarray = (self.lookup_table.multilinear_effect_transform[index] @ self.effect_transform + np.asarray(self.lookup_table.effect_transform[index].todense())).flatten()
-        cost: np.ndarray = self.lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, self.lookup_table.multilinear_effect_transform[index]) + self.base_cost_vector
+        column: np.ndarray = (lookup_table.multilinear_effect_transform[index] @ self.effect_transform + np.asarray(lookup_table.effect_transform[index].todense())).flatten() * speed_multi
+        cost: np.ndarray = lookup_table.cost_transform[index] + np.dot(self.paired_cost_transform, lookup_table.multilinear_effect_transform[index]) + self.base_cost_vector
 
         assert (cost>=0).all(), self.origin.ident
 
@@ -504,10 +573,12 @@ class CompiledConstruct:
         ValueError
             Debugging issues
         """
+        lookup_table = self.lookup_table(known_technologies)
+        speed_multi = self.speed_multiplier(known_technologies)
         if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
             return CompressedVector()
         else:
-            e, c = self._evaluate(cost_function, priced_indices, dual_vector)
+            e, c = self._evaluate(cost_function, priced_indices, dual_vector, lookup_table, speed_multi)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
             if np.isclose(c, 0).any():
@@ -524,7 +595,7 @@ class CompiledConstruct:
                 logging.debug(c)
                 raise ValueError(self.origin.ident)
             for i in range(evaluation.shape[0]):
-                output.update({self._generate_vector(i)[2]: evaluation[i]})
+                output.update({self._generate_vector(i, lookup_table, speed_multi)[2]: evaluation[i]})
 
             return output
 

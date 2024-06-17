@@ -146,7 +146,7 @@ def fix_temperature_settings(temperature_settings: dict, vector: CompressedVecto
             vector[k+'@'+str(temperature_settings[k])] = vector[k]
             del vector[k]
     
-def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: tuple[str, Fraction, str | None], temperature_settings: dict) -> UncompiledConstruct:
+def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: tuple[str, Fraction, str | None], temperature_settings: dict, research_effected: list[str] | None = None) -> UncompiledConstruct:
     """Generate a UncompiledConstruct given the machine, recipe, fuel, and ingredient temperatures
 
     Parameters
@@ -161,6 +161,8 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
         Result of burning the fuel
     temperature_settings : dict
         Specific temperatures of inputs and fuels to use
+    research_effected : list[str]
+        List of special research effect that should affect this construct
 
     Returns
     -------
@@ -213,7 +215,7 @@ def generate_fueled_construct_helper(machine: dict, vector_source: dict, fuel: t
 
     base_productivity = Fraction(machine['base_productivity']).limit_denominator() if 'base_productivity' in machine.keys() else Fraction(0) #https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
 
-    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, machine, base_productivity)
+    return UncompiledConstruct(ident, drain, vector, effect_effects, allowed_modules, max_internal_mods, base_inputs, cost, limit, machine, base_productivity, research_effected)
 
 def generate_crafting_constructs(machine: dict, recipe: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """Generates UncompiledConstructs of a machine that does recipe crafting
@@ -322,7 +324,7 @@ def generate_mining_drill_constructs(machine: dict, data: dict, RELEVENT_FLUID_T
                 continue
             for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
                 for temperature_setting in temperature_setting_generator(fuel_name, RELEVENT_FLUID_TEMPERATURES, resource):
-                    yield generate_fueled_construct_helper(machine, resource, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting)
+                    yield generate_fueled_construct_helper(machine, resource, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting, ["mining-drill-productivity-bonus"])
 
 def generate_burner_generator_constructs(machine: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """Generates UncompiledConstructs for a burner generator
@@ -517,7 +519,7 @@ def generate_lab_construct(machine: dict, technology: dict, data: dict, RELEVENT
     
     for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], data, RELEVENT_FLUID_TEMPERATURES):
         for temperature_setting in temperature_setting_generator(fuel_name, RELEVENT_FLUID_TEMPERATURES, technology):
-            yield generate_fueled_construct_helper(machine, technology, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting)
+            yield generate_fueled_construct_helper(machine, technology, (fuel_name, fuel_value, fuel_burnt_result), temperature_setting, ["laboratory-productivity", "laboratory-speed"])
 
 def generate_rocket_result_construct(machine: dict, item: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Generator[UncompiledConstruct, None, None]:
     """Generates UncompiledConstruct of a rocket being launched

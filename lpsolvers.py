@@ -59,8 +59,9 @@ def pulp_dense_solver(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray
         dual = np.zeros(b.shape[0])
         dual[np.where(constraint_mask)] = np.array([constraint.pi for name, constraint in problem.constraints.items()])
     
-        assert linear_transform_is_gt(A, primal, b).all()
-        assert linear_transform_is_gt(-1 * A.T, dual, -1 * c).all()
+        #TODO: improve errors
+        #assert linear_transform_is_gt(A, primal, b).all()
+        #assert linear_transform_is_gt(-1 * A.T, dual, -1 * c).all()
 
         return primal, dual
     

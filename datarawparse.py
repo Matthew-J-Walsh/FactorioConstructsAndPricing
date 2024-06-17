@@ -637,6 +637,41 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
             if not 'tile_height' in machine.keys():
                 machine['tile_height'] = math.ceil(abs(machine['collision_box'][1][1] - machine['collision_box'][0][1]))
 
+def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]:
+    """Generates research effect tables.
+    Each table should be an ordered collection of needed technology, effect tuples.
+    Effect type depends on research effect.
+    Currently creates "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed" effect tables.
+    See: https://lua-api.factorio.com/latest/types/Modifier.html
+
+    Parameters
+    ----------
+    data : dict
+        Entire data.raw https://wiki.factorio.com/Data.raw
+    tech_tree : TechnologyTree
+        Technology Tree to make limits from
+
+    Returns
+    -------
+    dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
+        Research effect tables
+    """
+    effect_table: dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]] = {}
+    for modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "laboratory-speed"]:
+        table = [[TechnologicalLimitation(tech_tree), 0 if 'productivity' in modifier_type else 1]] #TODO: Should this check be somewhere else?
+        for technology in data['technology'].values():
+            if 'effects' in technology.keys():
+                for modifier in technology['effects']:
+                    if modifier['type'] == modifier_type:
+                        table.append([TechnologicalLimitation(tech_tree, sets_of_researches=[[technology['name']]]), modifier['modifier']])
+
+        table = sorted(table, key=functools.cmp_to_key(lambda x, y: -1 if y[0] >= x[0] else 1))
+        for i in range(1, len(table)): #https://lua-api.factorio.com/latest/types/SimpleModifier.html#modifier
+            table[i][1] += table[i-1][1]
+
+        effect_table[modifier_type] = tuple([tuple(p) for p in table]) # type: ignore
+    return effect_table
+
 def complete_premanagement(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> TechnologyTree:
     """Does all the premanagment steps on data.raw in an appropriate order
 

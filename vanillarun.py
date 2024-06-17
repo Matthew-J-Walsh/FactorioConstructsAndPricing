@@ -13,7 +13,7 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
-    if False: #os.path.isfile(instance_filename):
+    if os.path.isfile(instance_filename): #False:
         vanilla = FactorioInstance.load(instance_filename)
         print("Instance loaded.")
     else:
@@ -26,9 +26,9 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     elif optimization_mode in ['standard', 'basic', 'simple', 'baseline', 'dual']:
         uncompiled_cost_function = standard_cost_function
     elif optimization_mode in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
-        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies: spatial_cost_function(vanilla.spatial_pricing, construct, lookup_indicies)
+        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies, known_technologies: spatial_cost_function(vanilla.spatial_pricing, construct, lookup_indicies, known_technologies)
     elif optimization_mode in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
-        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies: ore_cost_function(vanilla.raw_ore_pricing, construct, lookup_indicies)
+        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies, known_technologies: ore_cost_function(vanilla.raw_ore_pricing, construct, lookup_indicies, known_technologies)
     else:
         raise ValueError(optimization_mode)
     
@@ -64,14 +64,11 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     logging.info(vanilla.complex_constructs)
 
     logging.info("=============================================")
-    tech_level = vanilla.technological_limitation_from_specification(fully_automated=["automation-science-pack"])
-    logging.info(tech_level)
+    logging.info(vanilla.research_modifiers)
 
     logging.info("=============================================")
-    for cc in vanilla.complex_constructs:
-        if cc.ident=="utility-science-pack in assembling-machine-3 with electric":
-            assert isinstance(cc.subconstructs[0], CompiledConstruct)
-            logging.info(cc.subconstructs[0].lookup_table.effect_transform)
+    tech_level = vanilla.technological_limitation_from_specification(fully_automated=["automation-science-pack"])
+    logging.info(tech_level)
 
     logging.info("=============================================")
     vanilla_chain = FactorioFactoryChain(vanilla, uncompiled_cost_function)
@@ -209,7 +206,7 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
             p0_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
             for k, v in vanilla_chain.chain[-3].full_optimal_pricing_model.items():
                 p0_j[vanilla.reference_list.index(k)] = v
-            cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies)
+            cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies, vanilla_chain.chain[-2].known_technologies)
             p_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
             for k, v in vanilla_chain.chain[-2].full_optimal_pricing_model.items():
                 assert not np.isnan(v), k
