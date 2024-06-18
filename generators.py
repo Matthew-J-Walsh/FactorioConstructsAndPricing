@@ -56,7 +56,7 @@ def valid_crafting_machine(machine: dict, recipe: dict, COST_MODE: str) -> bool:
     #but I haven't found a good way of handling that yet. Many mods have other types of container and one could imagine a mod where some
     #fluid does need to be in a container for a process and therefor access to such recipes will be nessisary.
     #TODO
-    if any([phrase in recipe['name'] for phrase in ['fill', 'empty']]) and ('barrel' in recipe['name']):
+    if any([phrase in recipe['name'] for phrase in ['fill', 'empty']]) and ('barrel' in recipe['name']): #'fill', 'empty'
         return False
 
     #block all recipes that cannot be enabled (cheat mode only)

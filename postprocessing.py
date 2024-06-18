@@ -31,10 +31,10 @@ def compute_transportation_densities(pricing_model: CompressedVector, data: dict
             for wagon in data['cargo-wagon'].values():
                 output.append((ident, wagon['name']+" cargo-wagon", value * data[item_cata][ident]['stack_size'] * wagon['inventory_size']))
         elif ident in data['fluid'].keys():
-            output = output + fluid_transport_density_helper(ident, value, data)
+            output = output + fluid_transport_density_fluids(ident, value, data)
         elif '@' in ident:
             if ident.split('@')[0] in data['fluid'].keys():
-                output = output + fluid_transport_density_helper(ident.split('@')[0], value, data)
+                output = output + fluid_transport_density_fluids(ident.split('@')[0], value, data)
             else:
                 logging.error("Unknown object with temperature: "+ident)
         elif ident in ["electric", "heat"]:
@@ -44,7 +44,7 @@ def compute_transportation_densities(pricing_model: CompressedVector, data: dict
 
     return output
 
-def fluid_transport_density_helper(ident: str, value: float, data: dict) -> list[tuple[str, str, float]]:
+def fluid_transport_density_fluids(ident: str, value: float, data: dict) -> list[tuple[str, str, float]]:
     """Calculates the transport density for fluids
 
     Parameters
@@ -91,7 +91,7 @@ def find_fluid_container_size(data: dict, fluid: dict) -> tuple[int, int] | tupl
                     if ident!=fluid['name'] and delta < 0:
                         direct_ancestors_list.add(ident)
                         relevent_recipes.add(recipe['name'])
-            elif recipe['vector'][fluid['name']] > 0:
+            elif recipe['vector'][fluid['name']] < 0:
                 for ident, delta in recipe['vector'].items():
                     if ident!=fluid['name'] and delta > 0:
                         direct_predecessors_list.add(ident)
@@ -110,7 +110,7 @@ def find_fluid_container_size(data: dict, fluid: dict) -> tuple[int, int] | tupl
                 paired_value = int(abs(recipe['vector'][fluid['name']]/recipe['vector'][item]))
         if not paired_value is None:
             containers.append((paired_value, data['item'][item]['stack_size']))
-        
+
     assert len(containers)<2, "Found multiple containers, something is wrong!"
     if len(containers)==0:
         return None, None
