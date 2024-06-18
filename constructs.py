@@ -376,14 +376,14 @@ def determine_catalysts(uncompiled_construct_list: Collection[UncompiledConstruc
     for item in reference_list:
         graph[item] = set()
     for ident in [construct.ident for construct in uncompiled_construct_list]:
-        graph[ident+"-construct"] = set()
+        graph[ident+"=construct"] = set()
         
     for construct in uncompiled_construct_list:
         for k, v in list(construct.deltas.items()) + list(construct.base_inputs.items()):
             if v > 0:
-                graph[construct.ident+"-construct"].add(k)
+                graph[construct.ident+"=construct"].add(k)
             if v < 0:
-                graph[k].add(construct.ident+"-construct")
+                graph[k].add(construct.ident+"=construct")
     
     def all_descendants(node):
         descendants = copy.deepcopy(graph[node])

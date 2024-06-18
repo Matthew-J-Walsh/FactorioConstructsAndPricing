@@ -613,10 +613,13 @@ class FactorioScienceFactory(FactorioFactory):
         Set of tools that define which must be produced to clear all researches possible with just those tools.
         Example: If this was a set of red and green science pack that would indicate all research that only red and
                  green science packs are needed for MUST be completed within this factory, regardless of other calculations
+    extra : list[str]
+        Set of extra technologies to research
     """
     last_material_factory: FactorioMaterialFactory
     previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation
     clear: list[str]
+    extra: list[str]
 
     def __init__(self, instance: FactorioInstance, previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation, last_material_factory: FactorioMaterialFactory | InitialFactory, 
                  science_targets: CompressedVector) -> None:
@@ -636,15 +639,16 @@ class FactorioScienceFactory(FactorioFactory):
         assert isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, InitialFactory) or isinstance(previous_science, TechnologicalLimitation)
         assert isinstance(last_material_factory, FactorioMaterialFactory) or isinstance(last_material_factory, InitialFactory)
         assert isinstance(science_targets, CompressedVector)
-        self.instance = instance
-        self.clear = [target for target in science_targets.keys() if target in self.instance.data_raw['tool'].keys()]
+        self.clear = [target for target in science_targets.keys() if target in instance.data_raw['tool'].keys()]
+        self.extra = [target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in science_targets.keys() if RESEARCH_SPECIAL_STRING in target]
         self.previous_science = previous_science
-        covering_to = self.instance.technological_limitation_from_specification(fully_automated=self.clear) + \
-                      TechnologicalLimitation(instance.tech_tree, [set([target for target in science_targets.keys() if target in self.instance.data_raw['technology'].keys()])])
+        #covering_to = instance.technological_limitation_from_specification(fully_automated=self.clear, extra_technologies=self.extra)
         
-        last_coverage = self._previous_coverage()
+        #last_coverage = self._previous_coverage()
 
-        targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+        #targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+
+        targets, covering_to, last_coverage  = _science_factory_parameters(instance, previous_science, self.clear, self.extra)
 
         super().__init__(instance, last_coverage, targets)
 
@@ -755,8 +759,8 @@ class FactorioFactoryChain():
         Instance for this chain
     chain :list[FactorioFactory]
         List containing the chain elements
-    ore_area_optimized : bool
-        TODO
+    uncompiled_cost_function : Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
+        Cost function this chain uses
     """
     instance: FactorioInstance
     chain: list[FactorioFactory]
@@ -788,24 +792,30 @@ class FactorioFactoryChain():
         """
         self.chain.append(InitialFactory(self.instance, pricing_model, starting_techs))
     
-    def add(self, targets: CompressedVector | str) -> None:
-        """Adds a factory to the chain
-        TODO: make this function a lot less messy
-
+    def add(self, targets: CompressedVector | str | None = None) -> bool:
+        """Adds a factory to the chain. Won't add a factory if material targets are given and all materials are already priced
+        
         Parameters
         ----------
-        targets : CompressedVector | str
+        targets : CompressedVector | str | None
             Either:
                 CompressedVector of target outputs for the factory. Must be either all science tools or building materials
             Or:
                 String:
-                    "all materials" = will autopopulate all possible buildings and materials that can be made (TODO: restrict to catalysts)
-                    "all tech" = will populate all possible tech that can be made
+                    "all materials" = will autopopulate all possible buildings and active materials that can be made
+                    "all tech" = will autopopulate all possible tech that can be made
+                    "" = will autopopulate all tech if possible, otherwise autopopulate all possible buildings and active materials
+            Or (default):
+                None = String ""
 
         Raises
         ------
         ValueError
             Something very bad happened
+
+        Returns
+        -------
+        If the addition actually added a factory
         """
         factory_type = ""
         previous_sciences = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)]
@@ -821,11 +831,9 @@ class FactorioFactoryChain():
             elif list(targets.keys())[0] in self.instance.data_raw['item'].keys() or list(targets.keys())[0] in self.instance.data_raw['fluid'].keys():
                 factory_type = "material"
         else:
-            if targets=="all tech":
-                factory_type = "science"
-            else: #elif targets=="all materials":
-                factory_type = "material"
-            targets = _calculate_new_full_factory_targets(factory_type, last_material, known_technologies, self.instance)
+            if targets is None:
+                targets = ""
+            targets, factory_type = _calculate_new_full_factory_targets(targets, last_material, known_technologies, self.instance)
 
         if factory_type == "science":
             for target in targets.keys():
@@ -833,9 +841,14 @@ class FactorioFactoryChain():
             previous_science = previous_sciences[-1] if len(previous_sciences)>0 else known_technologies
             self.chain.append(FactorioScienceFactory(self.instance, previous_science, last_material, targets))
         else: #factory_type == "material":
-            logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(set(targets.keys()).difference(set(last_material.targets.keys()))))
+            difference: set[str] = set(targets.keys()).difference(set(last_material.targets.keys()))
+            logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(difference))
             last_science = previous_sciences[-1]
             self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
+            if len(difference)==0:
+                logging.info("Adding a material factory without any actual additional prices. This would indicate that there is no more progress to be made.")
+                return True
+        return False
 
     def compute_all(self) -> bool:
         """Computes all pricing models for chain iteratively and returns if the pricing models changed
@@ -920,14 +933,18 @@ class FactorioFactoryChain():
             #else: #if isinstance(factory, InitialFactory):
         writer.close()
 
-def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Literal["material"], last_material: FactorioMaterialFactory, 
-                                        known_technologies: TechnologicalLimitation, instance: FactorioInstance) -> CompressedVector:
-    """Calculates the targets for a full factory type
+def _calculate_new_full_factory_targets(target_types: str, last_material: FactorioMaterialFactory,
+                                        known_technologies: TechnologicalLimitation, instance: FactorioInstance) -> tuple[CompressedVector, str]:
+    """Calculates the targets for a full factory type. 
+    If no target is given it will create a science one if research can be done, otherwise it will crate a material one
 
     Parameters
     ----------
-    factory_type : Literal["science"] | Literal["material"]
-        What factory type to create
+    target_types : str
+        What factory targets to create.
+            "all tech" for a science factory
+            "all materials" for a material factory
+            Anything else (usually "") means that the function should choose whatever gives progress
     last_material : FactorioMaterialFactory
         The last material factory for pricing
     known_technologies : TechnologicalLimitation
@@ -939,12 +956,9 @@ def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Liter
     -------
     CompressedVector
         Targets in a compressed vector
-
-    Raises
-    ------
-    ValueError
-        Various issues with Factorio instance setup
-    """    
+    str
+        The factory type
+    """
     output_items = list(last_material.targets.keys())
     logging.info(output_items)
 
@@ -961,49 +975,132 @@ def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Liter
                                                             None, known_technologies)
     valid_rows = (R_j_i != 0).sum(axis=1) > 0
 
-    targets = CompressedVector()
-        
-    if factory_type=="science":
-        for tool in instance.data_raw['tool'].keys():
-            if valid_rows[instance.reference_list.index(tool)]:
-                targets[tool] = Fraction(1)
-
-    elif factory_type=="material":
-            #only actually craftable materials
-        for item_cata in ITEM_SUB_PROTOTYPES:
-            if item_cata=='tool':
-                continue #skip tools in material factories
-            for item in instance.data_raw[item_cata].keys():
-                if not item in instance.reference_list:
-                    if not item in OUTPUT_WARNING_LIST:
-                        logging.warning("Detected some a weird "+item_cata+": "+item)
-                        OUTPUT_WARNING_LIST.append(item)
-                elif valid_rows[instance.reference_list.index(item)] and item in instance.active_list:
-                    targets[item] = Fraction(1)
-        for fluid in instance.data_raw['fluid'].keys():
-            if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
-                for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
-                    if not fluid+'@'+str(temp) in instance.reference_list:
-                        raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
-                    if valid_rows[instance.reference_list.index(fluid+'@'+str(temp))] and fluid+'@'+str(temp) in instance.active_list:
-                        targets[fluid+'@'+str(temp)] = Fraction(1)
-            else:
-                if not fluid in instance.reference_list:
-                    if not fluid in OUTPUT_WARNING_LIST:
-                        logging.warning("Detected some a weird fluid: "+fluid)
-                        OUTPUT_WARNING_LIST.append(fluid)
-                elif valid_rows[instance.reference_list.index(fluid)] and fluid in instance.active_list:
-                    targets[fluid] = Fraction(1)
-        for other in ['electric', 'heat']:
-            if not other in instance.reference_list:
-                if not other in OUTPUT_WARNING_LIST:
-                    logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
-                    OUTPUT_WARNING_LIST.append(other)
-            if valid_rows[instance.reference_list.index(other)] and other in instance.active_list:
-                targets[other] = Fraction(1)
-
+    if target_types=="all tech":
+        factory_type = "science"
+        target_names: list[str] = _new_science_factory_targets(instance, valid_rows)
+    elif target_types=="all materials":
+        factory_type = "material"
+        target_names: list[str] = _new_material_factory_targets(instance, valid_rows)
     else:
-        raise ValueError("Unknown factory type: "+str(factory_type))
+        science_target_names: list[str] = _new_science_factory_targets(instance, valid_rows)
+        science_targets, covering_to, _ = _science_factory_parameters(instance, known_technologies, science_target_names, [])
+        if len(science_targets.keys()):
+            factory_type = "science"
+            target_names = science_target_names
+        else:
+            factory_type = "material"
+            target_names: list[str] = _new_material_factory_targets(instance, valid_rows)
 
-    logging.info("Auto-targets:\n\t"+str(list(targets.keys())))
-    return targets
+    logging.info("Auto-targets:\n\t"+str(target_names))
+
+    return CompressedVector({k: Fraction(1) for k in target_names}), factory_type
+
+def _new_science_factory_targets(instance: FactorioInstance, valid_rows: np.ndarray) -> list[str]:
+    """Determines all possible tool targets for a science factory
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        The Factorio instance to use
+    valid_rows : np.ndarray
+        What values of the reference list can be produced
+
+    Returns
+    -------
+    list[str]
+        All possible tools in the valid_rows
+    """    
+    target_names: list[str] = []
+    for tool in instance.data_raw['tool'].keys():
+        if valid_rows[instance.reference_list.index(tool)]:
+            target_names.append(tool)
+    return target_names
+
+def _science_factory_parameters(instance: FactorioInstance, previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation, 
+                                clear: list[str], extra: list[str]) -> tuple[CompressedVector, TechnologicalLimitation, TechnologicalLimitation]:
+    """Determines the targets, and coverages given some science factory parameters
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        The Factorio instance to use
+    previous_science : FactorioScienceFactory | InitialFactory | TechnologicalLimitation
+        Holder of previous science state
+    clear : list[str]
+        What tools are fully automated and all research requiring just them should be done
+    extra : list[str]
+        Extra science that must be done
+
+    Returns
+    -------
+    CompressedVector
+        The targets of the science factory
+    TechnologicalLimitation
+        The ending tech level
+    TechnologicalLimitation
+        The starting tech level
+    """    
+    covering_to: TechnologicalLimitation = instance.technological_limitation_from_specification(fully_automated=clear, extra_technologies=extra)
+
+    if isinstance(previous_science, TechnologicalLimitation):
+        last_coverage: TechnologicalLimitation = previous_science
+    else:
+        last_coverage: TechnologicalLimitation = previous_science.get_technological_coverage()
+
+    targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+
+    return targets, covering_to, last_coverage
+
+def _new_material_factory_targets(instance, valid_rows) -> list[str]:
+    """Determines all possible material targets for a material factory
+
+    Parameters
+    ----------
+    instance : _type_
+        The Factorio instance to use
+    valid_rows : _type_
+        What values of the reference list can be produced
+
+    Returns
+    -------
+    list[str]
+        All possible active materials in the valid_rows
+
+    Raises
+    ------
+    ValueError
+        Various build issues
+    """    
+    target_names: list[str] = []
+    for item_cata in ITEM_SUB_PROTOTYPES:
+        if item_cata=='tool':
+            continue #skip tools in material factories
+        for item in instance.data_raw[item_cata].keys():
+            if not item in instance.reference_list:
+                if not item in OUTPUT_WARNING_LIST:
+                    logging.warning("Detected some a weird "+item_cata+": "+item)
+                    OUTPUT_WARNING_LIST.append(item)
+            elif valid_rows[instance.reference_list.index(item)] and item in instance.active_list:
+                target_names.append(item)
+    for fluid in instance.data_raw['fluid'].keys():
+        if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
+            for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
+                if not fluid+'@'+str(temp) in instance.reference_list:
+                    raise ValueError("Fluid \""+fluid+"\" found to have temperature "+str(temp)+" but said temperature wasn't found in the reference list.")
+                if valid_rows[instance.reference_list.index(fluid+'@'+str(temp))] and fluid+'@'+str(temp) in instance.active_list:
+                    target_names.append(fluid+'@'+str(temp))
+        else:
+            if not fluid in instance.reference_list:
+                if not fluid in OUTPUT_WARNING_LIST:
+                    logging.warning("Detected some a weird fluid: "+fluid)
+                    OUTPUT_WARNING_LIST.append(fluid)
+            elif valid_rows[instance.reference_list.index(fluid)] and fluid in instance.active_list:
+                target_names.append(fluid)
+    for other in ['electric', 'heat']:
+        if not other in instance.reference_list:
+            if not other in OUTPUT_WARNING_LIST:
+                logging.warning("Was unable to find "+other+" in the reference list. While not nessisary wrong this is extreamly odd and should only happen on very strange mod setups.")
+                OUTPUT_WARNING_LIST.append(other)
+        if valid_rows[instance.reference_list.index(other)] and other in instance.active_list:
+            target_names.append(other)
+    return target_names
