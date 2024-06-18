@@ -207,15 +207,15 @@ class ModuleLookupTable:
             raise ValueError()
 
 
-    def evaluate(self, effect_vector: np.ndarray, priced_indices: np.ndarray, dual_vector: np.ndarray) -> np.ndarray:
+    def evaluate(self, effect_vector: np.ndarray, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> np.ndarray:
         """Evaluates a effect weighting vector pair to find the best module combination
 
         Parameters
         ----------
         effect_vector : np.ndarray
             A vector containing the weighting of each multilinear combination of effects
-        priced_indices : np.ndarray
-            Indicies of cost vector elements that are priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray
             Dual vector to calculate with (for beacon energy costs)
 
@@ -225,16 +225,14 @@ class ModuleLookupTable:
             Numerator of evaluations (-np.inf if cannot be made),
             Denominator of evaluations
         """
-        inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
-        inverse_priced_indices_arr[priced_indices] = 0
-        mask = self.cost_transform @ inverse_priced_indices_arr > 0
+        mask = self.cost_transform @ inverse_priced_indices > 0
         e = self.multilinear_effect_transform @ effect_vector + self.effect_transform @ dual_vector # type: ignore
         e[mask] = -np.inf
         return e
     
-    def search(self, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+    def search(self, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
         if cost_function(construct, np.array([0]))[0]==0:
-            extremes = [self._point_search_zc(start_point, construct, cost_function, priced_indices, dual_vector) for start_point in self.extreme_points]
+            extremes = [self._point_search_zc(start_point, construct, cost_function, inverse_priced_indices, dual_vector) for start_point in self.extreme_points]
             argmax = 0
             maxval = extremes[0][0] @ dual_vector
             for i in range(1, len(extremes)):
@@ -243,7 +241,7 @@ class ModuleLookupTable:
                     maxval = extremes[i][0] @ dual_vector
             return extremes[argmax]
         else:
-            extremes = [self._point_search_nnzc(start_point, construct, cost_function, priced_indices, dual_vector) for start_point in self.extreme_points]
+            extremes = [self._point_search_nnzc(start_point, construct, cost_function, inverse_priced_indices, dual_vector) for start_point in self.extreme_points]
             argmax = 0
             maxval = extremes[0][0] @ dual_vector / extremes[0][1]
             for i in range(1, len(extremes)):
@@ -253,11 +251,9 @@ class ModuleLookupTable:
             return extremes[argmax]
     
     def _point_search_nnzc(self, start_point: int, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], 
-                           priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+                           inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
         raise NotImplementedError()
-        inverse_priced_indices_arr = np.ones(self.cost_transform.shape[1])
-        inverse_priced_indices_arr[priced_indices] = 0
-        mask = self.cost_transform @ inverse_priced_indices_arr > 0
+        mask = self.cost_transform @ inverse_priced_indices > 0
         effect_transform = (construct.effect_transform @ dual_vector)
 
         current_point = start_point
@@ -282,7 +278,7 @@ class ModuleLookupTable:
                construct.origin.ident + (" with module setup: " + " & ".join([str(v)+"x "+self.module_names[i] for i, v in enumerate(self.module_setups[current_point]) if v>0]) if np.sum(self.module_setups[current_point])>0 else "")
 
     def _point_search_zc(self, start_point: int, construct: CompiledConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], 
-                           priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
+                           inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, float, np.ndarray, str]:
         raise NotImplementedError()
 
     def __repr__(self) -> str:
@@ -448,15 +444,15 @@ class CompiledConstruct:
             
         return highest_speed_multiplier
 
-    def vector(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, np.ndarray, str | None]:
+    def vector(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, np.ndarray, str | None]:
         """Produces the best vector possible given a pricing model
 
         Parameters
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -475,13 +471,13 @@ class CompiledConstruct:
         """
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
-        if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
+        if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost_vector.shape[0], 0)), np.nan, np.zeros((self.base_cost_vector.shape[0], 0)), None
         elif dual_vector is None:
             column, true_cost, ident = self._generate_vector(0, lookup_table, speed_multi)
             cost = cost_function(self, np.array([0]))[0]
         else:
-            e, c = self._evaluate(cost_function, priced_indices, dual_vector, lookup_table, speed_multi)
+            e, c = self._evaluate(cost_function, inverse_priced_indices, dual_vector, lookup_table, speed_multi)
                 
             if np.isclose(c, 0).any():
                 assert np.isclose(c, 0).all(), self.origin.ident
@@ -493,15 +489,15 @@ class CompiledConstruct:
         
         return column, cost, true_cost, ident
 
-    def _evaluate(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, lookup_table: ModuleLookupTable, speed_multi: float) -> tuple[np.ndarray, np.ndarray]:
+    def _evaluate(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, lookup_table: ModuleLookupTable, speed_multi: float) -> tuple[np.ndarray, np.ndarray]:
         """Evaluation of this construct
 
         Parameters
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : dual_vector
             Dual vector to calculate with
         lookup_table : ModuleLookupTable 
@@ -515,7 +511,7 @@ class CompiledConstruct:
             Numerator of evaluations (-np.inf if cannot be made),
             Denominator of evaluations
         """
-        e = lookup_table.evaluate(self.effect_transform @ dual_vector, priced_indices, dual_vector) * speed_multi
+        e = lookup_table.evaluate(self.effect_transform @ dual_vector, inverse_priced_indices, dual_vector) * speed_multi
         c = cost_function(self, np.arange(lookup_table.multilinear_effect_transform.shape[0]))
         return e, c
 
@@ -549,15 +545,15 @@ class CompiledConstruct:
         #return sparse.csr_array(column).T, sparse.csr_array(cost).T, ident # type: ignore
         return np.reshape(column, (-1, 1)), np.reshape(cost, (-1, 1)), ident
     
-    def efficency_dump(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation) -> CompressedVector:
+    def efficency_dump(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation) -> CompressedVector:
         """Dumps the efficiency of all possible constructs
 
         Parameters
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -575,10 +571,11 @@ class CompiledConstruct:
         """
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
-        if not (known_technologies >= self.origin.limit) or not np.isin(self.required_price_indices, priced_indices, assume_unique=True).all(): #rough line, ordered?
+        #inverse_inverse_priced_indices_arr_todo
+        if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
             return CompressedVector()
         else:
-            e, c = self._evaluate(cost_function, priced_indices, dual_vector, lookup_table, speed_multi)
+            e, c = self._evaluate(cost_function, inverse_priced_indices, dual_vector, lookup_table, speed_multi)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
             if np.isclose(c, 0).any():
@@ -647,15 +644,15 @@ class ComplexConstruct:
         else:
             self.stabilization[row] = direction
 
-    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """Produces the best vectors possible given a pricing model
 
         Parameters
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -670,7 +667,7 @@ class ComplexConstruct:
             Ident vectors
         """
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        vectors, costs, true_costs, idents = zip(*[sc.vectors(cost_function, priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]) # type: ignore
+        vectors, costs, true_costs, idents = zip(*[sc.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]) # type: ignore
         vector = np.concatenate(vectors, axis=1)#sparse.csr_matrix(sparse.hstack(vectors))
         cost = np.concatenate(costs)
         true_cost = np.concatenate(true_costs, axis=1)#sparse.csr_matrix(sparse.hstack(costs))
@@ -711,7 +708,7 @@ class ComplexConstruct:
 
         return vector, cost, true_cost, ident
 
-    def reduce(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def reduce(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """Produces the best vectors possible given a pricing model. 
         Additionally removes columns that cannot be used because their inputs cannot be made.
         Additionally sorts the columns (based on their hash hehe).
@@ -720,8 +717,8 @@ class ComplexConstruct:
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -735,7 +732,7 @@ class ComplexConstruct:
             Matrix of exact costs,
             Ident vectors
         """
-        vector, cost, true_cost, ident = self.vectors(cost_function, priced_indices, dual_vector, known_technologies)
+        vector, cost, true_cost, ident = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
         mask = np.full(vector.shape[1], True, dtype=bool)
 
         valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
@@ -758,7 +755,7 @@ class ComplexConstruct:
         #return vector, cost, ident
         return vector[:, sort_list], cost[sort_list], true_cost[:, sort_list], ident[sort_list]
 
-    def efficiency_analysis(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, 
+    def efficiency_analysis(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, 
                             known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> float:
         """Determines the best possible realizable efficiency of the construct
 
@@ -766,8 +763,8 @@ class ComplexConstruct:
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -785,7 +782,7 @@ class ComplexConstruct:
         RuntimeError
             Error with optimization that shouldn't happen
         """
-        vector, cost, true_cost, ident = self.vectors(cost_function, priced_indices, dual_vector, known_technologies)
+        vector, cost, true_cost, ident = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
 
         mask = np.logical_not(np.asarray((vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten())
 
@@ -861,15 +858,15 @@ class SingularConstruct(ComplexConstruct):
         """        
         raise RuntimeError("Cannot stabilize a singular constuct.")
 
-    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """Produces the best vector possible given a pricing model
 
         Parameters
         ----------
         cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
             A compiled cost function
-        priced_indices : np.ndarray
-            What indices of the pricing vector are actually priced
+        inverse_priced_indices : np.ndarray
+            What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
@@ -883,7 +880,7 @@ class SingularConstruct(ComplexConstruct):
             Matrix of exact costs,
             Ident vectors
         """
-        vector, cost, true_cost, ident = self.subconstructs[0].vector(cost_function, priced_indices,  dual_vector, known_technologies) # type: ignore
+        vector, cost, true_cost, ident = self.subconstructs[0].vector(cost_function, inverse_priced_indices,  dual_vector, known_technologies) # type: ignore
         if ident is None:
             return vector, np.array([]), true_cost, np.array([])
         return vector, np.array([cost]), true_cost, np.array([CompressedVector({ident: 1})])

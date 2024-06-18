@@ -4,7 +4,7 @@ from lookuptables import *
 from utils import *
 from lpsolvers import *
 
-def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, known_technologies: TechnologicalLimitation,
+def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation,
                                        dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
 
@@ -16,8 +16,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         Target output vector
     p0_j : np.ndarray
         Initial pricing model
-    priced_indices : np.ndarray
-        Indicies of the pricing vector that are priced
+    inverse_priced_indices : np.ndarray
+        What indices of the pricing vector aren't priced
     known_technologies : TechnologicalLimitation
         Current tech level
     dual_guess : np.ndarray | None, optional
@@ -40,7 +40,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
     """
     primal, dual = None, dual_guess
 
-    vectors, costs, true_costs, idents = construct.reduce(cost_function, priced_indices, dual, known_technologies)
+    vectors, costs, true_costs, idents = construct.reduce(cost_function, inverse_priced_indices, dual, known_technologies)
     i = 0
     vc = vectors.copy()
     vc[vc < 0] = 0
@@ -66,7 +66,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         assert not np.isclose(np.dot(c_i, primal), 0)
         assert not np.isclose(dual, 0).all()
         
-        new_vectors, new_costs, new_true_costs, new_idents = construct.reduce(cost_function, priced_indices, dual, known_technologies)
+        new_vectors, new_costs, new_true_costs, new_idents = construct.reduce(cost_function, inverse_priced_indices, dual, known_technologies)
         optimal_new_columns = linear_transform_is_gt(new_vectors.T, dual, .99 * new_costs)
         new_vectors, new_costs, new_true_costs, new_idents = new_vectors[:, optimal_new_columns], new_costs[optimal_new_columns], new_true_costs[:, optimal_new_columns], new_idents[optimal_new_columns]
         new_mask = true_new_column_mask(idents, new_idents)

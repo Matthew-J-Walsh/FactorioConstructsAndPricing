@@ -291,7 +291,10 @@ class FactorioInstance():
         p0_j = np.zeros(n, dtype=np.longdouble)
         for k, v in reference_model.items():
             p0_j[self.reference_list.index(k)] = v
-        priced_indices =  np.array([self.reference_list.index(k) for k in reference_model.keys()])
+
+        inverse_priced_indices = np.ones(len(self.reference_list))
+        inverse_priced_indices[np.array([self.reference_list.index(k) for k in reference_model.keys()])] = 0
+
         cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies, known_technologies)
 
         u_j = np.zeros(n, dtype=np.longdouble)
@@ -308,7 +311,7 @@ class FactorioInstance():
         #        ginv_j[self.reference_list.index(k)] = v
 
         logging.info("Starting a program solving.")
-        s_i, p_j, R_j_i, c_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, cost_function, priced_indices, known_technologies, ginv_j)
+        s_i, p_j, R_j_i, c_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ginv_j)
         logging.debug("Reconstructing factory.")
 
         s_i[np.where(s_i < 0)] = 0 #<0 is theoretically impossible, and indicates tiny tolerance errors, so we remove them to remove issues
@@ -326,7 +329,7 @@ class FactorioInstance():
                 s = s + s_i[i] * N_i[i]
         valid_rows = np.asarray((R_j_i > 0).sum(axis=1)).flatten() > 0
         
-        k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, priced_indices, p_j, known_technologies, valid_rows, self.post_analyses)
+        k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, inverse_priced_indices, p_j, known_technologies, valid_rows, self.post_analyses)
 
         fc_i = C_j_i @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
@@ -334,7 +337,7 @@ class FactorioInstance():
         for tempk, tempv in full_material_cost.items():
             assert tempk in self.active_list, str(tempk)+": "+str(tempv)+", "+str(N_i[np.where(C_j_i[self.reference_list.index(tempk)]!=0)])
 
-        nmv, nmc, nmtc, nmi = self.compiled.reduce(cost_function, priced_indices, None, known_technologies)
+        nmv, nmc, nmtc, nmi = self.compiled.reduce(cost_function, inverse_priced_indices, None, known_technologies)
         nme = (nmv.T @ p_j) / nmc
         nmv = CompressedVector({list(k.keys())[0]: nme[i] for i, k in enumerate(nmi) if len(k.keys())==1})
 
@@ -374,7 +377,7 @@ class FactorioInstance():
         self.post_analyses.update({target_name: target_outputs})
 
 
-def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], priced_indices: np.ndarray, dual_vector: np.ndarray, 
+def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, 
                         known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> CompressedVector:
     """Constructs an efficency analysis of a ComplexConstruct recursively
 
@@ -384,8 +387,8 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[C
         Construct to determine efficencies of
     cost_function : Callable[[CompiledConstruct, np.ndarray]
         A compiled cost function
-    priced_indices : np.ndarray
-        What indices of the pricing vector are actually priced
+    inverse_priced_indices : np.ndarray
+        What indices of the pricing vector aren't priced
     dual_vector : np.ndarray
         Dual vector to calculate with, if None is given, give the module-less beacon-less setup
     known_technologies : TechnologicalLimitation
@@ -401,8 +404,8 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: Callable[[C
     efficiencies: CompressedVector = CompressedVector({})
     for sc in construct.subconstructs:
         if isinstance(sc, ComplexConstruct):
-            efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)})
-            efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)
+            efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)})
+            efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)
     return efficiencies
 
 
@@ -949,8 +952,12 @@ def _calculate_new_full_factory_targets(factory_type: Literal["science"] | Liter
         
     instance.compile()
     assert not instance.compiled is None
+
+    inverse_priced_indices = np.ones(len(instance.reference_list))
+    inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items])] = 0
+
     R_j_i, c_i, C_j_i, N_i = instance.compiled.reduce(cost_function, 
-                                                            np.array([instance.reference_list.index(k) for k in output_items]), 
+                                                            inverse_priced_indices, 
                                                             None, known_technologies)
     valid_rows = (R_j_i != 0).sum(axis=1) > 0
 

@@ -212,7 +212,9 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
                 assert not np.isnan(v), k
                 p_j[vanilla.reference_list.index(k)] = v
             priced_indices =  np.array([vanilla.reference_list.index(k) for k in vanilla_chain.chain[-3].optimal_pricing_model.keys()])
-            logging.info(cc.subconstructs[0].efficency_dump(cost_function, priced_indices, p_j, vanilla_chain.chain[-2].known_technologies))
+            inverse_priced_indices = np.ones(len(vanilla.reference_list))
+            inverse_priced_indices[priced_indices] = 0
+            logging.info(cc.subconstructs[0].efficency_dump(cost_function, inverse_priced_indices, p_j, vanilla_chain.chain[-2].known_technologies))
 
     vanilla_chain.dump_to_excel(output_file)
 

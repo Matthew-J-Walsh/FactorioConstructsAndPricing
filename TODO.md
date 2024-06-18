@@ -38,8 +38,6 @@ Implement quality modules.
 
 Instead of just the (most of the time negative) efficiency value, it would be better to output a second value: How many more times expensive the factory would approximately be using this.
 
-## inverse_priced_indices_arr optimization
-
 ## Retargeting uses old optimization
 
 Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
