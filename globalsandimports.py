@@ -22,7 +22,7 @@ import pulp as pl
 
 import typing
 from numbers import Real, Number
-from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol, Literal
+from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Any, Optional, Generator, Protocol, Literal, TYPE_CHECKING
 
 class CallableSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:

@@ -3,9 +3,10 @@ from __future__ import annotations
 from constructs import *
 from globalsandimports import *
 from lpsolvers import *
-#from tools import FactorioInstance
-#import tools
 from utils import *
+
+if TYPE_CHECKING:
+    from tools import FactorioInstance
 
 
 def encode_effects_vector_to_multilinear(effect_vector: np.ndarray) -> np.ndarray:
@@ -107,7 +108,7 @@ class ModuleLookupTable:
     connected_points: list[np.ndarray]
     extreme_points: np.ndarray
 
-    def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance, base_productivity: Fraction) -> None:
+    def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance: FactorioInstance, base_productivity: Fraction) -> None:
         """
         Parameters
         ----------
@@ -350,7 +351,7 @@ class CompiledConstruct:
     effective_area: int
     isa_mining_drill: bool
 
-    def __init__(self, origin: UncompiledConstruct, instance):
+    def __init__(self, origin: UncompiledConstruct, instance: FactorioInstance):
         """
         Parameters
         ----------

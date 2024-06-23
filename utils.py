@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from globalsandimports import *
 
+if TYPE_CHECKING:
+    from tools import FactorioInstance
 
 
 class CompressedVector(dict):
@@ -353,6 +355,63 @@ class TechnologicalLimitation:
         assert self.tree == other.tree
         return self.tree.techlimit_ge(self, other)
 
+class ColumnTable:
+    """Container for columns of a LP problem
+    """
+    vector: np.ndarray
+    cost: np.ndarray
+    true_cost: np.ndarray
+    ident: np.ndarray[CompressedVector, Any]
+
+    def __init__(self, vector: np.ndarray, cost: np.ndarray, true_cost: np.ndarray, ident: np.ndarray[CompressedVector, Any]):
+        """
+        Parameters
+        ----------
+        vectors : np.ndarray
+            _description_
+        costs : np.ndarray
+            _description_
+        true_costs : np.ndarray
+            _description_
+        ident : np.ndarray
+            _description_
+        """
+        self.vector = vector
+        self.cost = cost
+        self.true_cost = true_cost
+        self.ident = ident
+
+    def __add__(self, other: ColumnTable) -> ColumnTable:
+        """Adds two tables together
+
+        Parameters
+        ----------
+        other : ColumnTable
+            Table to add
+
+        Returns
+        -------
+        ColumnTable
+            Added tables
+        """
+        return ColumnTable(np.concatenate((self.vector, other.vector), axis=1), np.concatenate((self.cost, other.cost)), 
+                           np.concatenate((self.true_cost, other.true_cost), axis=1), np.concatenate((self.ident, other.ident)))
+
+    def mask(self, mask: np.ndarray) -> ColumnTable:
+        """Returns a new ColumnTable with masked columns removed
+
+        Parameters
+        ----------
+        mask : np.ndarray
+            Masking array
+
+        Returns
+        -------
+        ColumnTable
+            New ColumnTable
+        """
+        return ColumnTable(self.vector[:, mask], self.cost[mask], self.true_cost[:, mask], self.ident[mask])  
+
 T = TypeVar('T')
 def list_union(l1: list[T], l2: list[T]) -> list[T]:
     """Union operation between lists, Used for when T is mutable
@@ -403,7 +462,7 @@ def convert_value_to_base_units(string: str) -> Fraction:
     except:
         raise ValueError(string)
 
-def technological_limitation_from_specification(instance, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
+def technological_limitation_from_specification(instance: FactorioInstance, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
     """Generates a TechnologicalLimitation from a specification
 
     Parameters

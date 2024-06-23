@@ -3,6 +3,9 @@ from __future__ import annotations
 from globalsandimports import *
 from utils import *
 
+if TYPE_CHECKING:
+    from tools import FactorioInstance
+
 class UncompiledConstruct:
     """An uncompiled construct, contains all the information needed to compile a single construct.
 
@@ -126,14 +129,26 @@ class ManualConstruct:
     effect_vector : np.ndarray
         Column vector of this manual action
     limit : TechnologicalLimitation
-        Tech level required to complete this manual ection
+        Tech level required to complete this manual action
     """
     ident: str
     deltas: CompressedVector
     effect_vector: np.ndarray
     limit: TechnologicalLimitation
 
-    def __init__(self, ident: str, deltas: CompressedVector, limit: TechnologicalLimitation, instance):
+    def __init__(self, ident: str, deltas: CompressedVector, limit: TechnologicalLimitation, instance: FactorioInstance):
+        """
+        Parameters
+        ----------
+        ident : str
+            Unique identifier
+        deltas : CompressedVector
+            Deltas from running construct
+        limit : TechnologicalLimitation
+            Tech level required to complete this manual action
+        instance : FactorioInstance
+            FactorioInstance in use
+        """        
         self.ident = ident
         self.deltas = deltas
         self.effect_vector = np.zeros(len(instance.reference_list))
@@ -142,13 +157,44 @@ class ManualConstruct:
         self.limit = limit
 
     def vector(self, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, str | None]:
+        """Gets the vector for this construct
+
+        Parameters
+        ----------
+        known_technologies : TechnologicalLimitation
+            Current tech level
+
+        Returns
+        -------
+        tuple[np.ndarray, float, str | None]
+            Effect vector
+            Cost
+            Ident
+        """        
         if self.limit >= known_technologies:
             return self.effect_vector, 1, None
         else:
-            return np.zeros_like(self.effect_vector), 0, None
+            return np.zeros_like(self.effect_vector), 0, self.ident
         
     @staticmethod
     def vectors(all_constructs: tuple[ManualConstruct, ...], known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+        """Calculates the vectors for all ManualConstructs
+
+        Parameters
+        ----------
+        all_constructs : tuple[ManualConstruct, ...]
+            All ManualConstructs to calculate vectors for
+        known_technologies : TechnologicalLimitation
+            Current tech level
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
+            Matrix of effect vectors,
+            Vector of costs,
+            Matrix of exact costs,
+            Ident vectors
+        """        
         construct_arr: np.ndarray[ManualConstruct, Any] = np.array(all_constructs, dtype=ManualConstruct)
         mask = np.array([known_technologies >= construct.limit for construct in construct_arr])
         construct_arr = construct_arr[mask]

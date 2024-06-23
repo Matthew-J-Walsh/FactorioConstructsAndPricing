@@ -88,7 +88,7 @@ class FactorioInstance():
 
         self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
         self.research_modifiers = generate_research_effect_tables(self.data_raw, self.tech_tree)
-        self.uncompiled_constructs = generate_all_constructs(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self.uncompiled_constructs)
         self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
         self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)

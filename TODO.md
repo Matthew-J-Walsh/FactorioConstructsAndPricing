@@ -12,33 +12,18 @@ Implement the optimizations of table lookups to minimize the amount of possible 
 
 What updates have to be done to handle diminishing beacons?
 
-## Retargeting uses old optimization
-
-Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
-
 
 # Misc improvements
 
-## Manual Crafting
-
-Sometimes manual crafting is needed (luckily not much in base game after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.
-Handcrafted factory?
-
-## We have recipe deltas
-
-Do we need COST_MODE propogated everywhere in generators?
-
-## FactorioInstance imports for typing
-
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## Decorator improvements for: Overloading .add(), currying pricing functions, return self?
+## Decorator improvements for: Overloading .add(), currying pricing functions, return self?, type checking interface inputs
 
-## Turn many tuple arguments into collections
+## Turn many tuple arguments into classes
 
-## Make .reduce() return a class for more clarity?
+## Retargeting uses old optimization
 
-## Use instance in more generators.py
+Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
 
 
 # Progression accuracy

@@ -1,7 +1,11 @@
+from __future__ import annotations 
 from utils import *
 from globalsandimports import *
 
-def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEMPERATURES: dict) -> Iterable[tuple[str, Fraction, str | None]]:
+if TYPE_CHECKING:
+    from tools import FactorioInstance
+
+def fuels_from_energy_source(energy_source: dict, instance: FactorioInstance) -> Iterable[tuple[str, Fraction, str | None]]:
     """Given a set energy source (https://lua-api.factorio.com/latest/types/EnergySource.html) calculates an iterable of possible fuels.
     RELEVENT_FLUID_TEMPERATURES must already be populated
     Note that some fuels leave a burnt result as a leftover when used (https://lua-api.factorio.com/latest/prototypes/ItemPrototype.html#burnt_result)
@@ -34,10 +38,10 @@ def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEM
     
     elif energy_source['type']=='burner': #https://lua-api.factorio.com/latest/types/BurnerEnergySource.html
         if 'fuel_categories' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in data['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category'] in energy_source['fuel_categories']]
         elif 'fuel_category' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in data['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category']==energy_source['fuel_category']]
         else:
             raise ValueError("Category-less burner energy source: "+str(energy_source))
@@ -48,15 +52,15 @@ def fuels_from_energy_source(energy_source: dict, data: dict, RELEVENT_FLUID_TEM
     elif energy_source['type']=='fluid': #https://lua-api.factorio.com/latest/types/FluidEnergySource.html
         if 'burns_fluid' in energy_source.keys(): #https://lua-api.factorio.com/latest/types/FluidEnergySource.html#burns_fluid
             if 'filter' in energy_source['fluid_box'].keys(): #https://lua-api.factorio.com/latest/types/FluidBox.html#filter
-                return [(energy_source['fluid_box']['filter'], data['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
+                return [(energy_source['fluid_box']['filter'], instance.data_raw['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
             else:
-                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in data['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
+                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in instance.data_raw['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
         else:
             if not 'filter' in energy_source['fluid_box'].keys():
                 raise ValueError("Non-burning fluid energy source without filter: "+str(energy_source))
             fluid = energy_source['fluid_box']['filter'] #https://lua-api.factorio.com/latest/types/FluidBox.html#filter
-            return [(fluid+'@'+temp, RELEVENT_FLUID_TEMPERATURES[fluid][temp] * effectivity, None) 
-                    for temp in RELEVENT_FLUID_TEMPERATURES[fluid].keys() 
+            return [(fluid+'@'+temp, instance.RELEVENT_FLUID_TEMPERATURES[fluid][temp] * effectivity, None) 
+                    for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys() 
                     if temp <= energy_source['maximum_temperature']] #there is some detail to maximum_temperature but this doesn't effect energy density and fuel calcs and is outside the scope of this function (see https://lua-api.factorio.com/latest/types/FluidEnergySource.html#maximum_temperature)
             
     elif energy_source['type']=='void': #https://lua-api.factorio.com/latest/types/VoidEnergySource.html
