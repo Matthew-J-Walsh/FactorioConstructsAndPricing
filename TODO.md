@@ -19,11 +19,19 @@ What updates have to be done to handle diminishing beacons?
 
 ## Decorator improvements for: Overloading .add(), currying pricing functions, return self?, type checking interface inputs
 
-## Turn many tuple arguments into classes
+## Turn allowed_modules tuples into class?
+
+## Turn research modifiers into class?
+
+## Turn solve_for_target output into class?
+
+## Dismantle _science_factory_parameters
 
 ## Retargeting uses old optimization
 
 Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
+
+## ColumnTable.reduced using ColumnTable.valid_rows
 
 
 # Progression accuracy

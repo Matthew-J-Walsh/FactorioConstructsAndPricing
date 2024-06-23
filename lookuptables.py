@@ -445,7 +445,7 @@ class CompiledConstruct:
             
         return highest_speed_multiplier
 
-    def vector(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, np.ndarray, str | None]:
+    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best vector possible given a pricing model
 
         Parameters
@@ -461,14 +461,8 @@ class CompiledConstruct:
 
         Returns
         -------
-        tuple[np.ndarray, float, np.ndarray, str | None]
-            Best construct values:
-            Effect Vector,
-            Scalar Cost,
-            True Cost Vector,
-            Name
-
-            Returns empty arrays, nans, and None if construct cannot be made
+        ColumnTable
+            Table of column for this construct
         """
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
@@ -487,8 +481,10 @@ class CompiledConstruct:
                 index = int(np.argmax(e / c))
             cost = c[index]
             column, true_cost, ident = self._generate_vector(index, lookup_table, speed_multi)
-        
-        return column, cost, true_cost, ident
+
+        if ident is None:
+            return ColumnTable(column, np.array([]), true_cost, np.array([]))
+        return ColumnTable(column, np.array([cost]), true_cost, np.array([CompressedVector({ident: 1})]))
 
     def _evaluate(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, lookup_table: ModuleLookupTable, speed_multi: float) -> tuple[np.ndarray, np.ndarray]:
         """Evaluation of this construct
@@ -645,7 +641,7 @@ class ComplexConstruct:
         else:
             self.stabilization[row] = direction
 
-    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best vectors possible given a pricing model
 
         Parameters
@@ -661,18 +657,11 @@ class ComplexConstruct:
 
         Returns
         -------
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
-            Matrix of effect vectors,
-            Vector of costs,
-            Matrix of exact costs,
-            Ident vectors
+        ColumnTable
+            Table of columns for this construct
         """
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        vectors, costs, true_costs, idents = zip(*[sc.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]) # type: ignore
-        vector = np.concatenate(vectors, axis=1)#sparse.csr_matrix(sparse.hstack(vectors))
-        cost = np.concatenate(costs)
-        true_cost = np.concatenate(true_costs, axis=1)#sparse.csr_matrix(sparse.hstack(costs))
-        ident: np.ndarray[CompressedVector, Any] = np.concatenate(idents)
+        return ColumnTable.sum([sc.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs], inverse_priced_indices.shape[0]) # type: ignore
 
         for stab_row, stab_dir in self.stabilization.items():
             raise NotImplementedError("Cost true cost issue.")
@@ -709,64 +698,6 @@ class ComplexConstruct:
 
         return vector, cost, true_cost, ident
 
-    def reduce(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation,
-               extras: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]] | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
-        """Produces the best vectors possible given a pricing model. 
-        Additionally removes columns that cannot be used because their inputs cannot be made.
-        Additionally sorts the columns (based on their hash hehe).
-
-        Parameters
-        ----------
-        cost_function : Callable[[CompiledConstruct, np.ndarray], np.ndarray]
-            A compiled cost function
-        inverse_priced_indices : np.ndarray
-            What indices of the pricing vector aren't priced
-        dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
-        known_technologies : TechnologicalLimitation
-            Current tech level to calculate for
-        extras : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]] | None (default: None)
-            Extra vectors to block filtering
-
-        Returns
-        -------
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
-            Matrix of effect vectors,
-            Vector of costs,
-            Matrix of exact costs,
-            Ident vectors
-        """
-        vector, cost, true_cost, ident = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
-        if not extras is None:
-            vector = np.concatenate((vector, extras[0]), axis=1)
-            cost = np.concatenate((cost, np.zeros_like(extras[1])))
-            true_cost = np.concatenate((np.concatenate((true_cost, extras[2]), axis=1), np.concatenate((np.zeros(true_cost.shape[1]), extras[1])).reshape(1, -1)), axis=0)
-            assert true_cost.shape[1]==vector.shape[1]
-            assert (true_cost.shape[0]-1)==vector.shape[0]
-            ident = np.concatenate((ident, extras[3]))
-
-        mask = np.full(vector.shape[1], True, dtype=bool)
-
-        valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
-        logging.debug("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
-        last_mask = np.full(vector.shape[1], False, dtype=bool)
-        while (last_mask!=mask).any():
-            last_mask = mask.copy()
-            valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0
-            mask = np.logical_and(mask, np.logical_not(np.asarray((vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
-            logging.debug("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
-    
-        vector = vector[:, mask]
-        cost = cost[mask]
-        true_cost = true_cost[:, mask]
-        ident = ident[mask]
-
-        ident_hashes = np.array([hash(ide) for ide in ident])
-        sort_list = ident_hashes.argsort()
-
-        #return vector, cost, ident
-        return vector[:, sort_list], cost[sort_list], true_cost[:, sort_list], ident[sort_list]
-
     def efficiency_analysis(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, 
                             known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> float:
         """Determines the best possible realizable efficiency of the construct
@@ -794,28 +725,23 @@ class ComplexConstruct:
         RuntimeError
             Error with optimization that shouldn't happen
         """
-        vector, cost, true_cost, ident = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
+        vector_table = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
 
-        mask = np.logical_not(np.asarray((vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten())
+        vector_table.mask(np.logical_not(np.asarray((vector_table.vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
 
-        vector = vector[:, mask]
-        cost = cost[mask]
-        true_cost = true_cost[:, mask]
-        ident = ident[mask]
-
-        if vector.shape[1]==0:
+        if vector_table.vector.shape[1]==0:
             return np.nan
         
         if not self.ident in post_analyses.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
-            return np.max(np.divide(vector.T @ dual_vector, cost)) # type: ignore
+            return np.max(np.divide(vector_table.vector.T @ dual_vector, vector_table.cost)) # type: ignore
         else:
             logging.debug("Doing special post analysis calculating for: "+self.ident)
-            stabilizable_rows = np.where(np.logical_and(np.asarray((vector > 0).sum(axis=1)), np.asarray((vector < 0).sum(axis=1))))[0]
+            stabilizable_rows = np.where(np.logical_and(np.asarray((vector_table.vector > 0).sum(axis=1)), np.asarray((vector_table.vector < 0).sum(axis=1))))[0]
             stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(post_analyses[self.ident].keys())))[0])
 
-            R = vector[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
+            R = vector_table.vector[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
             u = np.concatenate([np.array([v for v in post_analyses[self.ident].values()]), np.zeros_like(stabilizable_rows)])
-            c = cost - (vector.T @ dual_vector)
+            c = vector_table.cost - (vector_table.vector.T @ dual_vector)
 
             primal_diluted, dual = BEST_LP_SOLVER(R, u, c)
             if primal_diluted is None or dual is None:
@@ -831,7 +757,7 @@ class ComplexConstruct:
                 assert linear_transform_is_gt(Rp, primal_diluted, up).all()
                 raise RuntimeError("Alegedly no primal found but we have one.")
 
-            return np.dot(vector.T @ dual_vector, primal) / np.dot(c, primal)
+            return np.dot(vector_table.vector.T @ dual_vector, primal) / np.dot(c, primal)
 
     def __repr__(self) -> str:
         return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
@@ -870,7 +796,7 @@ class SingularConstruct(ComplexConstruct):
         """        
         raise RuntimeError("Cannot stabilize a singular constuct.")
 
-    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best vector possible given a pricing model
 
         Parameters
@@ -886,14 +812,8 @@ class SingularConstruct(ComplexConstruct):
 
         Returns
         -------
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
-            Matrix of effect vectors,
-            Vector of costs,
-            Matrix of exact costs,
-            Ident vectors
+        ColumnTable
+            Table of columns for this construct
         """
-        vector, cost, true_cost, ident = self.subconstructs[0].vector(cost_function, inverse_priced_indices,  dual_vector, known_technologies) # type: ignore
-        if ident is None:
-            return vector, np.array([]), true_cost, np.array([])
-        return vector, np.array([cost]), true_cost, np.array([CompressedVector({ident: 1})])
+        return self.subconstructs[0].vectors(cost_function, inverse_priced_indices,  dual_vector, known_technologies)
 

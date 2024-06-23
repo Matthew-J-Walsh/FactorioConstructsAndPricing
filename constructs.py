@@ -177,7 +177,7 @@ class ManualConstruct:
             return np.zeros_like(self.effect_vector), 0, self.ident
         
     @staticmethod
-    def vectors(all_constructs: tuple[ManualConstruct, ...], known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def vectors(all_constructs: tuple[ManualConstruct, ...], known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Calculates the vectors for all ManualConstructs
 
         Parameters
@@ -204,7 +204,7 @@ class ManualConstruct:
         true_costs = np.vstack([np.zeros_like(construct.effect_vector) for construct in construct_arr]).T
         idents = np.concatenate([np.array([CompressedVector({construct.ident: 1})]) for construct in construct_arr])
 
-        return vectors, costs, true_costs, idents
+        return ColumnTable(vectors, costs, true_costs, idents)
     
     def __repr__(self) -> str:
         return str(self.ident)+\

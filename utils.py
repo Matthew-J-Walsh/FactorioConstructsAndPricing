@@ -362,6 +362,7 @@ class ColumnTable:
     cost: np.ndarray
     true_cost: np.ndarray
     ident: np.ndarray[CompressedVector, Any]
+    _valid_rows: np.ndarray | None
 
     def __init__(self, vector: np.ndarray, cost: np.ndarray, true_cost: np.ndarray, ident: np.ndarray[CompressedVector, Any]):
         """
@@ -380,6 +381,39 @@ class ColumnTable:
         self.cost = cost
         self.true_cost = true_cost
         self.ident = ident
+        self._valid_rows = None
+
+    @staticmethod
+    def empty(size: int) -> ColumnTable:
+        return ColumnTable(np.zeros((size, 0)), np.zeros(0), np.zeros((size, 0)), np.zeros(0, dtype=CompressedVector))
+    
+    @staticmethod
+    def sum(all_tables: Sequence[ColumnTable], size_backup: int | None = None) -> ColumnTable:
+        if len(all_tables)==0:
+            if size_backup is None:
+                raise ValueError("Empty Column Table and no size backup")
+            return ColumnTable.empty(size_backup)
+        s: ColumnTable = all_tables[0]
+        for i in range(1, len(all_tables)):
+            s = s + all_tables[i]
+        return s
+    
+    @property
+    def valid_rows(self) -> np.ndarray:
+        """Rows with positive output
+        """        
+        if self._valid_rows is None:
+            self._valid_rows = (self.vector > 0).sum(axis=1) > 0
+        return self._valid_rows
+    
+    @property
+    def sorted(self) -> ColumnTable:
+        """A sorted version of self for easier equality filtering
+        """        
+        ident_hashes = np.array([hash(ide) for ide in self.ident])
+        sort_list = ident_hashes.argsort()
+
+        return ColumnTable(self.vector[:, sort_list], self.cost[sort_list], self.true_cost[:, sort_list], self.ident[sort_list])
 
     def __add__(self, other: ColumnTable) -> ColumnTable:
         """Adds two tables together
@@ -410,7 +444,70 @@ class ColumnTable:
         ColumnTable
             New ColumnTable
         """
-        return ColumnTable(self.vector[:, mask], self.cost[mask], self.true_cost[:, mask], self.ident[mask])  
+        return ColumnTable(self.vector[:, mask], self.cost[mask], self.true_cost[:, mask], self.ident[mask])
+    
+    def shadow_attachment(self, other: ColumnTable) -> ColumnTable:
+        """Attaches another ColumnTable onto this one.
+        The costs of the second ColumnTable will be transfered to an added row of true_cost.
+        Works best when doing column operations with ManualConstructs
+
+        Parameters
+        ----------
+        other : ColumnTable
+            Special elements to add
+
+        Returns
+        -------
+        ColumnTable
+            Combined table with added true_cost row
+        """        
+        vector = np.concatenate((self.vector, other.vector), axis=1)
+        cost = np.concatenate((self.cost, np.zeros_like(other.cost)))
+        true_cost = np.concatenate((np.concatenate((self.true_cost, other.true_cost), axis=1), np.concatenate((np.zeros(self.true_cost.shape[1]), other.cost)).reshape(1, -1)), axis=0)
+        assert true_cost.shape[1]==vector.shape[1]
+        assert (true_cost.shape[0]-1)==vector.shape[0]
+        ident = np.concatenate((self.ident, other.ident))
+        return ColumnTable(vector, cost, true_cost, ident)
+    
+    @property
+    def reduced(self) -> ColumnTable:
+        """Removes columns that cannot be used because their >0 rows cannot be made and returns the new table
+
+        Returns
+        -------
+        ColumnTable
+            New table without any rows that cannot be produced
+        """        
+        mask = np.full(self.vector.shape[1], True, dtype=bool)
+
+        valid_rows = np.asarray((self.vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
+        logging.debug("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+        last_mask = np.full(self.vector.shape[1], False, dtype=bool)
+        while (last_mask!=mask).any():
+            last_mask = mask.copy()
+            valid_rows = np.asarray((self.vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0
+            mask = np.logical_and(mask, np.logical_not(np.asarray((self.vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
+            logging.debug("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+    
+        return self.mask(mask)
+    
+    def find_zeros(self, cv: np.ndarray) -> list[int]:
+        """Given a contravector, find which output indicies have zero throughput (not zero due to subtraction)
+
+        Parameters
+        ----------
+        cv : np.ndarray
+            Contravector
+
+        Returns
+        -------
+        list[int]
+            List of indexes that have zero throughput
+        """        
+        positive = self.vector.copy()
+        positive[positive < 0] = 0
+        return np.where(np.isclose(positive @ cv, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
+    
 
 T = TypeVar('T')
 def list_union(l1: list[T], l2: list[T]) -> list[T]:
@@ -634,25 +731,6 @@ def linear_transform_is_close(A: np.ndarray | sparse.coo_matrix | sparse.csr_mat
     true_tol = 1/2 * (np.abs(Lhp) + np.abs(Lhn)) * rel_tol
     Aax = A @ x
     return np.logical_or(np.abs(Aax - b) <=  true_tol, np.isclose(Aax, b, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
-
-def find_zeros(R_j_i: np.ndarray, s_i: np.ndarray) -> list[int]:
-    """Given a linear transformation used on a contravector, find which output indicies have zero throughput (not zero due to subtraction)
-
-    Parameters
-    ----------
-    R_j_i : np.ndarray
-        Linear transformation
-    s_i : np.ndarray
-        Contravector
-
-    Returns
-    -------
-    list[int]
-        List of indexes that have zero throughput
-    """
-    R_j_i = R_j_i.copy()
-    R_j_i[R_j_i < 0] = 0
-    return np.where(np.isclose(R_j_i @ s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
 
 def vectors_orthant(v: np.ndarray | sparse.sparray | list) -> Hashable:
     """Determines the orthant a vector is in
