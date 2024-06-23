@@ -708,7 +708,8 @@ class ComplexConstruct:
 
         return vector, cost, true_cost, ident
 
-    def reduce(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+    def reduce(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation,
+               extras: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]] | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
         """Produces the best vectors possible given a pricing model. 
         Additionally removes columns that cannot be used because their inputs cannot be made.
         Additionally sorts the columns (based on their hash hehe).
@@ -723,6 +724,8 @@ class ComplexConstruct:
             Dual vector to calculate with, if None is given, give the module-less beacon-less setup
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
+        extras : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]] | None (default: None)
+            Extra vectors to block filtering
 
         Returns
         -------
@@ -733,6 +736,14 @@ class ComplexConstruct:
             Ident vectors
         """
         vector, cost, true_cost, ident = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
+        if not extras is None:
+            vector = np.concatenate((vector, extras[0]), axis=1)
+            cost = np.concatenate((cost, np.zeros_like(extras[1])))
+            true_cost = np.concatenate((np.concatenate((true_cost, extras[2]), axis=1), np.concatenate((np.zeros(true_cost.shape[1]), extras[1])).reshape(1, -1)), axis=0)
+            assert true_cost.shape[1]==vector.shape[1]
+            assert (true_cost.shape[0]-1)==vector.shape[0]
+            ident = np.concatenate((ident, extras[3]))
+
         mask = np.full(vector.shape[1], True, dtype=bool)
 
         valid_rows = np.asarray((vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any

@@ -696,3 +696,51 @@ def generate_all_constructs(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_
                 raise ValueError("Unknown type %s", machine['type'])
 
     return tuple(all_uncompiled_constructs)
+
+def generate_manual_constructs(instance) -> tuple[ManualConstruct, ...]:
+    """Generates all the manual constructs. Hand crafting and pickaxes.
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        FactorioInstance to use
+
+    Returns
+    -------
+    tuple[ManualConstruct, ...]
+        All the manual constructs
+    """    
+    all_manual_constructs: list[ManualConstruct] = []
+    for recipe in instance.data_raw['recipe'].values():
+        hand_craftable = True
+        if not recipe['enableable']:
+            hand_craftable = False
+        if 'crafting_categories' in instance.data_raw['character'] and not recipe['category'] in instance.data_raw['character']['crafting_categories']:
+            hand_craftable = False
+        if 'hide_from_player_crafting' in recipe.keys() and recipe['hide_from_player_crafting']:
+            hand_craftable = False
+        for k in recipe['vector'].keys():
+            if k in instance.data_raw['fluid'].keys():
+                hand_craftable = False
+
+        if hand_craftable:
+            all_manual_constructs.append(ManualConstruct(recipe['name']+" hand-crafted", recipe['vector'], recipe['limit'], instance))
+    
+    for resource in instance.data_raw['resource'].values():
+        hand_minable = True
+        if 'required_fluid' in resource['minable'].keys():
+            hand_minable = False
+        if 'mining_categories' in instance.data_raw['character'] and not resource['category'] in instance.data_raw['character']['mining_categories']:
+            hand_minable = False
+        for k in resource['vector'].keys():
+            if k in instance.data_raw['fluid'].keys():
+                hand_minable = False
+        
+        if hand_minable:
+            mining_speed = 1
+            if 'mining_speed' in instance.data_raw['character'].keys():
+                mining_speed = instance.data_raw['character']['mining_speed']
+            all_manual_constructs.append(ManualConstruct(resource['name']+" hand-mined", resource['vector'] * mining_speed, resource['limit'], instance))
+    
+    return tuple(all_manual_constructs)
+

@@ -511,6 +511,8 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
     Fixes IngredientPrototypes to always include their type. https://lua-api.factorio.com/latest/types/ItemIngredientPrototype.html#type
     Fixes ProductPrototypes to always include their type. https://lua-api.factorio.com/latest/types/ItemProductPrototype.html#type
 
+    Sets recipe crafting category to default if not set. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#category
+
     Parameters
     ----------
     data : dict
@@ -636,6 +638,11 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
                 machine['tile_width'] = math.ceil(abs(machine['collision_box'][1][0] - machine['collision_box'][0][0]))
             if not 'tile_height' in machine.keys():
                 machine['tile_height'] = math.ceil(abs(machine['collision_box'][1][1] - machine['collision_box'][0][1]))
+
+    logging.debug("Setting missing recipe crafting categories to default.")
+    for recipe in data['recipe'].values():
+        if not 'category' in recipe.keys():
+            recipe['category'] = "crafting"
 
 def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]:
     """Generates research effect tables.

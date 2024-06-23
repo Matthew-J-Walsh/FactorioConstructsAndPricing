@@ -66,7 +66,7 @@ def get_module_multilinear_effect_selector(idx: int) -> np.ndarray:
 MODULE_MULTILINEAR_EFFECT_SELECTORS = [get_module_multilinear_effect_selector(i) for i in range(len(ALL_MODULE_EFFECTS))]
 
 DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
-DEBUG_BLOCK_BEACONS: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_BEACONS: bool = False or DEBUG_BLOCK_MODULES #Should modules be removed from pricing to speed up debugging of non-module related issues.
 
 OUTPUT_WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
 

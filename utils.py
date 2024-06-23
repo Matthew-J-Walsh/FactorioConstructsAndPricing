@@ -424,7 +424,7 @@ def technological_limitation_from_specification(instance, fully_automated: list[
     """
     tech_obj = set()
     
-    assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
+    #assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
     for pack in fully_automated:
         assert pack in instance.data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
     for tech in extra_technologies:

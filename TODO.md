@@ -24,9 +24,21 @@ Add in functionality to let the retargeting to start with a primal guess, specif
 Sometimes manual crafting is needed (luckily not much in base game after an initial factory). Find some way of calculating when its needed and properly pricing it so that its incredibly punishing to minimize use.
 Handcrafted factory?
 
-## Improve research special string things
+## We have recipe deltas
 
-Splitting off the special string to get the technology stuff
+Do we need COST_MODE propogated everywhere in generators?
+
+## FactorioInstance imports for typing
+
+## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
+
+## Decorator improvements for: Overloading .add(), currying pricing functions, return self?
+
+## Turn many tuple arguments into collections
+
+## Make .reduce() return a class for more clarity?
+
+## Use instance in more generators.py
 
 
 # Progression accuracy

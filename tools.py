@@ -28,7 +28,7 @@ class FactorioInstance():
         ComplexConstructs in the instance
     disabled_constructs : list[ComplexConstruct]
         ComplexConstructs that have been disabled
-    compiled : ComplexConstruct | None
+    _compiled : ComplexConstruct | None
         ComplexConstruct of the entire instance or None if hasn't been compiled since last change
     reference_list : tuple[str, ...]
         Every relevent item, fluid, and research identifier (sorted)
@@ -53,9 +53,10 @@ class FactorioInstance():
     data_raw: dict
     tech_tree: TechnologyTree
     uncompiled_constructs: tuple[UncompiledConstruct, ...]
+    manual_constructs: tuple[ManualConstruct, ...]
     complex_constructs: list[ComplexConstruct]
     disabled_constructs: list[ComplexConstruct]
-    compiled: ComplexConstruct | None
+    _compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
     catalyst_list: tuple[str, ...]
     active_list: tuple[str, ...]
@@ -91,6 +92,7 @@ class FactorioInstance():
         self.reference_list = create_reference_list(self.uncompiled_constructs)
         self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
         self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)
+        self.manual_constructs = generate_manual_constructs(self)
         
         self.disabled_constructs = []
 
@@ -123,8 +125,8 @@ class FactorioInstance():
         if not nobuild:
             logging.debug("Building complex constructs.")
             self.complex_constructs = [SingularConstruct(CompiledConstruct(uc, self)) for uc in self.uncompiled_constructs]
-            self.compiled = None
-            self.compile()
+            self._compiled = None
+            self.compiled
     
     @staticmethod
     def load(filename: str) -> FactorioInstance:
@@ -146,17 +148,15 @@ class FactorioInstance():
         filename : str
             File to place FactorioInstance into
         """
-        self.compiled = None
+        self._compiled = None
         with open(filename, 'wb') as file:
             pickle.dump(self, file)
 
-    def compile(self) -> ComplexConstruct:
-        """Populates FactorioInstance.compiled and returns it.
-        """
-        if self.compiled is None:
-            self.compiled = ComplexConstruct(tuple([cc for cc in self.complex_constructs if not cc in self.disabled_constructs]), "Whole Game Construct") # type: ignore
-            #self.compiled_constructs = [CompiledConstruct(uc, self) for uc in self.uncompiled_constructs]
-        return self.compiled
+    @property
+    def compiled(self) -> ComplexConstruct:
+        if self._compiled is None:
+            self._compiled = ComplexConstruct(tuple([cc for cc in self.complex_constructs if not cc in self.disabled_constructs]), "Whole Game Construct") # type: ignore
+        return self._compiled
 
     def disable_complex_construct(self, target_name: str) -> None:
         """Disables the closest named complex construct
@@ -167,7 +167,7 @@ class FactorioInstance():
             Target name of complex construct to be disabled
         """
         self.disabled_constructs.append(self.search_complex_constructs(target_name))
-        self.compiled = None
+        self._compiled = None
     
     def enable_complex_construct(self, target_name: str) -> None:
         """Enables the closest named complex construct
@@ -180,7 +180,7 @@ class FactorioInstance():
         construct = self.search_complex_constructs(target_name)
         try:
             self.disabled_constructs.remove(construct)
-            self.compiled = None
+            self._compiled = None
         except:
             logging.warning(construct.ident+" was not disabled in the first place.")
 
@@ -253,7 +253,7 @@ class FactorioInstance():
         return new_name
 
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], 
-                         primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector]:
+                         primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None, use_manual: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector]:
         """Solves for a target factory given a tech level and reference pricing model
 
         Parameters
@@ -268,6 +268,9 @@ class FactorioInstance():
             guess for the primal, currently unused, by default None
         dual_guess : CompressedVector | None, optional
             guess for the dual, currently unused, by default None
+        use_manual : bool, optional (default: False)
+            Should manual columns be added.
+            Warning: its a waste of processing power to turn this on if it doesn't have to be
 
         Returns
         -------
@@ -285,15 +288,13 @@ class FactorioInstance():
 
         if DEBUG_BLOCK_MODULES:
             reference_model = CompressedVector({k: v for k, v in reference_model.items() if not '-module' in k})
-        self.compile()
-        assert not self.compiled is None
 
         p0_j = np.zeros(n, dtype=np.longdouble)
         for k, v in reference_model.items():
             p0_j[self.reference_list.index(k)] = v
 
         inverse_priced_indices = np.ones(len(self.reference_list))
-        inverse_priced_indices[np.array([self.reference_list.index(k) for k in reference_model.keys()])] = 0
+        inverse_priced_indices[np.array([self.reference_list.index(k) for k in reference_model.keys()], dtype=np.int32)] = 0
 
         cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies, known_technologies)
 
@@ -310,10 +311,14 @@ class FactorioInstance():
         #    for k, v in dual_guess.items():
         #        ginv_j[self.reference_list.index(k)] = v
 
-        logging.info("Starting a program solving.")
-        s_i, p_j, R_j_i, c_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ginv_j)
+        if use_manual:
+            logging.info("Starting a manual program solving.")
+            s_i, p_j, R_j_i, c_i, C_j_i, N_i = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.vectors(self.manual_constructs, known_technologies), ginv_j)
+        else:
+            logging.info("Starting a program solving.")
+            s_i, p_j, R_j_i, c_i, C_j_i, N_i = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ginv_j)
+        
         logging.debug("Reconstructing factory.")
-
         s_i[np.where(s_i < 0)] = 0 #<0 is theoretically impossible, and indicates tiny tolerance errors, so we remove them to remove issues
 
         #scale = 100 / np.max(p_j) #normalization to prevent massive numbers.
@@ -327,7 +332,7 @@ class FactorioInstance():
         for i in range(s_i.shape[0]):
             if positives[i]:
                 s = s + s_i[i] * N_i[i]
-        valid_rows = np.asarray((R_j_i > 0).sum(axis=1)).flatten() > 0
+        valid_rows = (R_j_i > 0).sum(axis=1) > 0
         
         k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, inverse_priced_indices, p_j, known_technologies, valid_rows, self.post_analyses)
 
@@ -477,7 +482,7 @@ class FactorioFactory():
         self.true_cost = CompressedVector()
         self.no_module_value = CompressedVector()
 
-    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], use_manual: bool = False) -> bool:
         """Calculates a optimal factory with the the reference model
 
         Parameters
@@ -486,24 +491,16 @@ class FactorioFactory():
             CompressedVector of reference pricing model
         uncompiled_cost_function : Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
             Cost function to use for this factory optimization
-        
+        use_manual : bool, optional (default: False)
+            Should manual construct be added in for calculating the optimal factory
 
         Returns
         -------
         bool
             If pricing model has changed since this factory was last optimized
         """
-        s, p, pf, k, zs, scale, tc, nmv = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.optimal_factory, self.optimal_pricing_model)
+        s, p, pf, k, zs, scale, tc, nmv = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.optimal_factory, self.optimal_pricing_model, use_manual=use_manual)
         same = p==self.optimal_pricing_model
-        #try:
-        #    if len(self.optimal_pricing_model)>0:
-        #        for k, v in self.optimal_pricing_model.items():
-        #            assert k in p.keys(), k
-        #            assert v==0 or not p[k]==0, k
-        #except:
-        #    logging.info(reference_model)
-        #    logging.info(self.targets)
-        #    raise ValueError()
         self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self.construct_efficiencies, self.intermediate_scale_factor, self.true_cost, self.no_module_value = s, p, pf, k, scale, tc, nmv
         self.zero_throughputs = zs
         self.optimized = True
@@ -600,6 +597,14 @@ class FactorioMaterialFactory(FactorioFactory):
         self.last_material_factory = last_material_factory
 
 
+class FactorioManualFactory(FactorioMaterialFactory):
+    """A factory with manual crafting
+    """
+
+    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], use_manual: bool = False) -> bool:
+        return super().calculate_optimal_factory(reference_model, uncompiled_cost_function, True)
+
+
 class FactorioScienceFactory(FactorioFactory):
     """A factory in factorio that completes research.
 
@@ -642,12 +647,7 @@ class FactorioScienceFactory(FactorioFactory):
         self.clear = [target for target in science_targets.keys() if target in instance.data_raw['tool'].keys()]
         self.extra = [target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in science_targets.keys() if RESEARCH_SPECIAL_STRING in target]
         self.previous_science = previous_science
-        #covering_to = instance.technological_limitation_from_specification(fully_automated=self.clear, extra_technologies=self.extra)
         
-        #last_coverage = self._previous_coverage()
-
-        #targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
-
         targets, covering_to, last_coverage  = _science_factory_parameters(instance, previous_science, self.clear, self.extra)
 
         super().__init__(instance, last_coverage, targets)
@@ -726,7 +726,7 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.optimal_pricing_model = pricing_model.norm()
         self.construct_efficiencies = CompressedVector()
     
-    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]) -> bool:
+    def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], use_manual: bool = False) -> bool:
         """Placeholder. Initial Factories cannot change.
         """
         return False
@@ -817,13 +817,13 @@ class FactorioFactoryChain():
         -------
         If the addition actually added a factory
         """
-        factory_type = ""
+        factory_type: str = ""
         previous_sciences = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)]
         last_material = [fac for fac in self.chain if isinstance(fac, FactorioMaterialFactory)][-1]
         if len(previous_sciences)==0:
-            known_technologies = last_material.known_technologies #first science after a startup base.
+            known_technologies: TechnologicalLimitation = last_material.known_technologies #first science after a startup base.
         else:
-            known_technologies = previous_sciences[-1].get_technological_coverage()
+            known_technologies: TechnologicalLimitation = previous_sciences[-1].get_technological_coverage()
 
         if isinstance(targets, CompressedVector):
             if list(targets.keys())[0] in self.instance.data_raw['tool'].keys() or list(targets.keys())[0] in self.instance.data_raw['technology'].keys():
@@ -840,15 +840,29 @@ class FactorioFactoryChain():
                 assert target in self.instance.data_raw['tool'].keys() or target in self.instance.data_raw['technology'].keys(), "If a factory does science stuff is only allowed to do science stuff."
             previous_science = previous_sciences[-1] if len(previous_sciences)>0 else known_technologies
             self.chain.append(FactorioScienceFactory(self.instance, previous_science, last_material, targets))
-        else: #factory_type == "material":
+        elif factory_type == "material":
             difference: set[str] = set(targets.keys()).difference(set(last_material.targets.keys()))
             logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(difference))
             last_science = previous_sciences[-1]
             self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
+        else: #factory_type == "manual"
+            difference: set[str] = set(targets.keys()).difference(set(last_material.targets.keys()))
             if len(difference)==0:
-                logging.info("Adding a material factory without any actual additional prices. This would indicate that there is no more progress to be made.")
+                logging.info("Adding a manual factory without any actual additional prices. This would indicate that there is no more progress to be made.")
                 return True
+            logging.info("Attempting to add the following targets to the new manual factory:\n\t"+str(difference))
+            last_science = previous_sciences[-1]
+            self.chain.append(FactorioManualFactory(self.instance, last_science, last_material, targets))
         return False
+
+    def complete(self) -> None:
+        """Completes the chain, adding factories until no more progress can be made
+        """
+        i = 0
+        while not self.add():
+            i += 1
+            if i>100:
+                raise RuntimeError("Chain autocomplete seems to be infinite?")
 
     def compute_all(self) -> bool:
         """Computes all pricing models for chain iteratively and returns if the pricing models changed
@@ -915,10 +929,17 @@ class FactorioFactoryChain():
             Name of excel file to write to
         """
         writer = pd.ExcelWriter(file_name)
+        manual_factory_ident = 1
         material_factory_ident = 1
         science_factory_ident = 1
         for factory in self.chain[1:]:
-            if isinstance(factory, FactorioMaterialFactory):
+            if isinstance(factory, FactorioManualFactory):
+                if not factory.optimized:
+                    logging.error("Found Manual Factory "+str(manual_factory_ident)+" unoptimized.")
+                else:
+                    factory.dump_to_excel(writer, "Manual Factory "+str(manual_factory_ident))
+                manual_factory_ident += 1
+            elif isinstance(factory, FactorioMaterialFactory):
                 if not factory.optimized:
                     logging.error("Found Material Factory "+str(material_factory_ident)+" unoptimized.")
                 else:
@@ -960,20 +981,19 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
         The factory type
     """
     output_items = list(last_material.targets.keys())
-    logging.info(output_items)
+    #logging.info("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=")
+    #logging.info(output_items)
 
     cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray] = lambda construct, lookup_indicies: np.zeros_like(lookup_indicies)
-        
-    instance.compile()
-    assert not instance.compiled is None
 
     inverse_priced_indices = np.ones(len(instance.reference_list))
-    inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items])] = 0
+    inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items], dtype=np.int32)] = 0
 
     R_j_i, c_i, C_j_i, N_i = instance.compiled.reduce(cost_function, 
                                                             inverse_priced_indices, 
                                                             None, known_technologies)
     valid_rows = (R_j_i != 0).sum(axis=1) > 0
+    #logging.info([k for k in N_i])
 
     if target_types=="all tech":
         factory_type = "science"
@@ -984,12 +1004,27 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
     else:
         science_target_names: list[str] = _new_science_factory_targets(instance, valid_rows)
         science_targets, covering_to, _ = _science_factory_parameters(instance, known_technologies, science_target_names, [])
-        if len(science_targets.keys()):
+        if len(science_targets.keys())>0:
             factory_type = "science"
             target_names = science_target_names
         else:
-            factory_type = "material"
-            target_names: list[str] = _new_material_factory_targets(instance, valid_rows)
+            material_target_names: list[str] = _new_material_factory_targets(instance, valid_rows)
+            #logging.info(material_target_names)
+            difference: set[str] = set(material_target_names).difference(set(last_material.targets.keys()))
+            #logging.info(difference)
+            if len(difference)>0 and (not isinstance(last_material, FactorioManualFactory) or len(material_target_names)>len(last_material.targets.keys())): 
+                #second check here is due to needing to keep using manual factories until material factories can actually take over
+                factory_type = "material"
+                target_names = material_target_names
+            else:
+                factory_type = "manual"
+                manual_constructs = ManualConstruct.vectors(instance.manual_constructs, known_technologies)
+                R_j_i, c_i, C_j_i, N_i = instance.compiled.reduce(cost_function, 
+                                                            inverse_priced_indices, 
+                                                            None, known_technologies, extras=manual_constructs)
+                valid_rows = (R_j_i != 0).sum(axis=1) > 0
+                target_names = _new_material_factory_targets(instance, valid_rows)# + ['electric']
+                #logging.info(target_names)
 
     logging.info("Auto-targets:\n\t"+str(target_names))
 
@@ -1104,3 +1139,5 @@ def _new_material_factory_targets(instance, valid_rows) -> list[str]:
         if valid_rows[instance.reference_list.index(other)] and other in instance.active_list:
             target_names.append(other)
     return target_names
+
+

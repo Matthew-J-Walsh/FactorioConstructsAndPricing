@@ -9,11 +9,11 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle"):
+def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle", force_rebuild: bool = False):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
-    if os.path.isfile(instance_filename): #False:
+    if not force_rebuild and os.path.isfile(instance_filename): #False:
         vanilla = FactorioInstance.load(instance_filename)
         print("Instance loaded.")
     else:
@@ -104,11 +104,14 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     starting_pricing['lab'] = 2 + 10 * starting_pricing['electronic-circuit'] + 10 * starting_pricing['iron-gear-wheel'] + 4 * starting_pricing['transport-belt']
 
     starting_pricing = CompressedVector({k: Fraction(v).limit_denominator() for k, v in starting_pricing.items()})
-    vanilla_chain.initial_pricing(starting_pricing, tech_level)
+    
 
-    print("Starting factories.")
+    
 
     def curated():
+        vanilla_chain.initial_pricing(starting_pricing, tech_level)
+        print("Starting factories.")
+
         logging.info("=============================================")
         logger.setLevel(logging.DEBUG)
         vanilla_chain.add("all tech")
@@ -191,13 +194,19 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
         logging.info(len(vanilla_chain.chain)-1)
     
     def uncurated():
-        i = 0
-        while not vanilla_chain.add():
-            i += 1
-            if i>100:
-                break
+        vanilla_chain.initial_pricing(starting_pricing, tech_level)
+        print("Autocompleting factories.")
+        vanilla_chain.complete()
+
+    def blank_run():
+        #tech_level = vanilla.technological_limitation_from_specification()
+        vanilla_chain.initial_pricing(CompressedVector(), tech_level)
+        print("Autocompleting factories from nothing.")
+        vanilla_chain.complete()
 
     curated()
+    #uncurated()
+    #blank_run()
 
     print("Computing.")
 

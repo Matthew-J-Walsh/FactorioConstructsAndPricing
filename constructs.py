@@ -4,8 +4,7 @@ from globalsandimports import *
 from utils import *
 
 class UncompiledConstruct:
-    """
-    An uncompiled construct, contains all the information needed to compile a single construct.
+    """An uncompiled construct, contains all the information needed to compile a single construct.
 
     Members
     -------
@@ -115,6 +114,57 @@ class UncompiledConstruct:
                 "\n\tA Cost of: "+str(self.cost)+\
                 "\n\tRequiring: "+str(self.limit)+\
                 "\n\tBuilding size of: "+str(self.building['tile_width'])+" by "+str(self.building['tile_height'])
+
+
+class ManualConstruct:
+    """Manual Constructs are hand crafted constructs. This should only be used when there is no other way to progress
+
+    Members
+    -------
+    ident : str
+        Unique identifier
+    effect_vector : np.ndarray
+        Column vector of this manual action
+    limit : TechnologicalLimitation
+        Tech level required to complete this manual ection
+    """
+    ident: str
+    deltas: CompressedVector
+    effect_vector: np.ndarray
+    limit: TechnologicalLimitation
+
+    def __init__(self, ident: str, deltas: CompressedVector, limit: TechnologicalLimitation, instance):
+        self.ident = ident
+        self.deltas = deltas
+        self.effect_vector = np.zeros(len(instance.reference_list))
+        for k, v in deltas.items():
+            self.effect_vector[instance.reference_list.index(k)] = v
+        self.limit = limit
+
+    def vector(self, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, str | None]:
+        if self.limit >= known_technologies:
+            return self.effect_vector, 1, None
+        else:
+            return np.zeros_like(self.effect_vector), 0, None
+        
+    @staticmethod
+    def vectors(all_constructs: tuple[ManualConstruct, ...], known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]:
+        construct_arr: np.ndarray[ManualConstruct, Any] = np.array(all_constructs, dtype=ManualConstruct)
+        mask = np.array([known_technologies >= construct.limit for construct in construct_arr])
+        construct_arr = construct_arr[mask]
+
+        vectors = np.vstack([construct.effect_vector for construct in construct_arr]).T
+        costs = np.ones_like(construct_arr, dtype=np.float64)
+        true_costs = np.vstack([np.zeros_like(construct.effect_vector) for construct in construct_arr]).T
+        idents = np.concatenate([np.array([CompressedVector({construct.ident: 1})]) for construct in construct_arr])
+
+        return vectors, costs, true_costs, idents
+    
+    def __repr__(self) -> str:
+        return str(self.ident)+\
+                "\n\tWith a deltas of: "+str(self.deltas)+\
+                "\n\tRequiring: "+str(self.limit)
+                #"\n\tWith a vector of: "+str(self.effect_vector)+\
 
 def module_setup_generator(allowed_modules: list[tuple[str, bool, bool]], internal_module_limit: int, building_size: tuple[int, int], beacon: dict | None = None) -> Generator[tuple[CompressedVector, CompressedVector], None, None]:
     """Returns an generator over the set of possible module setups.
