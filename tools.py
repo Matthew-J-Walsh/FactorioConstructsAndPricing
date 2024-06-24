@@ -44,7 +44,7 @@ class FactorioInstance():
         What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     RELEVENT_FLUID_TEMPERATURES : dict
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities
-    research_modifiers : dict[str, ResearchEffectTable]
+    research_modifiers : dict[str, ResearchTable]
         Research modifier technology tables
         Currently ModuleLookupTables use "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed"
     post_analyses : dict[str, dict[int, float]]
@@ -253,7 +253,7 @@ class FactorioInstance():
         return new_name
 
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], 
-                         primal_guess: CompressedVector | None = None, dual_guess: CompressedVector | None = None, use_manual: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector]:
+                         recovered_run: ColumnTable | None = None, use_manual: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector, ColumnTable]:
         """Solves for a target factory given a tech level and reference pricing model
 
         Parameters
@@ -264,17 +264,15 @@ class FactorioInstance():
             Technology level to use
         reference_model : CompressedVector
             reference pricing model
-        primal_guess : CompressedVector | None, optional
-            guess for the primal, currently unused, by default None
-        dual_guess : CompressedVector | None, optional
-            guess for the dual, currently unused, by default None
+        recovered_run : ColumnTable | None, optional
+            The ColumnTable from the last run
         use_manual : bool, optional (default: False)
             Should manual columns be added.
             Warning: its a waste of processing power to turn this on if it doesn't have to be
 
         Returns
         -------
-        tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector]
+        tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector, ColumnTable]
             Amount of each construct that should be used,
             Pricing model of resulting factory,
             Pricing model of resulting factory including items that weren't targeted,
@@ -283,6 +281,7 @@ class FactorioInstance():
             Scaling factor difference between input and output pricing model,
             Full item/fluid cost of the created factory,
             Evaluations of unmodded constructs
+            The result table used in the last optimization step
         """
         n = len(self.reference_list)
 
@@ -302,21 +301,12 @@ class FactorioInstance():
         for k, v in targets.items():
             u_j[self.reference_list.index(k)] = v
 
-        if not primal_guess is None:
-            logging.warning("Primal guess not supported yet. We have to ignore it.")
-        
-        ginv_j = None
-        #if not dual_guess is None:
-        #    ginv_j = np.zeros(len(self.reference_list))
-        #    for k, v in dual_guess.items():
-        #        ginv_j[self.reference_list.index(k)] = v
-
         if use_manual:
             logging.info("Starting a manual program solving.")
-            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.vectors(self.manual_constructs, known_technologies), ginv_j)
+            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.vectors(self.manual_constructs, known_technologies), recovered_run)
         else:
             logging.info("Starting a program solving.")
-            s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ginv_j)
+            s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, recovered_run)
         
         logging.debug("Reconstructing factory.")
         s_i[np.where(s_i < 0)] = 0 #<0 is theoretically impossible, and indicates tiny tolerance errors, so we remove them to remove issues
@@ -348,7 +338,7 @@ class FactorioInstance():
 
         zs = R_vector_table.find_zeros(s_i)
 
-        return s, p, p_full, k, zs, scale, full_material_cost, nmv
+        return s, p, p_full, k, zs, scale, full_material_cost, nmv, R_vector_table
     
     def technological_limitation_from_specification(self, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
         """Generates a TechnologicalLimitation from a specification. Works as a more user friendly way of getting useful TechnologicalLimitations.
@@ -456,6 +446,7 @@ class FactorioFactory():
     intermediate_scale_factor: float
     true_cost: CompressedVector
     no_module_value: CompressedVector
+    last_run_columns: ColumnTable | None
 
     def __init__(self, instance: FactorioInstance, known_technologies: TechnologicalLimitation, targets: CompressedVector) -> None:
         """
@@ -481,6 +472,7 @@ class FactorioFactory():
         self.intermediate_scale_factor = 0
         self.true_cost = CompressedVector()
         self.no_module_value = CompressedVector()
+        self.last_run_columns = None
 
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], use_manual: bool = False) -> bool:
         """Calculates a optimal factory with the the reference model
@@ -499,9 +491,10 @@ class FactorioFactory():
         bool
             If pricing model has changed since this factory was last optimized
         """
-        s, p, pf, k, zs, scale, tc, nmv = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.optimal_factory, self.optimal_pricing_model, use_manual=use_manual)
+        s, p, pf, k, zs, scale, tc, nmv, recovery = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.last_run_columns, use_manual=use_manual)
         same = p==self.optimal_pricing_model
         self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self.construct_efficiencies, self.intermediate_scale_factor, self.true_cost, self.no_module_value = s, p, pf, k, scale, tc, nmv
+        self.last_run_columns = recovery
         self.zero_throughputs = zs
         self.optimized = True
 
@@ -638,7 +631,7 @@ class FactorioScienceFactory(FactorioFactory):
         last_material_factory : FactorioMaterialFactory | InitialFactory
             Factory to base the pricing model of this factory on
         science_targets : CompressedVector
-            Target tools defining a clear TODO: better ways of handling this whole system
+            Target tools defining a clear
         """        
         assert isinstance(instance, FactorioInstance)
         assert isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, InitialFactory) or isinstance(previous_science, TechnologicalLimitation)

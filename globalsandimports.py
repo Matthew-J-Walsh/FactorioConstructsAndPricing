@@ -65,7 +65,7 @@ def get_module_multilinear_effect_selector(idx: int) -> np.ndarray:
 
 MODULE_MULTILINEAR_EFFECT_SELECTORS = [get_module_multilinear_effect_selector(i) for i in range(len(ALL_MODULE_EFFECTS))]
 
-DEBUG_BLOCK_MODULES: bool = True #Should modules be removed from pricing to speed up debugging of non-module related issues.
+DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_BLOCK_BEACONS: bool = False or DEBUG_BLOCK_MODULES #Should modules be removed from pricing to speed up debugging of non-module related issues.
 
 OUTPUT_WARNING_LIST = [] #List of items that have had warnings thrown about them. Won't throw the same item twice.
@@ -86,6 +86,6 @@ ITEM_SUB_PROTOTYPES = ['item', 'ammo', 'capsule', 'gun', 'item-with-entity-data'
 RESEARCH_SPECIAL_STRING = "=research"
 
 #Unfortunatly there is really no other way to do this, the day duration information seems to be runtime only so its not avaiable in prototype stage.
-#If daytime is being modified somehow it will need to be adjusted in this global (TODO: move to FactorioInstance? or FactoryChain?)
+#If daytime is being modified somehow it will need to be adjusted in this global (TODO: move to FactorioInstance? or FactoryChain?, Different Surfaces?)
 #For more information on this calculation see https://forums.factorio.com/viewtopic.php?f=5&t=5594
 DAYTIME_VARIABLES: dict[str, Fraction] = {"daytime": Fraction(25000,60*2), "nighttime": Fraction(25000,60*10), "dawntime/dusktime": Fraction(25000,60*5)} # type: ignore

@@ -17,17 +17,11 @@ What updates have to be done to handle diminishing beacons?
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## Decorator improvements for: Overloading .add(), currying pricing functions, return self?, type checking interface inputs
-
-## Turn allowed_modules tuples into class?
-
-## Turn solve_for_target output into class?
-
-## Retargeting uses old optimization
-
-## ColumnTable.reduced using ColumnTable.valid_rows
+## Decorator improvements for: Overloading .add(), type checking interface inputs
 
 ## Special case where there are disjoint research bonuses for productivity???
+
+## Fix many typing comments that changed
 
 
 # Progression accuracy

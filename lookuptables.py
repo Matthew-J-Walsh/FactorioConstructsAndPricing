@@ -324,16 +324,16 @@ class CompiledConstruct:
     -------
     origin : UncompiledConstruct
         Construct to compile
-    technological_lookup_tables : tuple[tuple[TechnologicalLimitation, ModuleLookupTable], ...]
-        Table containing lookup tables associated with this Construct given a Tech Level
-    technological_speed_multipliers : tuple[tuple[TechnologicalLimitation, float], ...]
-        Table containing speed multipliers associated with this Construct given a Tech Level
+    technological_lookup_tables : ResearchTable
+        ResearchTable containing lookup tables associated with this Construct given a Tech Level
+    technological_speed_multipliers : ResearchTable
+        ResearchTable containing speed multipliers associated with this Construct given a Tech Level
     effect_transform : sparse.csr_matrix
         Effect this construct has in multilinear form
     base_cost_vector : np.ndarray
         Cost vector associated with the module-less and beacon-less construct
     required_price_indices : np.ndarray
-        TODO: Do this differently
+        Indicies that must be priced to build this construct
     paired_cost_transform : np.ndarray
         Additional cost vector from effects, Currently 0 for various reasons
     effective_area : int
@@ -415,15 +415,6 @@ class CompiledConstruct:
         ModuleLookupTable
             The highest unlocked lookup table
         """
-        #if len(self.technological_lookup_tables)==1:
-        #    return self.technological_lookup_tables[0][1]
-        #highest_lookup_table: ModuleLookupTable = self.technological_lookup_tables[0][1]
-        #for tech_req, lookup_table in self.technological_lookup_tables[1:]:
-        #    if known_technologies>=tech_req:
-        #        highest_lookup_table = lookup_table
-        #    else:
-        #        break
-            
         return self.technological_lookup_tables.max(known_technologies)
     
     def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
@@ -439,15 +430,6 @@ class CompiledConstruct:
         float
             Multiplier
         """
-        #if len(self.technological_speed_multipliers)==1:
-        #    return self.technological_speed_multipliers[0][1]
-        #highest_speed_multiplier: float = self.technological_speed_multipliers[0][1]
-        #for tech_req, speed_multi in self.technological_speed_multipliers[1:]:
-        #    if known_technologies>=tech_req:
-        #        highest_speed_multiplier = speed_multi
-        #    else:
-        #        break
-            
         return self.technological_speed_multipliers.value(known_technologies)
 
     def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
@@ -573,7 +555,6 @@ class CompiledConstruct:
         """
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
-        #inverse_inverse_priced_indices_arr_todo
         if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
             return CompressedVector()
         else:

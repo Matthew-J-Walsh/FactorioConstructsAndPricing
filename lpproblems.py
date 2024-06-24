@@ -5,7 +5,7 @@ from utils import *
 from lpsolvers import *
 
 def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
-                                       dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
+                                       starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector
 
     Parameters
@@ -20,27 +20,25 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         What indices of the pricing vector aren't priced
     known_technologies : TechnologicalLimitation
         Current tech level
-    dual_guess : np.ndarray | None, optional
-        Guess for the dual vector, by default None
+    starting_columns : ColumnTable | None, optional
+        What columns to start with
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    tuple[np.ndarray, np.ndarray, ColumnTable]
         The optimal factory vector,
         The optimal pricing model for the factory
-        Matrix of the effect vectors of the used constructs
-        Cost array of the used constructs
-        Matrix of the cost vectors of the used construct
-        Ident array of the used constructs
+        The columns of the optimal factory
 
     Raises
     ------
     RuntimeError
         Unable to form a factory for whatever reason
     """
-    primal, dual = None, dual_guess
-
-    vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).reduced.sorted
+    if starting_columns is None:
+        vector_table = construct.vectors(cost_function, inverse_priced_indices, None, known_technologies).reduced.sorted
+    else:
+        vector_table = starting_columns
 
     i = 0
     old_valid_rows = vector_table.valid_rows
@@ -50,7 +48,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
 
         logging.info("Starting iteration "+str(i)+" of current optimization with "+str(len(vector_table.ident))+" columns.")
         i += 1
-        primal, dual = BEST_LP_SOLVER(vector_table.vector, u_j, vector_table.cost, ginv=dual)
+        primal, dual = BEST_LP_SOLVER(vector_table.vector, u_j, vector_table.cost)
         if primal is None or dual is None:
             logging.error("Row losses: "+str(np.where(np.logical_and(old_valid_rows, np.logical_not(valid_rows)))[0]))
             raise RuntimeError("Unable to form factory even with slack.")
@@ -79,8 +77,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
     return primal, dual, vector_table
 
 def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
-                                              extras: ColumnTable,
-                                              dual_guess: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
+                                              manual_constructs: ColumnTable, starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
     With extra columns that shouldn't be filtered and have max priority cost
 
@@ -96,30 +93,27 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         What indices of the pricing vector aren't priced
     known_technologies : TechnologicalLimitation
         Current tech level
-    extras : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]] | None
-        Extra constructs to be added every time, never filtered. 
-        Same format as construct.reduce outputs
-    dual_guess : np.ndarray | None, optional
-        Guess for the dual vector, by default None
+    manual_constructs : ColumnTable
+        Columns of the manual constructs
+    starting_columns : ColumnTable | None, optional
+        What columns to start with
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    tuple[np.ndarray, np.ndarray, ColumnTable]
         The optimal factory vector,
         The optimal pricing model for the factory
-        Matrix of the effect vectors of the used constructs
-        Cost array of the used constructs
-        Matrix of the cost vectors of the used construct
-        Ident array of the used constructs
+        The columns of the optimal factory
 
     Raises
     ------
     RuntimeError
         Unable to form a factory for whatever reason
     """
-    primal, dual = None, dual_guess
-
-    vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).shadow_attachment(extras).reduced.sorted
+    if starting_columns is None:
+        vector_table = construct.vectors(cost_function, inverse_priced_indices, None, known_technologies).shadow_attachment(manual_constructs).reduced.sorted
+    else:
+        vector_table = starting_columns
 
     prio_primal, prio_dual = BEST_LP_SOLVER(vector_table.vector, u_j, vector_table.true_cost[-1, :])
     if prio_primal is None or prio_dual is None:
@@ -144,7 +138,7 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         old_valid_rows = valid_rows
         dual = dual[:-1]
         
-        new_vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).shadow_attachment(extras).reduced.sorted
+        new_vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).shadow_attachment(manual_constructs).reduced.sorted
         new_vector_table = new_vector_table.mask(linear_transform_is_gt(new_vector_table.vector.T, dual, .99 * new_vector_table.cost))
 
         new_mask = true_new_column_mask(vector_table.ident, new_vector_table.ident)

@@ -664,13 +664,13 @@ def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> di
 
     Returns
     -------
-    dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
+    dict[str, ResearchTable]
         Research effect tables
     """
     effect_table: dict[str, ResearchTable] = {}
     for modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "laboratory-speed"]:
         effect_table[modifier_type] = ResearchTable()
-        effect_table[modifier_type].add(TechnologicalLimitation(tech_tree), 0.0 if 'productivity' in modifier_type else 1.0) #TODO: Should this check be somewhere else?
+        effect_table[modifier_type].add(TechnologicalLimitation(tech_tree), 0.0 if 'productivity' in modifier_type else 1.0)
         for technology in data['technology'].values():
             if 'effects' in technology.keys():
                 for modifier in technology['effects']:

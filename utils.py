@@ -489,18 +489,17 @@ class ColumnTable:
         ColumnTable
             New table without any rows that cannot be produced
         """        
-        mask = np.full(self.vector.shape[1], True, dtype=bool)
-
-        valid_rows = np.asarray((self.vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0 #sum is equivalent to any
-        logging.debug("Beginning reduction of "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
-        last_mask = np.full(self.vector.shape[1], False, dtype=bool)
-        while (last_mask!=mask).any():
-            last_mask = mask.copy()
-            valid_rows = np.asarray((self.vector[:, np.where(mask)[0]] > 0).sum(axis=1)).flatten() > 0
-            mask = np.logical_and(mask, np.logical_not(np.asarray((self.vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
-            logging.debug("Reduced to "+str(np.count_nonzero(mask))+" constructs with "+str(np.count_nonzero(valid_rows))+" counted outputs.")
+        logging.debug("Beginning reduction of "+str(self.vector.shape[1])+" constructs with "+str(np.count_nonzero(self.valid_rows))+" counted outputs.")
+        size: int = self.vector.shape[1]
+        last_size: int = self.vector.shape[1]+1
+        reduced: ColumnTable = self
+        while last_size!=size:
+            last_size = reduced.vector.shape[1]
+            reduced = reduced.mask(np.logical_not(np.asarray((reduced.vector[~reduced.valid_rows, :] < 0).sum(axis=0)).flatten()))
+            size = reduced.vector.shape[1]
+            logging.debug("Reduced to "+str(size)+" constructs with "+str(np.count_nonzero(reduced.valid_rows))+" counted outputs.")
     
-        return self.mask(mask)
+        return reduced
     
     def find_zeros(self, cv: np.ndarray) -> list[int]:
         """Given a contravector, find which output indicies have zero throughput (not zero due to subtraction)
