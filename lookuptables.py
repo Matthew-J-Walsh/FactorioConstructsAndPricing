@@ -342,8 +342,8 @@ class CompiledConstruct:
         If this construct should be priced based on size when calculating in size restricted mode
     """
     origin: UncompiledConstruct
-    technological_lookup_tables: tuple[tuple[TechnologicalLimitation, ModuleLookupTable], ...]
-    technological_speed_multipliers: tuple[tuple[TechnologicalLimitation, float], ...]
+    technological_lookup_tables: ResearchTable
+    technological_speed_multipliers: ResearchTable
     effect_transform: sparse.csr_matrix
     base_cost_vector: np.ndarray
     required_price_indices: np.ndarray
@@ -363,15 +363,20 @@ class CompiledConstruct:
         self.origin = origin
 
         if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
-            self.technological_lookup_tables = tuple([(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod)) for limit, base_prod in instance.research_modifiers['laboratory-productivity']])
+            self.technological_lookup_tables = ResearchTable()
+            for limit, base_prod in instance.research_modifiers['laboratory-productivity']:
+                self.technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
         elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
-            self.technological_lookup_tables = tuple([(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod)) for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']])
+            self.technological_lookup_tables = ResearchTable()
+            for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']:
+                self.technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
         else:
-            self.technological_lookup_tables = ((origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity)),)
+            self.technological_lookup_tables = ResearchTable()
+            self.technological_lookup_tables.add(origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity))
         if "laboratory-speed" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratorySpeedModifier.html
             self.technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
         else:
-            self.technological_speed_multipliers = ((origin.limit, 1),)
+            self.technological_speed_multipliers = instance.research_modifiers['no-speed-modifier']
 
         self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list)
         
@@ -410,16 +415,16 @@ class CompiledConstruct:
         ModuleLookupTable
             The highest unlocked lookup table
         """
-        if len(self.technological_lookup_tables)==1:
-            return self.technological_lookup_tables[0][1]
-        highest_lookup_table: ModuleLookupTable = self.technological_lookup_tables[0][1]
-        for tech_req, lookup_table in self.technological_lookup_tables[1:]:
-            if known_technologies>=tech_req:
-                highest_lookup_table = lookup_table
-            else:
-                break
+        #if len(self.technological_lookup_tables)==1:
+        #    return self.technological_lookup_tables[0][1]
+        #highest_lookup_table: ModuleLookupTable = self.technological_lookup_tables[0][1]
+        #for tech_req, lookup_table in self.technological_lookup_tables[1:]:
+        #    if known_technologies>=tech_req:
+        #        highest_lookup_table = lookup_table
+        #    else:
+        #        break
             
-        return highest_lookup_table
+        return self.technological_lookup_tables.max(known_technologies)
     
     def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
         """Calculate the speed multiplier at a technological level
@@ -434,16 +439,16 @@ class CompiledConstruct:
         float
             Multiplier
         """
-        if len(self.technological_speed_multipliers)==1:
-            return self.technological_speed_multipliers[0][1]
-        highest_speed_multiplier: float = self.technological_speed_multipliers[0][1]
-        for tech_req, speed_multi in self.technological_speed_multipliers[1:]:
-            if known_technologies>=tech_req:
-                highest_speed_multiplier = speed_multi
-            else:
-                break
+        #if len(self.technological_speed_multipliers)==1:
+        #    return self.technological_speed_multipliers[0][1]
+        #highest_speed_multiplier: float = self.technological_speed_multipliers[0][1]
+        #for tech_req, speed_multi in self.technological_speed_multipliers[1:]:
+        #    if known_technologies>=tech_req:
+        #        highest_speed_multiplier = speed_multi
+        #    else:
+        #        break
             
-        return highest_speed_multiplier
+        return self.technological_speed_multipliers.value(known_technologies)
 
     def vectors(self, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best vector possible given a pricing model

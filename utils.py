@@ -354,6 +354,17 @@ class TechnologicalLimitation:
         """        
         assert self.tree == other.tree
         return self.tree.techlimit_ge(self, other)
+    
+    @property
+    def tech_coverage(self) -> TechnologicalLimitation:
+        """Returns self
+
+        Returns
+        -------
+        TechnologicalLimitation
+            Self
+        """
+        return self
 
 class ColumnTable:
     """Container for columns of a LP problem
@@ -508,6 +519,85 @@ class ColumnTable:
         positive[positive < 0] = 0
         return np.where(np.isclose(positive @ cv, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
     
+class ResearchTable:
+    """Table of research depenedent values
+
+    Members
+    -------
+    limits : list[TechnologicalLimitation]
+        Technological Levels
+    values : list[Any]
+        Research dependent values
+    """    
+    limits: list[TechnologicalLimitation]
+    values: list[Any]
+
+    def __init__(self):
+        """Empty init for ordering
+        """        
+        self.limits = []
+        self.values = []
+    
+    def add(self, limit: TechnologicalLimitation, value: Any):
+        """Adds an value to the table
+
+        Parameters
+        ----------
+        limit : TechnologicalLimitation
+            Tech level to add at
+        element : Any
+            Value to add
+        """        
+        if len(self.limits)!=0:
+            for i in range(len(self.limits)):
+                if not limit >= self.limits[i]:
+                    self.limits.insert(i, limit)
+                    self.values.insert(i, value)
+                    return
+        self.limits.append(limit)
+        self.values.append(value)
+
+    def value(self, known_technologies: TechnologicalLimitation) -> Any:
+        """Evalutes the sum of bonuses up to a tech level
+
+        Parameters
+        ----------
+        known_technologies : TechnologicalLimitation
+            Tech level to use
+
+        Returns
+        -------
+        Any
+            Sum of bonuses
+        """        
+        return sum([value for limit, value in zip(self.limits, self.values) if known_technologies >= limit])
+    
+    def max(self, known_technologies: TechnologicalLimitation) -> Any:
+        """Evaluates the maximum (ordered) value given the tech level
+
+        Parameters
+        ----------
+        known_technologies : TechnologicalLimitation
+            Tech level to use
+
+        Returns
+        -------
+        Any
+            Maximum tech level's associated value
+        """        
+        for i in range(len(self.limits)):
+            if not known_technologies >= self.limits[i]:
+                return self.values[i-1]
+        return self.values[-1]
+    
+    def __iter__(self) -> Iterator[tuple[TechnologicalLimitation, Any]]:
+        for limit in self.limits:
+            yield limit, self.value(limit)
+
+    def __repr__(self) -> str:
+        return repr(self.limits)+"\n"+repr(self.values)
+
+
 
 T = TypeVar('T')
 def list_union(l1: list[T], l2: list[T]) -> list[T]:

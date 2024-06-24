@@ -44,7 +44,7 @@ class FactorioInstance():
         What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
     RELEVENT_FLUID_TEMPERATURES : dict
         Dict with keys of fluid names and values of a dict mapping temperatures to energy densities
-    research_modifiers : dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
+    research_modifiers : dict[str, ResearchEffectTable]
         Research modifier technology tables
         Currently ModuleLookupTables use "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed"
     post_analyses : dict[str, dict[int, float]]
@@ -64,7 +64,7 @@ class FactorioInstance():
     raw_ore_pricing: np.ndarray
     COST_MODE: str
     RELEVENT_FLUID_TEMPERATURES: dict
-    research_modifiers: dict[str, tuple[tuple[TechnologicalLimitation, Any], ...]]
+    research_modifiers: dict[str, ResearchTable]
     post_analyses: dict[str, dict[int, float]]
 
     def __init__(self, filename: str, COST_MODE: str = 'normal', nobuild: bool = False, raw_ore_pricing: dict[str, Real] | CompressedVector | None = None) -> None:
@@ -591,7 +591,7 @@ class FactorioMaterialFactory(FactorioFactory):
         assert isinstance(last_material_factory, FactorioMaterialFactory) or isinstance(last_material_factory, InitialFactory)
         assert isinstance(material_targets, CompressedVector)
         if isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, InitialFactory):
-            super().__init__(instance, previous_science.get_technological_coverage(), material_targets)
+            super().__init__(instance, previous_science.tech_coverage, material_targets)
         else: #we probably got here via self.startup_base
             super().__init__(instance, previous_science, material_targets)
         self.last_material_factory = last_material_factory
@@ -664,9 +664,10 @@ class FactorioScienceFactory(FactorioFactory):
         if isinstance(self.previous_science, TechnologicalLimitation):
             return self.previous_science
         else:
-            return self.previous_science.get_technological_coverage()
-
-    def get_technological_coverage(self) -> TechnologicalLimitation:
+            return self.previous_science.tech_coverage
+        
+    @property
+    def tech_coverage(self) -> TechnologicalLimitation:
         """
         Returns
         -------
@@ -725,20 +726,22 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.optimal_factory = CompressedVector()
         self.optimal_pricing_model = pricing_model.norm()
         self.construct_efficiencies = CompressedVector()
+        self.previous_science = known_technologies
     
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray], use_manual: bool = False) -> bool:
         """Placeholder. Initial Factories cannot change.
         """
         return False
     
-    def get_technological_coverage(self) -> TechnologicalLimitation:
+    @property
+    def tech_coverage(self) -> TechnologicalLimitation:
         """
         Returns
         -------
         TechnologicalLimitation
-            Tech level unlocked by default
+            Tech level that will be unlocked when this factory is done
         """
-        return self.known_technologies
+        return self._previous_coverage()
     
     def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Placeholder. Initial Factories cannot change.
@@ -823,7 +826,7 @@ class FactorioFactoryChain():
         if len(previous_sciences)==0:
             known_technologies: TechnologicalLimitation = last_material.known_technologies #first science after a startup base.
         else:
-            known_technologies: TechnologicalLimitation = previous_sciences[-1].get_technological_coverage()
+            known_technologies: TechnologicalLimitation = previous_sciences[-1].tech_coverage
 
         if isinstance(targets, CompressedVector):
             if list(targets.keys())[0] in self.instance.data_raw['tool'].keys() or list(targets.keys())[0] in self.instance.data_raw['technology'].keys():
@@ -1075,10 +1078,7 @@ def _science_factory_parameters(instance: FactorioInstance, previous_science: Fa
     """    
     covering_to: TechnologicalLimitation = instance.technological_limitation_from_specification(fully_automated=clear, extra_technologies=extra)
 
-    if isinstance(previous_science, TechnologicalLimitation):
-        last_coverage: TechnologicalLimitation = previous_science
-    else:
-        last_coverage: TechnologicalLimitation = previous_science.get_technological_coverage()
+    last_coverage: TechnologicalLimitation = previous_science.tech_coverage
 
     targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 

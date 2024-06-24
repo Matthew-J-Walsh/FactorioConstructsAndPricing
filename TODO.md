@@ -21,17 +21,13 @@ What updates have to be done to handle diminishing beacons?
 
 ## Turn allowed_modules tuples into class?
 
-## Turn research modifiers into class?
-
 ## Turn solve_for_target output into class?
-
-## Dismantle _science_factory_parameters
 
 ## Retargeting uses old optimization
 
-Add in functionality to let the retargeting to start with a primal guess, specifically for used constructs with potentially well optimized module setups.
-
 ## ColumnTable.reduced using ColumnTable.valid_rows
+
+## Special case where there are disjoint research bonuses for productivity???
 
 
 # Progression accuracy
