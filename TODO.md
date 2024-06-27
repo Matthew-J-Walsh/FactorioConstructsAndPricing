@@ -13,6 +13,13 @@ Implement the optimizations of table lookups to minimize the amount of possible 
 What updates have to be done to handle diminishing beacons?
 
 
+# Speedups
+
+## true_new_column_mask using values other than names?
+
+## Different solvers? Pulp solver ojective function dot product?
+
+
 # Misc improvements
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed

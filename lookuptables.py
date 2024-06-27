@@ -192,18 +192,18 @@ class ModuleLookupTable:
         allowed_internal_modules = tuple([instance.data_raw['module'][mod] for mod, i, e in self.avaiable_modules if i])
         allowed_external_modules = tuple([instance.data_raw['module'][mod] for mod, i, e in self.avaiable_modules if e])
         beacon_designs: tuple[tuple[dict, tuple[tuple[Fraction, Fraction], ...]], ...] = tuple([(beacon, tuple(beacon_setups((self.building_height, self.building_height), beacon))) for beacon in instance.data_raw['beacon'].values()])
-        new_effects, new_added_effect, new_cost = generate_module_vector_lambdas(allowed_internal_modules, allowed_external_modules, 
-                                                                                 beacon_designs, instance.reference_list)(model_point_generator(len(allowed_internal_modules), self.module_count, len(allowed_external_modules), 2, 
-                                                                                                                                                tuple([len(designs) for beacon, designs in beacon_designs])))
+        new_points = model_point_generator(len(allowed_internal_modules), self.module_count, len(allowed_external_modules), 2, tuple([len(designs) for beacon, designs in beacon_designs]))
+        new_effects, new_added_effect, new_cost = generate_module_vector_lambdas(allowed_internal_modules, allowed_external_modules, beacon_designs, instance.reference_list)(new_points)
 
-        if len(self.avaiable_modules) > 3:
-            print(self.multilinear_effect_transform.shape)
-            print(self.effect_transform.shape)
-            print(self.cost_transform.shape)
+        if self.module_count > 3:
 
-            print(new_effects.shape)
-            print(new_added_effect.shape)
-            print(new_cost.shape)
+            for i in range(self.multilinear_effect_transform.shape[0]):
+                found = False
+                for j in range(new_effects.shape[0]):
+                    if np.isclose(self.multilinear_effect_transform[i], new_effects[j]).all():
+                        found = True
+                        break
+                assert found
 
             raise ValueError()
 

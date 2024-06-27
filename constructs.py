@@ -266,98 +266,199 @@ def model_point_generator(allowed_internal_module_count: int, internal_module_li
                           beacon_dimensions: tuple[int, ...]) -> np.ndarray:
     if allowed_internal_module_count==0:
         return np.zeros((0, 0))
-    #print(allowed_internal_module_count)
-    #print(internal_module_limit)
-    #print(allowed_external_module_count)
-    #print(beacon_module_limit)
-    #print(beacon_dimensions)
-    internal_module_setups = np.column_stack([g.ravel() for g in np.meshgrid(*([np.arange(internal_module_limit+1)]*allowed_internal_module_count))])
+    internal_module_setups = np.concatenate([g.reshape(-1, 1) for g in np.meshgrid(*([np.arange(internal_module_limit+1)]*allowed_internal_module_count), indexing='ij')], axis=1)
     internal_module_setups = internal_module_setups[internal_module_setups.sum(axis=1)<=internal_module_limit,:]
-    #print(internal_module_setups.shape)
 
-    external_module_internals = np.column_stack([g.ravel() for g in np.meshgrid(*([np.arange(beacon_module_limit+1)]*allowed_external_module_count))])
+    if allowed_external_module_count!=0:
+        external_module_internals = np.concatenate([g.reshape(-1, 1) for g in np.meshgrid(*([np.arange(beacon_module_limit+1)]*allowed_external_module_count), indexing='ij')], axis=1)
+    else:
+        external_module_internals = np.zeros((0, 0))
     external_module_internals = external_module_internals[
         np.logical_and(external_module_internals.sum(axis=1)<=beacon_module_limit, (external_module_internals==beacon_module_limit).sum(axis=1)>0)
         ,:]
-    #print(external_module_internals.shape)
 
     beacon_designs = np.zeros((1+sum(beacon_dimensions), len(beacon_dimensions)))
     i = 1
     for j in range(len(beacon_dimensions)):
         for k in range(1, 1+beacon_dimensions[j]):
             beacon_designs[i, j] = k
-    #print(beacon_designs.shape)
+
+    total = np.array([np.concatenate((internal_module_setups[i], external_module_internals[j], beacon_designs[k]))
+                      for i in range(internal_module_setups.shape[0]) for j in range(external_module_internals.shape[0]) for k in range(beacon_designs.shape[0])], dtype=np.int64)
+
+    return total
+
+def generate_module_validity_lambda():
+    return None
+
+def generate_module_neighbors_lambda(allowed_internal_module_count: int, internal_module_limit: int, 
+                                     allowed_external_module_count: int, beacon_module_limits: tuple[int, ...],
+                                     beacon_dimensions: tuple[int, ...]) -> Callable[[np.ndarray], np.ndarray]:
+    beacon_sizes = np.array(beacon_dimensions)
+    beacon_module_maxes = np.array(beacon_module_limits)
+    correct_point_size = allowed_internal_module_count + allowed_external_module_count + len(beacon_dimensions)
+
+    def valid_point(point: np.ndarray) -> bool:
+        point = point.reshape(1, -1)
+        if point.shape[1]!=correct_point_size:
+            return False
+
+        internal_module_portion = point[:, :allowed_internal_module_count]
+        external_module_portion = point[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count]
+        beacon_design_portion = point[:, allowed_internal_module_count+allowed_external_module_count:]
+
+        internal_module_count = internal_module_portion.sum()
+        if internal_module_count>internal_module_limit:
+            return False
+        external_module_count = external_module_portion.sum()
+        if beacon_design_portion.sum()>0 and external_module_count>beacon_module_maxes[beacon_design_portion.argmax()]:
+            return False
+        if (beacon_design_portion>beacon_sizes).any():
+            return False
+
+        return True
+
+    #ravel line explination:
+    #https://stackoverflow.com/questions/48170804/how-to-add-only-to-diagonals-of-array-in-python
+    def get_neighbors(point: np.ndarray) -> np.ndarray:
+        point = point.reshape(1, -1)
+        assert point.shape[1]==correct_point_size, point.shape[1]-correct_point_size
+        
+        internal_module_portion = point[:, :allowed_internal_module_count]
+        external_module_portion = point[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count]
+        beacon_design_portion = point[:, allowed_internal_module_count+allowed_external_module_count:]
+
+        internal_module_count = internal_module_portion.sum()
+
+        internal_loss_points = np.zeros((0, point.shape[1]))
+        if internal_module_count>0:
+            nnzs = np.nonzero(internal_module_portion)[1]
+            internal_loss_points = np.repeat(point, nnzs.shape[0], axis=0)
+            internal_loss_points[np.arange(internal_loss_points.shape[0]), nnzs] -= 1
+        internal_gain_points = np.zeros((0, point.shape[1]))
+        if internal_module_count<internal_module_limit:
+            internal_gain_points = np.repeat(point, allowed_internal_module_count, axis=0)
+            internal_gain_points[np.diag_indices(allowed_internal_module_count)] += 1
+        internal_piviot_points = np.zeros((0, point.shape[1]))
+        if internal_module_count==internal_module_limit:
+            nnzs = np.nonzero(internal_module_portion)[1]
+            internal_piviot_points = np.repeat(point, nnzs.shape[0] * allowed_internal_module_count, axis=0)
+            internal_piviot_points[np.arange(internal_piviot_points.shape[0]), np.repeat(nnzs, allowed_internal_module_count)] -= 1
+            internal_piviot_points[:, :allowed_internal_module_count] += np.kron(np.eye(allowed_internal_module_count, dtype=int), np.ones(nnzs.shape[0], dtype=int)).T
+
+        beacons_active = beacon_design_portion.sum() > 0
+
+        external_piviot_points = np.zeros((0, point.shape[1]))
+        if beacons_active:
+            nnzs = allowed_internal_module_count + np.nonzero(external_module_portion)[1]
+            external_piviot_points = np.repeat(point, nnzs.shape[0] * allowed_external_module_count, axis=0)
+            external_piviot_points[np.arange(external_piviot_points.shape[0]), np.repeat(nnzs, allowed_external_module_count)] -= 1
+            external_piviot_points[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count] += np.kron(np.eye(allowed_external_module_count, dtype=int), np.ones(nnzs.shape[0], dtype=int)).T
+        beacon_piviot_points = np.zeros((0, point.shape[1]))
+        if beacons_active:
+            beacon_piviot_points = np.repeat(point, beacon_sizes.shape[0], axis=0)
+            beacon_piviot_points[:, allowed_internal_module_count+allowed_external_module_count:] = 0
+            beacon_piviot_points[:, allowed_internal_module_count+allowed_external_module_count:][np.diag_indices(beacon_sizes.shape[0])] = 1
+        beacon_pm_points = np.zeros((0, point.shape[1]))
+        if beacons_active:
+            nnz: int = np.nonzero(beacon_design_portion)[1][0]
+            if beacon_design_portion[:, nnz]==beacon_sizes[nnz]:
+                beacon_pm_points = point.copy()
+                beacon_pm_points[0, allowed_internal_module_count + allowed_external_module_count + nnz] -= 1
+            else:
+                beacon_pm_points = np.repeat(point, 2, axis=0)
+                beacon_pm_points[0, allowed_internal_module_count + allowed_external_module_count + nnz] -= 1
+                beacon_pm_points[1, allowed_internal_module_count + allowed_external_module_count + nnz] += 1
+        initial_beacon_piviot_points = np.zeros((0, point.shape[1]))
+        if not beacons_active:
+            initial_beacon_piviot_points = np.repeat(point, allowed_external_module_count * beacon_sizes.shape[0], axis=0)
+            initial_beacon_piviot_points[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count] = 0
+            initial_beacon_piviot_points[np.arange(initial_beacon_piviot_points.shape[0]), allowed_internal_module_count + np.tile(np.arange(allowed_external_module_count), (beacon_sizes.shape[0], 1)).flatten()] = beacon_module_maxes[0]
+            initial_beacon_piviot_points[:, allowed_internal_module_count+allowed_external_module_count:] += np.kron(np.eye(beacon_sizes.shape[0], dtype=int), np.ones(allowed_external_module_count, dtype=int)).T
+
+        for m in (internal_loss_points, internal_gain_points, internal_piviot_points, external_piviot_points, beacon_piviot_points, beacon_pm_points, initial_beacon_piviot_points):
+            print(m.shape)
+
+        out = np.concatenate((internal_loss_points, internal_gain_points, internal_piviot_points, external_piviot_points, beacon_piviot_points, beacon_pm_points, initial_beacon_piviot_points), axis=0)
+
+        for i in range(out.shape[0]):
+            assert valid_point(out[i])
+
+        return out
     
-    internals = np.repeat(internal_module_setups, external_module_internals.shape[0] * beacon_designs.shape[0], axis=0)
-    externals = np.repeat(external_module_internals, internal_module_setups.shape[0] * beacon_designs.shape[0], axis=0)
-    beacons = np.repeat(beacon_designs, internal_module_setups.shape[0] * external_module_internals.shape[0], axis=0)
-    #print(internals.shape)
-    #print(externals.shape)
-    #print(beacons.shape)
-    return np.concatenate([internals, externals, beacons], axis=1)
+    return get_neighbors
 
 def generate_module_vector_lambdas(allowed_internal_modules: tuple[dict, ...], allowed_external_modules: tuple[dict, ...], beacon_designs: tuple[tuple[dict, tuple[tuple[Fraction, Fraction], ...]], ...],
                                    reference_list: tuple[str, ...]) -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray, np.ndarray]]:
     allowed_internal_module_count = len(allowed_internal_modules)
     allowed_external_module_count = len(allowed_external_modules)
 
-    beacon_design_effect_table = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])))
-    beacon_design_cost_table = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])))
-    beacon_design_beacon_cost = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])), dtype=int)
-    beacon_design_electric_cost = np.zeros((len(beacon_designs), max([max([len(design) for design in beacon]) for beacon in beacon_designs])), dtype=int)
-    for i, (beacon, designs) in enumerate(beacon_designs):
-        for j, design in enumerate(designs):
-            beacon_design_effect_table[i, j] = design[0]
-            beacon_design_cost_table[i, j] = design[1]
-            beacon_design_beacon_cost[i, j] = reference_list.index(beacon['name'])
-            beacon_design_electric_cost[i, j] = -1 * beacon['energy_usage_raw']
+    beacon_design_count = sum([len(designs) for beacon, designs in beacon_designs])+1
+    beacon_desing_one_form = np.array([k for k in itertools.accumulate([len(designs) for beacon, designs in beacon_designs])])
+
+    beacon_design_effect_multi = np.zeros(beacon_design_count)
+    beacon_design_cost_multi = np.zeros(beacon_design_count)
+    beacon_design_beacon_cost_index = np.zeros(beacon_design_count, dtype=int)
+    beacon_design_electric_cost = np.zeros(beacon_design_count)
+    i = 1
+    for j, (beacon, designs) in enumerate(beacon_designs):
+        for design in designs:
+            beacon_design_effect_multi[i] = design[0] * beacon['distribution_effectivity']
+            beacon_design_cost_multi[i] = design[1]
+            beacon_design_beacon_cost_index[i] = reference_list.index(beacon['name'])
+            beacon_design_electric_cost[i] = -1 * beacon['energy_usage_raw'] * design[1]
+            i += 1
+        assert beacon_desing_one_form[j]==(i-1)
     electric_index = reference_list.index('electric')
 
-    internal_effect_matrix = np.zeros((len(ALL_MODULE_EFFECTS), allowed_internal_module_count))
+    internal_effect_matrix = np.zeros((len(ACTIVE_MODULE_EFFECTS), allowed_internal_module_count))
     internal_cost_matrix = np.zeros((len(reference_list), allowed_internal_module_count))
     for i, module in enumerate(allowed_internal_modules):
-        for j, effect_name in enumerate(ALL_MODULE_EFFECTS):
+        for j, effect_name in enumerate(ACTIVE_MODULE_EFFECTS):
             if effect_name in module['effect'].keys():
                 internal_effect_matrix[j, i] = module['effect'][effect_name]['bonus']
+        internal_cost_matrix[reference_list.index(module['name']), i] = 1
 
-    external_effect_matrix = np.zeros((len(ALL_MODULE_EFFECTS), allowed_external_module_count))
+    external_effect_matrix = np.zeros((len(ACTIVE_MODULE_EFFECTS), allowed_external_module_count))
     external_cost_matrix = np.zeros((len(reference_list), allowed_external_module_count))
     for i, module in enumerate(allowed_external_modules):
-        for j, effect_name in enumerate(ALL_MODULE_EFFECTS):
+        for j, effect_name in enumerate(ACTIVE_MODULE_EFFECTS):
             if effect_name in module['effect'].keys():
                 external_effect_matrix[j, i] = module['effect'][effect_name]['bonus']
+        external_cost_matrix[reference_list.index(module['name']), i] = 1
 
     def dual_func(points: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         if len(points.shape)==1 or points.shape[1]==1:
-            points = points.reshape((1, -1))
+            points = points.reshape(1, -1)
 
         if points.shape[1]==0:
-            return np.zeros((0, len(ALL_MODULE_EFFECTS))), np.zeros((0, len(reference_list))), np.zeros((0, len(ALL_MODULE_EFFECTS)))
+            return np.zeros((0, len(ACTIVE_MODULE_EFFECTS))), np.zeros((0, len(reference_list))), np.zeros((0, len(ACTIVE_MODULE_EFFECTS)))
 
         internal_module_portion = points[:, :allowed_internal_module_count]
-        beacon_module_portion = points[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count]
+        external_module_portion = points[:, allowed_internal_module_count:allowed_internal_module_count+allowed_external_module_count]
         beacon_design_portion = points[:, allowed_internal_module_count+allowed_external_module_count:]
 
-        chosen_beacon_design = (-1 * beacon_design_portion.sum(axis=1)==0 + np.argmax(beacon_design_portion, axis=1) + 1).astype(int)
-        chosen_beacon_design_index = beacon_design_portion.sum(axis=1).astype(int)
-        beacon_effect_multi = beacon_design_effect_table[chosen_beacon_design, chosen_beacon_design_index]
-        beacon_cost_multi = beacon_design_cost_table[chosen_beacon_design, chosen_beacon_design_index]
+        chosen_beacon_design = (beacon_desing_one_form @ beacon_design_portion.T).astype(int)
+        beacon_effect_multi = beacon_design_effect_multi[chosen_beacon_design]
+        beacon_cost_multi = beacon_design_cost_multi[chosen_beacon_design]
         beacon_direct_cost = np.zeros((len(reference_list), points.shape[0]))
-        beacon_direct_cost[beacon_design_beacon_cost[chosen_beacon_design, chosen_beacon_design_index], :] = beacon_cost_multi
+        beacon_direct_cost[beacon_design_beacon_cost_index[chosen_beacon_design], :] = beacon_cost_multi
         beacon_electric_effect = np.zeros((len(reference_list), points.shape[0]))
-        beacon_electric_effect[electric_index, :] = beacon_cost_multi * beacon_design_electric_cost[chosen_beacon_design, chosen_beacon_design_index]
+        beacon_electric_effect[electric_index, :] = beacon_cost_multi * beacon_design_electric_cost[chosen_beacon_design]
 
         internal_effect = internal_effect_matrix @ internal_module_portion.T
         internal_cost = internal_cost_matrix @ internal_module_portion.T
 
-        external_effect = (external_effect_matrix @ beacon_module_portion.T) * beacon_effect_multi
-        external_cost = (external_cost_matrix @ beacon_module_portion.T) * beacon_cost_multi + beacon_direct_cost
+        external_effect = (external_effect_matrix @ external_module_portion.T) * beacon_effect_multi
+        external_cost = (external_cost_matrix @ external_module_portion.T) * beacon_cost_multi + beacon_direct_cost
 
-        multilinear_effect = np.ones([points.shape[0]]+[2]*len(ALL_MODULE_EFFECTS))
-        for i in range(points.shape[0]):
-            multilinear_effect[i] += MODULE_MULTILINEAR_EFFECT_SELECTORS[i] * (internal_effect + external_effect) #mins and maxes
+        total_effect = (internal_effect + external_effect).T + 1
+        total_effect = (total_effect + MODULE_EFFECT_MINIMUMS_NUMPY + np.abs(total_effect - MODULE_EFFECT_MINIMUMS_NUMPY))/2
 
-        return multilinear_effect.reshape((points.shape[0], -1)), beacon_electric_effect.T, (internal_cost + external_cost).T
+        multilinear_effect = (np.einsum("ij,jklm->ijklm", total_effect, MODULE_MULTILINEAR_EFFECT_SELECTORS) + MODULE_MULTILINEAR_VOID_SELECTORS[None, ]).prod(axis=1)
+        multilinear_effect = multilinear_effect.reshape(-1, 1<<len(ACTIVE_MODULE_EFFECTS))
+
+        return multilinear_effect, beacon_electric_effect.T, (internal_cost + external_cost).T
 
     return dual_func
 

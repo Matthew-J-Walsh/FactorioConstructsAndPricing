@@ -40,7 +40,7 @@ BEST_LP_SOLVER: CallableDenseSolver
 
 ALL_MODULE_EFFECTS = ['consumption', 'speed', 'productivity', 'pollution'] 
 ACTIVE_MODULE_EFFECTS = ['consumption', 'speed', 'productivity'] 
-MODULE_EFFECT_MINIMUMS = {'consumption': Fraction(1, 5), 'speed': Fraction(1, 5), 'productivity': Fraction(1)} 
+MODULE_EFFECT_MINIMUMS = {'consumption': Fraction(4, 5), 'speed': Fraction(4, 5), 'productivity': Fraction(1)} 
 def multilienar_effect_ordering():
     """
     Creates an effect ordering, list of tuples, for the standard effect multilinear form.
@@ -53,17 +53,29 @@ def multilienar_effect_ordering():
         for c in itertools.combinations(range(l), i):
             ordering.append(set(c))
     return ordering
-MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
-MODULE_EFFECT_MINIMUMS_NUMPY = np.array([1 - MODULE_EFFECT_MINIMUMS[eff] for eff in ACTIVE_MODULE_EFFECTS])
+#MODULE_EFFECT_ORDERING = multilienar_effect_ordering()
+MODULE_EFFECT_MINIMUMS_NUMPY = np.array([float(1 - MODULE_EFFECT_MINIMUMS[eff]) for eff in ACTIVE_MODULE_EFFECTS], dtype=float)
+
+def _new_multilienar_effect_ordering() -> list[set[int]]:
+    ordering = np.empty([2]*len(ACTIVE_MODULE_EFFECTS), dtype=object)
+    for index in np.ndindex(ordering.shape):
+        ordering[index] = set()
+    for dim in range(len(ordering.shape)):
+        for index in np.ndindex(ordering.shape):
+            if index[dim]==1:
+                ordering[index].add(dim)
+    return ordering.reshape(-1).tolist()
+MODULE_EFFECT_ORDERING = _new_multilienar_effect_ordering()
 
 def get_module_multilinear_effect_selector(idx: int) -> np.ndarray:
-    selector = np.zeros([2]*len(ALL_MODULE_EFFECTS))
-    keys = [slice(None)]*len(ALL_MODULE_EFFECTS)
+    selector = np.zeros([2]*len(ACTIVE_MODULE_EFFECTS))
+    keys = [slice(None)]*len(ACTIVE_MODULE_EFFECTS)
     keys[idx] = 1 # type: ignore
     selector[tuple(keys)] = 1
-    return selector
+    return selector.reshape(1, *([2]*len(ACTIVE_MODULE_EFFECTS)))
 
-MODULE_MULTILINEAR_EFFECT_SELECTORS = [get_module_multilinear_effect_selector(i) for i in range(len(ALL_MODULE_EFFECTS))]
+MODULE_MULTILINEAR_EFFECT_SELECTORS = np.concatenate([get_module_multilinear_effect_selector(i) for i in range(len(ACTIVE_MODULE_EFFECTS))], axis=0)
+MODULE_MULTILINEAR_VOID_SELECTORS = np.concatenate([1-get_module_multilinear_effect_selector(i) for i in range(len(ACTIVE_MODULE_EFFECTS))], axis=0)
 
 DEBUG_BLOCK_MODULES: bool = False #Should modules be removed from pricing to speed up debugging of non-module related issues.
 DEBUG_BLOCK_BEACONS: bool = False or DEBUG_BLOCK_MODULES #Should modules be removed from pricing to speed up debugging of non-module related issues.
