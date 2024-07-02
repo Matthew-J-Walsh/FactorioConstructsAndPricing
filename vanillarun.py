@@ -9,7 +9,7 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle", force_rebuild: bool = False):
+def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle", force_rebuild: bool = True):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
@@ -22,13 +22,13 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
         print("Instance built and saved.")
 
     if isinstance(optimization_mode, dict):
-        uncompiled_cost_function = hybrid_cost_function(optimization_mode, vanilla)
+        uncompiled_cost_function: CostFunction = hybrid_cost_function(optimization_mode, vanilla)
     elif optimization_mode in ['standard', 'basic', 'simple', 'baseline', 'dual']:
-        uncompiled_cost_function = standard_cost_function
+        uncompiled_cost_function: CostFunction = standard_cost_function
     elif optimization_mode in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
-        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies, known_technologies: spatial_cost_function(vanilla.spatial_pricing, construct, lookup_indicies, known_technologies)
+        uncompiled_cost_function: CostFunction = lambda pricing_vector, construct, point_evaluations: spatial_cost_function(vanilla.spatial_pricing, construct, point_evaluations)
     elif optimization_mode in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
-        uncompiled_cost_function = lambda pricing_vector, construct, lookup_indicies, known_technologies: ore_cost_function(vanilla.raw_ore_pricing, construct, lookup_indicies, known_technologies)
+        uncompiled_cost_function: CostFunction = lambda pricing_vector, construct, point_evaluations: ore_cost_function(vanilla.raw_ore_pricing, construct, point_evaluations)
     else:
         raise ValueError(optimization_mode)
     
@@ -217,23 +217,6 @@ def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: 
     vanilla_chain.retarget_all()
 
     print("Dumping to Excel.")
-
-    logging.info("=============================================")
-    for cc in vanilla.complex_constructs:
-        if cc.ident in ["steel-plate in electric-furnace with electric", "automation-science-pack in assembling-machine-3 with electric", "logistic-science-pack in assembling-machine-3 with electric"]:
-            assert isinstance(cc.subconstructs[0], CompiledConstruct)
-            p0_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
-            for k, v in vanilla_chain.chain[-3].full_optimal_pricing_model.items():
-                p0_j[vanilla.reference_list.index(k)] = v
-            cost_function = lambda construct, lookup_indicies: uncompiled_cost_function(p0_j, construct, lookup_indicies, vanilla_chain.chain[-2].known_technologies)
-            p_j = np.zeros(len(vanilla.reference_list), dtype=np.longdouble)
-            for k, v in vanilla_chain.chain[-2].full_optimal_pricing_model.items():
-                assert not np.isnan(v), k
-                p_j[vanilla.reference_list.index(k)] = v
-            priced_indices =  np.array([vanilla.reference_list.index(k) for k in vanilla_chain.chain[-3].optimal_pricing_model.keys()])
-            inverse_priced_indices = np.ones(len(vanilla.reference_list))
-            inverse_priced_indices[priced_indices] = 0
-            logging.info(cc.subconstructs[0].efficency_dump(cost_function, inverse_priced_indices, p_j, vanilla_chain.chain[-2].known_technologies))
 
     vanilla_chain.dump_to_excel(output_file)
 

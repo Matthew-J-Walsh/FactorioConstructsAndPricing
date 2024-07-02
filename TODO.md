@@ -2,11 +2,18 @@
 
 This file is a todo list of things with various levels of importance. List is in no particular order.
 
-# Asymptotic speedups
 
-## Optimization of table lookups
 
-Implement the optimizations of table lookups to minimize the amount of possible constructs that are actually calculated for.
+
+# Expansion Stuff
+
+## Intra/InterConstruct Transport Cost Tax
+
+Impose specific costs to all unstabilized inputs and outputs for a ComplexConstruct. This would effectively be like declaring "Everything in this construct is moved around via ___", and allow different levels of constructs to have different types of transport costs.
+
+## Surface Restrictions
+
+Classify Constructs by surface, prohibiting specific constructs (some resources, throwing worthless items into the void) from being used depending on the factory surface. Should allow for inter-surface factories.
 
 ## Expansion Beacon setups
 
@@ -15,9 +22,7 @@ What updates have to be done to handle diminishing beacons?
 
 # Speedups
 
-## true_new_column_mask using values other than names?
-
-## Different solvers? Pulp solver ojective function dot product?
+## Different solvers?
 
 
 # Misc improvements
@@ -29,6 +34,20 @@ What updates have to be done to handle diminishing beacons?
 ## Special case where there are disjoint research bonuses for productivity???
 
 ## Fix many typing comments that changed
+
+## Beacon Setups naming in construct
+
+## Changes in cost functions due to effective area and the like
+
+## Lots of naming stuff
+
+Vectors vs columns
+setups vs designs
+value vs evaluation
+etc.
+Additionally private vs public class variables
+
+## We aren't using base productivity
 
 
 # Progression accuracy

@@ -17,3 +17,5 @@ Af.txt
 Aff.txt
 *.xlsx
 *.pickle
+*.profile
+*.pstats

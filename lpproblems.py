@@ -4,7 +4,7 @@ from lookuptables import *
 from utils import *
 from lpsolvers import *
 
-def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
+def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
                                        starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector
 
@@ -14,8 +14,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         Construct being optimized, usually a ComplexConstruct of the entire factory
     u_j : np.ndarray
         Target output vector
-    p0_j : np.ndarray
-        Initial pricing model
+    cost_function : CompiledCostFunction
+        Cost function to use
     inverse_priced_indices : np.ndarray
         What indices of the pricing vector aren't priced
     known_technologies : TechnologicalLimitation
@@ -48,6 +48,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
 
         logging.info("Starting iteration "+str(i)+" of current optimization with "+str(len(vector_table.ident))+" columns.")
         i += 1
+        if i>100:
+            raise RuntimeError()
         primal, dual = BEST_LP_SOLVER(vector_table.vector, u_j, vector_table.cost)
         if primal is None or dual is None:
             logging.error("Row losses: "+str(np.where(np.logical_and(old_valid_rows, np.logical_not(valid_rows)))[0]))
@@ -63,8 +65,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         new_vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).reduced.sorted
         new_vector_table.mask(linear_transform_is_gt(new_vector_table.vector.T, dual, .99 * new_vector_table.cost))
         
-        new_mask = true_new_column_mask(vector_table.ident, new_vector_table.ident)
-        true_news = np.where(new_mask)[0]
+        true_news = true_new_column_mask(vector_table.vector, vector_table.cost, new_vector_table.vector, new_vector_table.cost)
         if len(true_news)==0:
             break
 
@@ -76,7 +77,7 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
 
     return primal, dual, vector_table
 
-def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: Callable[[CompiledConstruct, np.ndarray], np.ndarray], inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
+def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
                                               manual_constructs: ColumnTable, starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
     With extra columns that shouldn't be filtered and have max priority cost
@@ -87,8 +88,8 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         Construct being optimized, usually a ComplexConstruct of the entire factory
     u_j : np.ndarray
         Target output vector
-    p0_j : np.ndarray
-        Initial pricing model
+    cost_function : CompiledCostFunction
+        Cost function to use
     inverse_priced_indices : np.ndarray
         What indices of the pricing vector aren't priced
     known_technologies : TechnologicalLimitation
@@ -141,8 +142,7 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         new_vector_table = construct.vectors(cost_function, inverse_priced_indices, dual, known_technologies).shadow_attachment(manual_constructs).reduced.sorted
         new_vector_table = new_vector_table.mask(linear_transform_is_gt(new_vector_table.vector.T, dual, .99 * new_vector_table.cost))
 
-        new_mask = true_new_column_mask(vector_table.ident, new_vector_table.ident)
-        true_news = np.where(new_mask)[0]
+        true_news = true_new_column_mask(vector_table.vector, vector_table.cost, new_vector_table.vector, new_vector_table.cost)
         if len(true_news)==0:
             break
 
@@ -157,29 +157,51 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
 
     return primal, dual, vector_table
 
-def true_new_column_mask(idents, new_idents) -> np.ndarray:
-    """Calculates a mask for a new set of idents that removes already present elements
+def true_new_column_mask(columns: np.ndarray, costs: np.ndarray, new_columns: np.ndarray, new_costs: np.ndarray) -> np.ndarray:
+    """Determines what columns of the new columns are not present in the reference columns, considers costs
 
     Parameters
     ----------
-    idents : _type_
-        Old ident array
-    new_idents : _type_
-        New ident array
+    columns : np.ndarray
+        Reference columns
+    costs : np.ndarray
+        Reference costs
+    new_columns : np.ndarray
+        New columns
+    new_costs : np.ndarray
+        New costs
 
     Returns
     -------
     np.ndarray
-        Mask of columns that are new
+        Column indicies of the new columns that are actually new
     """    
-    new_mask = np.full(new_idents.shape[0], True, dtype=bool)
-    for i in range(new_mask.shape[0]):
-        for j in range(idents.shape[0]):
-            if new_idents[i]==idents[j]:
-                new_mask[i] = False
-                break
-            if hash(new_idents[i]) < hash(idents[j]):
-                break
-    return new_mask
+    c_hash = columns.sum(axis=0)
+    n_hash = new_columns.sum(axis=0)
 
+    mask = np.full(new_columns.shape[1], True, dtype=bool)
 
+    for ci, ni in iterate_over_equals(c_hash, n_hash):
+        if (columns[:, ci]==new_columns[:, ni]).all() and costs[ci]==new_costs[ni]:
+            mask[ni] = False
+    
+    return np.where(mask)[0]
+
+def iterate_over_equals(a1: np.ndarray, a2: np.ndarray) -> Iterator[tuple[int, int]]:
+    """Creates an iterator for where elements of a1 equal elements of a2
+
+    Parameters
+    ----------
+    a1 : np.ndarray
+        First array
+    a2 : np.ndarray
+        Second array
+
+    Yields
+    ------
+    Iterator[tuple[int, int]]
+        Iterator of indicies of the first and second array.
+    """    
+    for i, v1 in enumerate(a1):
+        for j in np.where(a2 == v1)[0]:
+            yield (i, j)

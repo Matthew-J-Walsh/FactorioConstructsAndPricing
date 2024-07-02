@@ -1,9 +1,26 @@
+from __future__ import annotations
+
 from globalsandimports import *
 from utils import *
-import lookuptables as luts
 
+if TYPE_CHECKING:
+    import lookuptables as luts
+    import constructs as cstcts
+    import tools as tools
 
-def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
+class CostFunction(Protocol):
+    """Class for typing of all cost functions before getting a pricing vector.
+    """    
+    def __call__(self, pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        raise NotImplementedError
+    
+class CompiledCostFunction(Protocol):
+    """Class for typing of all cost functions after getting a pricing vector.
+    """    
+    def __call__(self, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        raise NotImplementedError
+
+def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """Cost function based on previous dual vector
 
     Parameters
@@ -22,12 +39,12 @@ def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledC
     np.ndarray
         Cost array
     """    
-    out = construct.lookup_table(known_technologies).cost_transform[lookup_indicies, :] @ pricing_vector + np.dot(construct.base_cost_vector, pricing_vector)
+    out = point_evaluations.beacon_cost @ pricing_vector + np.dot(construct.base_cost_vector, pricing_vector)
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
 
-def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
+def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """Cost function based on ore tiles used
 
     Parameters
@@ -47,11 +64,11 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
         Cost array
     """    
     if construct.isa_mining_drill:
-        return standard_cost_function(pricing_vector, construct, lookup_indicies, known_technologies)
+        return standard_cost_function(pricing_vector, construct, point_evaluations)
     else:
-        return np.zeros(lookup_indicies.shape[0])
+        return np.zeros(point_evaluations.beacon_cost.shape[0])
 
-def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
+def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """Cost function based on ore produced (not mined).
     Doesn't account for productivity
 
@@ -74,12 +91,12 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
     effect_transform_positive = construct.effect_transform.copy()
     effect_transform_positive[effect_transform_positive < 0] = 0
     effect_vector = effect_transform_positive @ pricing_vector
-    out = construct.lookup_table(known_technologies).multilinear_effect_transform[lookup_indicies, :] @ effect_vector
+    out = point_evaluations.multilinear_effect @ effect_vector
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
 
-def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray, known_technologies: TechnologicalLimitation) -> np.ndarray:
+def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """Cost function based on tiles taken up. Useful for space platforms
 
     Parameters
@@ -98,16 +115,16 @@ def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCons
     np.ndarray
         Cost array
     """    
-    out = construct.lookup_table(known_technologies).effective_area_table[lookup_indicies] + construct.effective_area
+    out = point_evaluations.effective_area + construct.effective_area
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
 
-def throughput_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, lookup_indicies: np.ndarray) -> np.ndarray:
+def throughput_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """TODO: Based on item throughput rate in trains?"""
     raise NotImplementedError()
 
-def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]:
+def hybrid_cost_function(input: dict[str, Real], instance: tools.FactorioInstance) -> CostFunction:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)
     'spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space' specify the spatial cost method
@@ -125,26 +142,26 @@ def hybrid_cost_function(input: dict[str, Real], instance) -> Callable[[np.ndarr
     Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
         Uncompiled cost function
     """    
-    func = lambda pricing_vector, construct, lookup_indicies, known_technologies: np.zeros(lookup_indicies.shape[0])
+    func = lambda pricing_vector, construct, point_evaluations: np.zeros(point_evaluations.beacon_cost.shape[0])
 
     for phrase in ['standard', 'basic', 'simple', 'baseline', 'dual']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
-                func(pricing_vector, construct, lookup_indicies, known_technologies) + \
-                    input[phrase] * standard_cost_function(pricing_vector, construct, lookup_indicies, known_technologies)
+            func = lambda pricing_vector, construct, point_evaluations: \
+                func(pricing_vector, construct, point_evaluations) + \
+                    input[phrase] * standard_cost_function(pricing_vector, construct, point_evaluations)
             break
 
     for phrase in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
-                func(pricing_vector, construct, lookup_indicies, known_technologies) + input[phrase] * spatial_cost_function(instance.spatial_pricing, construct, lookup_indicies, known_technologies)
+            func = lambda pricing_vector, construct, point_evaluations: \
+                func(pricing_vector, construct, point_evaluations) + input[phrase] * spatial_cost_function(instance.spatial_pricing, construct, point_evaluations)
             break
     
     for phrase in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
         if phrase in input.keys():
-            func = lambda pricing_vector, construct, lookup_indicies, known_technologies: \
-                func(pricing_vector, construct, lookup_indicies, known_technologies) + \
-                    input[phrase] * ore_cost_function(instance.raw_ore_pricing, construct, lookup_indicies, known_technologies)
+            func = lambda pricing_vector, construct, point_evaluations: \
+                func(pricing_vector, construct, point_evaluations) + \
+                    input[phrase] * ore_cost_function(instance.raw_ore_pricing, construct, point_evaluations)
             break
     
     return func

@@ -28,16 +28,16 @@ def pulp_dense_solver(A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray
     """
     problem = pl.LpProblem()
     variables = pl.LpVariable.dicts("x", range(A.shape[1]), lowBound=0)
-    var_arr = np.fromiter(variables.values(), dtype=object)
-
-    if not c is None:
-        problem += np.dot(var_arr, c)
+    s = 0
+    for i in range(c.shape[0]):
+        s += c[i]*variables[i]
+    problem += s
 
     constraint_mask = np.full(b.shape[0], True, dtype=bool)
 
     summations = np.zeros(A.shape[0], dtype=object)
     for j, i in zip(*np.where(A!=0)):
-        summations[j] += A[j, i] * var_arr[i]
+        summations[j] += A[j, i] * variables[i]
 
     for j in range(b.shape[0]):
         if isinstance(summations[j], Real):
