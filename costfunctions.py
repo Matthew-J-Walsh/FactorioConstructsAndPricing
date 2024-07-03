@@ -66,6 +66,7 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
     if construct.isa_mining_drill:
         return standard_cost_function(pricing_vector, construct, point_evaluations)
     else:
+        #print(point_evaluations.beacon_cost.shape)
         return np.zeros(point_evaluations.beacon_cost.shape[0])
 
 def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:

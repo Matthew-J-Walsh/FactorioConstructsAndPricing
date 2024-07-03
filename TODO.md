@@ -24,6 +24,13 @@ What updates have to be done to handle diminishing beacons?
 
 ## Different solvers?
 
+## Calculation orders
+
+Should be make an array and fill it rather than concat?
+np.einsum vs np.kron
+Transposing stuff outside function
+Combining beacon operations together?
+
 
 # Misc improvements
 

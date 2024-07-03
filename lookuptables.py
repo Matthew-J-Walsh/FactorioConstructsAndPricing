@@ -277,8 +277,10 @@ class ModuleLookupTable:
         if dual_vector is None:
             point = np.zeros(self.point_length)
             evaluation = self.get_point_evaluations(point)
+            #print("B")
         else:
             point, evaluation = self.search(construct, cost_function, inverse_priced_indices, dual_vector)
+            #print("C")
         module_string = (" with module setup: " + " & ".join([self.string_table[i]+" x"+str(v) for i, v in enumerate(point) if v>0]) if np.sum(point)>0 else "")
         return evaluation, module_string
     
@@ -500,7 +502,8 @@ class ModuleLookupTable:
 
         effective_area = self._beacon_areas[chosen_beacon_design] #1.4
 
-        return PointEvaluations(multilinear_effect, beacon_electric_effect.T, internal_cost + external_cost, effective_area) #3.2
+        return PointEvaluations(multilinear_effect.reshape(points.shape[0], -1), beacon_electric_effect.T.reshape(points.shape[0], -1), 
+                                (internal_cost + external_cost).reshape(points.shape[0], -1), effective_area.reshape(points.shape[0], -1)) #3.2
 
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str("UNKNOWN TODO")
@@ -537,8 +540,8 @@ def get_best_point(construct: CompiledConstruct, effect_vector: np.ndarray, cost
         best_point_index = int((point_values / point_costs).argmax())
         best_point_value = point_values[best_point_index] / point_costs[best_point_index]
     #best_new_point_cost = new_point_costs[best_new_point_index]
-    best_point_evaluation = PointEvaluations(point_evaluations.multilinear_effect[best_point_index], point_evaluations.running_cost[best_point_index], 
-                                             point_evaluations.beacon_cost[best_point_index] ,point_evaluations.effective_area[best_point_index])
+    best_point_evaluation = PointEvaluations(point_evaluations.multilinear_effect[best_point_index].reshape(1, -1), point_evaluations.running_cost[best_point_index].reshape(1, -1), 
+                                             point_evaluations.beacon_cost[best_point_index].reshape(1, -1) ,point_evaluations.effective_area[best_point_index].reshape(1, -1))
     return best_point_value, best_point_index, best_point_evaluation
 
 _LOOKUP_TABLES: list[ModuleLookupTable] = []
@@ -709,6 +712,7 @@ class CompiledConstruct:
         """
         if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost_vector.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost_vector.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
+            #print("A")
         else:
             lookup_table = self.lookup_table(known_technologies)
             speed_multi = self.speed_multiplier(known_technologies)
@@ -728,6 +732,9 @@ class CompiledConstruct:
 
         assert column.shape[0] == self.base_cost_vector.shape[0]
         assert true_cost.shape[0] == self.base_cost_vector.shape[0]
+        assert column.shape[1] == true_cost.shape[1]
+        assert column.shape[1] == cost.shape[0]
+        assert column.shape[1] == ident.shape[0]
 
         return ColumnTable(column, cost, true_cost, ident)
     
@@ -852,6 +859,12 @@ class ComplexConstruct:
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
         table = [sc.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]
         out = ColumnTable.sum(table, inverse_priced_indices.shape[0])
+
+        assert out.vector.shape[0] == out.true_cost.shape[0]
+        assert out.vector.shape[1] == out.true_cost.shape[1]
+        assert out.vector.shape[1] == out.cost.shape[0]
+        assert out.vector.shape[1] == out.ident.shape[0]
+
         assert out.vector.shape[0]==self.subconstructs[0].subconstructs[0].base_cost_vector.shape[0] # type: ignore
         return out # type: ignore
 
