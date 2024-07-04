@@ -305,7 +305,7 @@ class FactorioInstance():
 
         if use_manual:
             logging.info("Starting a manual program solving.")
-            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.vectors(self.manual_constructs, known_technologies), recovered_run)
+            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.columns(self.manual_constructs, known_technologies), recovered_run)
         else:
             logging.info("Starting a program solving.")
             s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, recovered_run)
@@ -323,20 +323,20 @@ class FactorioInstance():
         positives = np.logical_not(np.isclose(s_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))
         for i in range(s_i.shape[0]):
             if positives[i]:
-                s = s + s_i[i] * R_vector_table.ident[i]
+                s = s + s_i[i] * R_vector_table.idents[i]
         
         k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, inverse_priced_indices, p_j, known_technologies, R_vector_table.valid_rows, self.post_analyses)
 
-        fc_i = R_vector_table.true_cost @ s_i
+        fc_i = R_vector_table.true_costs @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
         full_material_cost = CompressedVector({self.reference_list[i]: fc_i[i] for i in range(fc_i.shape[0]) if fc_i[i]>0})
         for tempk, tempv in full_material_cost.items():
-            assert tempk in self.active_list, str(tempk)+": "+str(tempv)+", "+str(R_vector_table.ident[np.where(R_vector_table.true_cost[self.reference_list.index(tempk)]!=0)])
+            assert tempk in self.active_list, str(tempk)+": "+str(tempv)+", "+str(R_vector_table.idents[np.where(R_vector_table.true_costs[self.reference_list.index(tempk)]!=0)])
 
         #nmv, nmc, nmtc, nmi = self.compiled.reduce(cost_function, inverse_priced_indices, None, known_technologies)
-        nm_vector_table = self.compiled.vectors(cost_function, inverse_priced_indices, None, known_technologies).reduced
-        nme = (nm_vector_table.vector.T @ p_j) / nm_vector_table.cost
-        nmv = CompressedVector({list(k.keys())[0]: nme[i] for i, k in enumerate(nm_vector_table.ident) if len(k.keys())==1})
+        nm_vector_table = self.compiled.columns(cost_function, inverse_priced_indices, None, known_technologies).reduced
+        nme = (nm_vector_table.columns.T @ p_j) / nm_vector_table.costs
+        nmv = CompressedVector({list(k.keys())[0]: nme[i] for i, k in enumerate(nm_vector_table.idents) if len(k.keys())==1})
 
         zs = R_vector_table.find_zeros(s_i)
 
@@ -387,7 +387,7 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: CompiledCos
     inverse_priced_indices : np.ndarray
         What indices of the pricing vector aren't priced
     dual_vector : np.ndarray
-        Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+        Dual vector to calculate with, if None is given, give the module-less beacon-less design
     known_technologies : TechnologicalLimitation
         Current tech level to calculate for
     valid_rows : np.ndarray
@@ -987,7 +987,7 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
     inverse_priced_indices = np.ones(len(instance.reference_list))
     inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items], dtype=np.int32)] = 0
 
-    R_vector_table = instance.compiled.vectors(cost_function, 
+    R_vector_table = instance.compiled.columns(cost_function, 
                                                             inverse_priced_indices, 
                                                             None, known_technologies).reduced
     #logging.info([k for k in N_i])
@@ -1015,8 +1015,8 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
                 target_names = material_target_names
             else:
                 factory_type = "manual"
-                manual_constructs = ManualConstruct.vectors(instance.manual_constructs, known_technologies)
-                R_vector_table = instance.compiled.vectors(cost_function, 
+                manual_constructs = ManualConstruct.columns(instance.manual_constructs, known_technologies)
+                R_vector_table = instance.compiled.columns(cost_function, 
                                                             inverse_priced_indices, 
                                                             None, known_technologies).shadow_attachment(manual_constructs).reduced
                 target_names = _new_material_factory_targets(instance, R_vector_table.valid_rows)# + ['electric']

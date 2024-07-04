@@ -39,7 +39,7 @@ def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledC
     np.ndarray
         Cost array
     """    
-    out = point_evaluations.beacon_cost @ pricing_vector + np.dot(construct.base_cost_vector, pricing_vector)
+    out = point_evaluations.beacon_cost @ pricing_vector + np.dot(construct.base_cost, pricing_vector)
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out

@@ -139,7 +139,7 @@ class ManualConstruct:
     """
     ident: str
     deltas: CompressedVector
-    effect_vector: np.ndarray
+    _column: np.ndarray
     limit: TechnologicalLimitation
 
     def __init__(self, ident: str, deltas: CompressedVector, limit: TechnologicalLimitation, instance: FactorioInstance):
@@ -157,13 +157,13 @@ class ManualConstruct:
         """        
         self.ident = ident
         self.deltas = deltas
-        self.effect_vector = np.zeros(len(instance.reference_list))
+        self._column = np.zeros(len(instance.reference_list))
         for k, v in deltas.items():
-            self.effect_vector[instance.reference_list.index(k)] = v
+            self._column[instance.reference_list.index(k)] = v
         self.limit = limit
 
-    def vector(self, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, str | None]:
-        """Gets the vector for this construct
+    def column(self, known_technologies: TechnologicalLimitation) -> tuple[np.ndarray, float, str | None]:
+        """Gets the column for this construct
 
         Parameters
         ----------
@@ -173,44 +173,44 @@ class ManualConstruct:
         Returns
         -------
         tuple[np.ndarray, float, str | None]
-            Effect vector
+            Effect column
             Cost
             Ident
         """        
         if self.limit >= known_technologies:
-            return self.effect_vector, 1, None
+            return self._column, 1, None
         else:
-            return np.zeros_like(self.effect_vector), 0, self.ident
+            return np.zeros_like(self._column), 0, self.ident
         
     @staticmethod
-    def vectors(all_constructs: Collection[ManualConstruct], known_technologies: TechnologicalLimitation) -> ColumnTable:
-        """Calculates the vectors for all ManualConstructs
+    def columns(all_constructs: Collection[ManualConstruct], known_technologies: TechnologicalLimitation) -> ColumnTable:
+        """Calculates the columns for all ManualConstructs
 
         Parameters
         ----------
         all_constructs : Collection[ManualConstruct]
-            All ManualConstructs to calculate vectors for
+            All ManualConstructs to calculate columns for
         known_technologies : TechnologicalLimitation
             Current tech level
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray[CompressedVector, Any]]
-            Matrix of effect vectors,
+            Matrix of effect columns,
             Vector of costs,
             Matrix of exact costs,
-            Ident vectors
+            Ident columns
         """        
         construct_arr: np.ndarray[ManualConstruct, Any] = np.array(all_constructs, dtype=ManualConstruct)
         mask = np.array([known_technologies >= construct.limit for construct in construct_arr])
         construct_arr = construct_arr[mask]
 
-        vectors = np.vstack([construct.effect_vector for construct in construct_arr]).T
+        columns = np.vstack([construct.effect_vector for construct in construct_arr]).T
         costs = np.ones_like(construct_arr, dtype=np.float64)
         true_costs = np.vstack([np.zeros_like(construct.effect_vector) for construct in construct_arr]).T
         idents = np.concatenate([np.array([CompressedVector({construct.ident: 1})]) for construct in construct_arr])
 
-        return ColumnTable(vectors, costs, true_costs, idents)
+        return ColumnTable(columns, costs, true_costs, idents)
     
     def __repr__(self) -> str:
         return str(self.ident)+\
@@ -218,57 +218,8 @@ class ManualConstruct:
                 "\n\tRequiring: "+str(self.limit)
                 #"\n\tWith a vector of: "+str(self.effect_vector)+\
 
-def module_setup_generator(allowed_modules: list[tuple[str, bool, bool]], internal_module_limit: int, building_size: tuple[int, int], beacon: dict | None = None) -> Generator[tuple[CompressedVector, CompressedVector], None, None]:
-    """Returns an generator over the set of possible module setups.
-
-    Parameters
-    ----------
-    allowed_modules : list[tuple[str, bool, bool]]
-        Each tuple represents a module, if it can be used inside the building, and if it can be used in beacons for the building
-    internal_module_limit : int
-        The number of internal module slots
-    building_size : tuple[int, int]
-        Size of building's tile
-    beacon : dict | None, optional
-        Beacon being used, by default None
-
-    Yields
-    ------
-    Generator[tuple[CompressedVector, CompressedVector], None, None]
-        All the modules effecting an average building
-        Costs per building
-    """    
-    if len(allowed_modules)==0 or DEBUG_BLOCK_MODULES:
-        yield CompressedVector(), CompressedVector()
-    else:
-        internal_modules = [m for m, i, _ in allowed_modules if i]
-        external_modules = [m for m, _, e in allowed_modules if e]
-
-        if not beacon is None and not DEBUG_BLOCK_BEACONS:
-            for effecting_beacon_count, beacons_per_building in beacon_setups(building_size, beacon):
-                for internal_mod_count in range(internal_module_limit+1):
-                    for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
-                        #for external_mod_setup in itertools.combinations_with_replacement(exteral_modules, beacon_count*beacon['module_specification']['module_slots']): #too big
-                        for external_mod in external_modules:
-                            effect_vector = CompressedVector()
-                            cost_vector = CompressedVector()
-                            for mod in internal_mod_setup:
-                                effect_vector = effect_vector + CompressedVector({mod+"|i": 1})
-                                cost_vector = cost_vector + CompressedVector({mod: 1})
-                            yield effect_vector + CompressedVector({external_mod+"|e": effecting_beacon_count * beacon['module_specification']['module_slots']}), \
-                                  cost_vector + CompressedVector({beacon['name']: 1 * beacons_per_building}) + CompressedVector({external_mod: 1 * beacons_per_building * beacon['module_specification']['module_slots']}) # type: ignore
-        else:
-            for internal_mod_count in range(internal_module_limit+1):
-                for internal_mod_setup in itertools.combinations_with_replacement(internal_modules, internal_mod_count):
-                    effect_vector = CompressedVector()
-                    cost_vector = CompressedVector()
-                    for mod in internal_mod_setup:
-                        effect_vector = effect_vector + CompressedVector({mod+"|i": 1})
-                        cost_vector = cost_vector + CompressedVector({mod: 1})
-                    yield effect_vector, cost_vector
-
-def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[Fraction, Fraction]]:
-    """Determines the possible optimal beacon setups for a building and beacon
+def beacon_designs(building_size: tuple[int, int], beacon: dict) -> list[tuple[Fraction, Fraction]]:
+    """Determines the possible optimal beacon designs for a building and beacon
 
     Parameters
     ----------
@@ -297,42 +248,42 @@ def beacon_setups(building_size: tuple[int, int], beacon: dict) -> list[tuple[Fr
     E_plus = int(beacon['supply_area_distance'])*2+B_plus
     E_minus = int(beacon['supply_area_distance'])*2+B_minus
 
-    setups = []
+    designs = []
     #surrounded buildings: same direction
     surrounded_buildings_same_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_plus - 1)/B_minus)
     surrounded_buildings_same_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_minus - 1)/B_minus)
-    setups.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+    designs.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
                    2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B))
     #surrounded buildings: opposite direction
     surrounded_buildings_opp_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_minus - 1)/B_minus)
     surrounded_buildings_opp_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_plus - 1)/B_minus)
-    setups.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+    designs.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
                    1*2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B))
     #efficient rows: beacons long way
     efficient_rows_long_way_D = int(M_minus * np.ceil(B_plus / M_minus) - B_plus)
     efficient_rows_long_way_LCM = int(np.lcm(M_minus, B_plus + efficient_rows_long_way_D))
     efficient_rows_long_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_plus-2)/(B_plus + efficient_rows_long_way_D))-np.ceil(i*M_minus/(B_plus + efficient_rows_long_way_D))+1 for i in np.arange(efficient_rows_long_way_LCM)]).sum()/float(efficient_rows_long_way_LCM)).limit_denominator()
-    setups.append((efficient_rows_long_way_sum,
+    designs.append((efficient_rows_long_way_sum,
                    float(efficient_rows_long_way_LCM)/(B_plus + efficient_rows_long_way_D)))
     #efficient rows: beacons short way
     efficient_rows_short_way_D = int(M_minus * np.ceil(B_minus / M_minus) - B_minus)
     efficient_rows_short_way_LCM = int(np.lcm(M_minus, B_minus + efficient_rows_short_way_D))
     efficient_rows_short_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_minus-2)/(B_minus + efficient_rows_short_way_D))-np.ceil(i*M_minus/(B_minus + efficient_rows_short_way_D))+1 for i in np.arange(efficient_rows_short_way_LCM)]).sum()/float(efficient_rows_short_way_LCM)).limit_denominator()
-    setups.append((efficient_rows_short_way_sum,
+    designs.append((efficient_rows_short_way_sum,
                    float(efficient_rows_short_way_LCM)/(B_minus + efficient_rows_short_way_D)))
     
     mask = [True]*4
     for i in range(4): #ew
         for j in range(4):
             if i!=j:
-                if (setups[i][0] >= setups[j][0] and setups[i][1] < setups[j][1]) or (setups[i][0] < setups[j][0] and setups[i][1] >= setups[j][1]):
+                if (designs[i][0] >= designs[j][0] and designs[i][1] < designs[j][1]) or (designs[i][0] < designs[j][0] and designs[i][1] >= designs[j][1]):
                     mask[j] = False
-    filt_setups = []
+    filtered_designs = []
     for i in range(4):
         if mask[i]:
-            filt_setups.append(setups[i])
+            filtered_designs.append(designs[i])
 
-    return list(set(filt_setups))
+    return list(set(filtered_designs))
 
 def create_reference_list(uncompiled_constructs: Collection[UncompiledConstruct]) -> tuple[str, ...]:
     """Creates a reference list given a collection of UncompiledConstructs

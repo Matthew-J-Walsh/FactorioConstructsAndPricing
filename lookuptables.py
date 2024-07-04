@@ -10,27 +10,6 @@ if TYPE_CHECKING:
     from tools import FactorioInstance
 
 
-def encode_effects_vector_to_multilinear(effect_vector: np.ndarray) -> np.ndarray:
-    """Takes an effects vector and puts it into multilinear effect form
-
-    Parameters
-    ----------
-    effect_vector : np.ndarray
-        Input effect vector to put into multilinear form
-
-    Returns
-    -------
-    np.ndarray
-        Vector in multilinear form
-    """
-    multilinear = np.full(len(MODULE_EFFECT_ORDERING), np.nan)
-    for i in range(len(MODULE_EFFECT_ORDERING)):
-        multilinear[i] = 1
-        if len(MODULE_EFFECT_ORDERING[i])!=0:
-            for j in MODULE_EFFECT_ORDERING[i]:
-                multilinear[i] *= effect_vector[j]
-    return multilinear
-
 def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: Sequence[str]) -> sparse.csr_matrix:
     """Calculates the multilinear effect form of deltas
 
@@ -60,7 +39,6 @@ def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects
 
 class ModuleLookupTable:
     """A lookup table for many CompiledConstructs, used to determine the optimal module setups
-    Left ([0], [0, :]) value is the baseline
 
     Members
     -------
@@ -86,16 +64,16 @@ class ModuleLookupTable:
         Number of interal modules
     _allowed_external_module_count : int
         Number of exteral modules
-    _beacon_setup_sizes : np.ndarray
-        Array with cardinality of beacon frequency setups for different beacon setups
+    _beacon_design_sizes : np.ndarray
+        Array with cardinality of beacon frequency designs for different beacon designs
     _beacon_module_slots : np.ndarray
-        Number of slots for each beacon setup
+        Number of slots for each beacon design
     _beacon_design_one_form : np.ndarray
-        Transformation to calculate what beacon setup is being used
+        Transformation to calculate what beacon design is being used
     _beacon_design_effect_multi : np.ndarray
-        Effect multi from a beacon setup onto the external modules
+        Effect multi from a beacon design onto the external modules
     _beacon_design_cost_multi : np.ndarray
-        Cost multi from a beacon setup onto the beacon cost and external module costs
+        Cost multi from a beacon design onto the beacon cost and external module costs
     _beacon_design_beacon_cost_index : np.ndarray
         Index of a beacon design's building cost
     _beacon_design_electric_cost : np.ndarray
@@ -111,7 +89,7 @@ class ModuleLookupTable:
     _external_cost_matrix : np.ndarray
         Matrix to calculate the external module costs given a point
     _beacon_areas : np.ndarray
-        Area of each beacon setup
+        Area of each beacon design
     """
     module_count: int
     building_width: int
@@ -126,7 +104,7 @@ class ModuleLookupTable:
 
     _allowed_internal_module_count: int
     _allowed_external_module_count: int
-    _beacon_setup_sizes: np.ndarray
+    _beacon_design_sizes: np.ndarray
     _beacon_module_slots: np.ndarray
     _beacon_design_one_form: np.ndarray
     _beacon_design_effect_multi: np.ndarray
@@ -170,14 +148,14 @@ class ModuleLookupTable:
                 external_modules.append(instance.data_raw['module'][module_name])
 
         if len(avaiable_modules)==0:
-            beacon_module_setups: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
+            beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
         else:
-            beacon_module_setups: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
+            beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
             for beacon in list(instance.data_raw['beacon'].values()):
-                for setup in beacon_setups((self.building_width, self.building_height), beacon):
-                    beacon_module_setups.append((beacon, [setup]))
+                for design in beacon_designs((self.building_width, self.building_height), beacon):
+                    beacon_module_designs.append((beacon, [design]))
 
-        self.string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name'] for beacon, setups in beacon_module_setups]
+        self.string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name'] for beacon, designs in beacon_module_designs]
         self.point_length = len(self.string_table)
 
         point_restrictions_transform = sparse.lil_matrix((self.point_length, len(instance.reference_list)))
@@ -188,7 +166,7 @@ class ModuleLookupTable:
         for external_module in external_modules:
             point_restrictions_transform[i, instance.reference_list.index(external_module['name'])] = 1
             i += 1
-        for beacon, setups in beacon_module_setups:
+        for beacon, designs in beacon_module_designs:
             point_restrictions_transform[i, instance.reference_list.index(beacon['name'])] = 1
             i += 1
         self.point_restrictions_transform = sparse.csr_matrix(point_restrictions_transform)
@@ -201,21 +179,21 @@ class ModuleLookupTable:
         self._allowed_external_module_count = len(external_modules)
 
 
-        self._beacon_setup_sizes = np.array([len(designs) for beacon, designs in beacon_module_setups])
-        self._beacon_module_slots = np.array([beacon['module_specification']['module_slots'] for beacon, designs in beacon_module_setups])
-        self.point_length = self._allowed_internal_module_count + self._allowed_external_module_count + len(beacon_module_setups)
+        self._beacon_design_sizes = np.array([len(designs) for beacon, designs in beacon_module_designs])
+        self._beacon_module_slots = np.array([beacon['module_specification']['module_slots'] for beacon, designs in beacon_module_designs])
+        self.point_length = self._allowed_internal_module_count + self._allowed_external_module_count + len(beacon_module_designs)
 
 
 
-        self._beacon_design_count = sum([len(designs) for beacon, designs in beacon_module_setups])+1
-        self._beacon_design_one_form = np.array([k for k in itertools.accumulate([len(designs) for beacon, designs in beacon_module_setups])])
+        self._beacon_design_count = sum([len(designs) for beacon, designs in beacon_module_designs])+1
+        self._beacon_design_one_form = np.array([k for k in itertools.accumulate([len(designs) for beacon, designs in beacon_module_designs])])
 
         self._beacon_design_effect_multi = np.zeros(self._beacon_design_count)
         self._beacon_design_cost_multi = np.zeros(self._beacon_design_count)
         self._beacon_design_beacon_cost_index = np.zeros(self._beacon_design_count, dtype=int)
         self._beacon_design_electric_cost = np.zeros(self._beacon_design_count)
         i = 1
-        for j, (beacon, designs) in enumerate(beacon_module_setups):
+        for j, (beacon, designs) in enumerate(beacon_module_designs):
             for design in designs:
                 self._beacon_design_effect_multi[i] = design[0] * beacon['distribution_effectivity']
                 self._beacon_design_cost_multi[i] = design[1]
@@ -242,17 +220,17 @@ class ModuleLookupTable:
             self._external_cost_matrix[instance.reference_list.index(module['name']), i] = 1
 
         beacon_areas = [0]
-        for beacon, designs in beacon_module_setups:
+        for beacon, designs in beacon_module_designs:
             for design in designs:
                 beacon_areas.append(design[1] * beacon['tile_height'] * beacon['tile_width'])
         self._beacon_areas = np.array(beacon_areas)
 
-        assert self._beacon_design_one_form.shape[0] == len(beacon_module_setups), str(self._beacon_design_one_form.shape[0])+","+str(len(beacon_module_setups))
-        assert self._beacon_areas.shape[0]==self._beacon_design_count, str(self._beacon_areas.shape[0])+","+str(self._beacon_design_count)+"\n"+str(self._beacon_setup_sizes)
+        assert self._beacon_design_one_form.shape[0] == len(beacon_module_designs), str(self._beacon_design_one_form.shape[0])+","+str(len(beacon_module_designs))
+        assert self._beacon_areas.shape[0]==self._beacon_design_count, str(self._beacon_areas.shape[0])+","+str(self._beacon_design_count)+"\n"+str(self._beacon_design_sizes)
 
 
     def best_point(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None) -> tuple[PointEvaluations, str]:
-        """Calculates the best value possible column, its associated values, and string
+        """Calculates the best possible valued column, its associated evaluations, and string
 
         Parameters
         ----------
@@ -311,22 +289,22 @@ class ModuleLookupTable:
         """        
         point_inverse_restrictions = self.point_restrictions_transform @ inverse_priced_indices
 
-        effect_vector = construct.effect_transform @ dual_vector
+        multilinear_weighting_vector = construct.effect_transform @ dual_vector
 
         current_point = np.zeros(self.point_length)
         current_point_evaluation = self.get_point_evaluations(current_point)
         current_point_cost = cost_function(construct, current_point_evaluation)[0]
         cost_mode = current_point_cost==0
         if cost_mode:
-            current_point_value = (current_point_evaluation.multilinear_effect @ effect_vector)[0]
+            current_point_value = (current_point_evaluation.multilinear_effect @ multilinear_weighting_vector)[0]
         else:
-            current_point_value = (current_point_evaluation.multilinear_effect @ effect_vector)[0] / current_point_cost
+            current_point_value = (current_point_evaluation.multilinear_effect @ multilinear_weighting_vector)[0] / current_point_cost
 
         i = 0
         while True:
             new_points = self.get_neighbors(current_point, point_inverse_restrictions)
             new_point_evaluation = self.get_point_evaluations(new_points)
-            best_new_point_value, best_new_point_index, best_point_evaluation = get_best_point(construct, effect_vector, cost_function, new_point_evaluation, cost_mode)
+            best_new_point_value, best_new_point_index, best_point_evaluation = get_best_point(construct, multilinear_weighting_vector, cost_function, new_point_evaluation, cost_mode)
             best_new_point = new_points[best_new_point_index]
             if best_new_point_value < current_point_value or (best_new_point==current_point).all():
                 break
@@ -389,13 +367,13 @@ class ModuleLookupTable:
             external_piviot_points[:, self._allowed_internal_module_count:self._allowed_internal_module_count+self._allowed_external_module_count] += np.kron(np.eye(self._allowed_external_module_count, dtype=int), np.ones(nnzs.shape[0], dtype=int)).T
         beacon_piviot_points = np.zeros((0, point.shape[1]))
         if beacons_active:
-            beacon_piviot_points = np.repeat(point, self._beacon_setup_sizes.shape[0], axis=0)
+            beacon_piviot_points = np.repeat(point, self._beacon_design_sizes.shape[0], axis=0)
             beacon_piviot_points[:, self._allowed_internal_module_count+self._allowed_external_module_count:] = 0
-            beacon_piviot_points[:, self._allowed_internal_module_count+self._allowed_external_module_count:][np.diag_indices(self._beacon_setup_sizes.shape[0])] = 1
+            beacon_piviot_points[:, self._allowed_internal_module_count+self._allowed_external_module_count:][np.diag_indices(self._beacon_design_sizes.shape[0])] = 1
         beacon_pm_points = np.zeros((0, point.shape[1]))
         if beacons_active:
             nnz: int = np.nonzero(beacon_design_portion)[1][0]
-            if beacon_design_portion[:, nnz]==self._beacon_setup_sizes[nnz]:
+            if beacon_design_portion[:, nnz]==self._beacon_design_sizes[nnz]:
                 beacon_pm_points = point.copy()
                 beacon_pm_points[0, self._allowed_internal_module_count + self._allowed_external_module_count + nnz] -= 1
             else:
@@ -404,10 +382,10 @@ class ModuleLookupTable:
                 beacon_pm_points[1, self._allowed_internal_module_count + self._allowed_external_module_count + nnz] += 1
         initial_beacon_piviot_points = np.zeros((0, point.shape[1]))
         if not beacons_active:
-            initial_beacon_piviot_points = np.repeat(point, self._allowed_external_module_count * self._beacon_setup_sizes.shape[0], axis=0)
+            initial_beacon_piviot_points = np.repeat(point, self._allowed_external_module_count * self._beacon_design_sizes.shape[0], axis=0)
             initial_beacon_piviot_points[:, self._allowed_internal_module_count:self._allowed_internal_module_count+self._allowed_external_module_count] = 0
-            initial_beacon_piviot_points[np.arange(initial_beacon_piviot_points.shape[0]), self._allowed_internal_module_count + np.tile(np.arange(self._allowed_external_module_count), (self._beacon_setup_sizes.shape[0], 1)).flatten()] = self._beacon_module_slots[0]
-            initial_beacon_piviot_points[:, self._allowed_internal_module_count+self._allowed_external_module_count:] += np.kron(np.eye(self._beacon_setup_sizes.shape[0], dtype=int), np.ones(self._allowed_external_module_count, dtype=int)).T
+            initial_beacon_piviot_points[np.arange(initial_beacon_piviot_points.shape[0]), self._allowed_internal_module_count + np.tile(np.arange(self._allowed_external_module_count), (self._beacon_design_sizes.shape[0], 1)).flatten()] = self._beacon_module_slots[0]
+            initial_beacon_piviot_points[:, self._allowed_internal_module_count+self._allowed_external_module_count:] += np.kron(np.eye(self._beacon_design_sizes.shape[0], dtype=int), np.ones(self._allowed_external_module_count, dtype=int)).T
 
         out = np.concatenate((point, internal_loss_points, internal_gain_points, internal_piviot_points, external_piviot_points, beacon_piviot_points, beacon_pm_points, initial_beacon_piviot_points), axis=0)
 
@@ -445,7 +423,7 @@ class ModuleLookupTable:
         external_module_count = external_module_portion.sum()
         if beacon_design_portion.sum()>0 and external_module_count>self._beacon_module_slots[beacon_design_portion.argmax()]:
             return False
-        if (beacon_design_portion>self._beacon_setup_sizes).any():
+        if (beacon_design_portion>self._beacon_design_sizes).any():
             return False
 
         return True
@@ -508,15 +486,15 @@ class ModuleLookupTable:
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str("UNKNOWN TODO")
 
-def get_best_point(construct: CompiledConstruct, effect_vector: np.ndarray, cost_function: CompiledCostFunction, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, int, PointEvaluations]:
+def get_best_point(construct: CompiledConstruct, multilinear_weighting_vector: np.ndarray, cost_function: CompiledCostFunction, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, int, PointEvaluations]:
     """Calculates the best point given a set of poitns and their evaluations
 
     Parameters
     ----------
     construct : CompiledConstruct
         Construct being looked at
-    effect_vector : np.ndarray
-        Effect vector of the construct
+    multilinear_weighting_vector : np.ndarray
+        Multilinear effect weightings
     cost_function : CompiledCostFunction
         Cost function being used
     point_evaluations : PointEvaluations
@@ -531,7 +509,7 @@ def get_best_point(construct: CompiledConstruct, effect_vector: np.ndarray, cost
         Index of best point
         PointEvaluations of best point
     """    
-    point_values = (effect_vector @ point_evaluations.multilinear_effect.T).reshape(-1)
+    point_values = (multilinear_weighting_vector @ point_evaluations.multilinear_effect.T).reshape(-1)
     point_costs = cost_function(construct, point_evaluations)
     if cost_mode:
         best_point_index = int(point_values.argmax())
@@ -589,7 +567,7 @@ class CompiledConstruct:
         ResearchTable containing speed multipliers associated with this Construct given a Tech Level
     effect_transform : sparse.csr_matrix
         Effect this construct has in multilinear form
-    base_cost_vector : np.ndarray
+    base_cost : np.ndarray
         Cost vector associated with the module-less and beacon-less construct
     required_price_indices : np.ndarray
         Indicies that must be priced to build this construct
@@ -604,9 +582,8 @@ class CompiledConstruct:
     technological_lookup_tables: ResearchTable
     technological_speed_multipliers: ResearchTable
     effect_transform: sparse.csr_matrix
-    base_cost_vector: np.ndarray
+    base_cost: np.ndarray
     required_price_indices: np.ndarray
-    paired_cost_transform: np.ndarray
     effective_area: int
     isa_mining_drill: bool
 
@@ -644,18 +621,11 @@ class CompiledConstruct:
             if item in origin.base_inputs.keys():
                 true_cost = true_cost + CompressedVector({item: -1 * origin.base_inputs[item]})
         
-        self.base_cost_vector = np.zeros(len(instance.reference_list))
+        self.base_cost = np.zeros(len(instance.reference_list))
         for k, v in true_cost.items():
-            self.base_cost_vector[instance.reference_list.index(k)] = v
+            self.base_cost[instance.reference_list.index(k)] = v
         
         self.required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
-
-        self.paired_cost_transform = np.zeros((len(instance.reference_list), len(MODULE_EFFECT_ORDERING)))
-        #for transport_building in LOGISTICAL_COST_MULTIPLIERS.keys():
-        #    if transport_building=="pipe":
-        #        base_throughput = sum([v for k, v in origin.deltas.items() if k in instance.data_raw['fluid'].keys()])
-        #    else:
-        #        base_throughput = sum([v for k, v in origin.deltas.items() if k not in instance.data_raw['fluid'].keys()])
 
         self.effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
 
@@ -691,8 +661,8 @@ class CompiledConstruct:
         """
         return self.technological_speed_multipliers.value(known_technologies)
 
-    def vectors(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
-        """Produces the best vector possible given a pricing model
+    def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
+        """Produces the best column possible given a pricing model
 
         Parameters
         ----------
@@ -701,7 +671,7 @@ class CompiledConstruct:
         inverse_priced_indices : np.ndarray
             What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+            Dual vector to calculate with, if None is given, give the module-less beacon-less design
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
 
@@ -711,7 +681,7 @@ class CompiledConstruct:
             Table of column for this construct
         """
         if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
-            column, cost, true_cost, ident = np.zeros((self.base_cost_vector.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost_vector.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
+            column, cost, true_cost, ident = np.zeros((self.base_cost.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
             #print("A")
         else:
             lookup_table = self.lookup_table(known_technologies)
@@ -721,7 +691,7 @@ class CompiledConstruct:
 
             column = (evaluation.multilinear_effect @ self.effect_transform + evaluation.running_cost.flatten()).reshape(-1, 1) * speed_multi
             cost = cost_function(self, evaluation)
-            true_cost = (self.base_cost_vector + evaluation.beacon_cost).reshape(-1, 1)
+            true_cost = (self.base_cost + evaluation.beacon_cost).reshape(-1, 1)
             ident = np.array([CompressedVector({self.origin.ident + module_string: 1})])
             #logging.debug(self.origin.ident)
             #logging.debug(evaluation)
@@ -730,8 +700,8 @@ class CompiledConstruct:
             #logging.debug(sparse.csr_matrix(true_cost))
             #logging.debug(ident)
 
-        assert column.shape[0] == self.base_cost_vector.shape[0]
-        assert true_cost.shape[0] == self.base_cost_vector.shape[0]
+        assert column.shape[0] == self.base_cost.shape[0]
+        assert true_cost.shape[0] == self.base_cost.shape[0]
         assert column.shape[1] == true_cost.shape[1]
         assert column.shape[1] == cost.shape[0]
         assert column.shape[1] == ident.shape[0]
@@ -748,7 +718,7 @@ class CompiledConstruct:
         inverse_priced_indices : np.ndarray
             What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+            Dual vector to calculate with, if None is given, give the module-less beacon-less design
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
 
@@ -837,8 +807,8 @@ class ComplexConstruct:
         else:
             self.stabilization[row] = direction
 
-    def vectors(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
-        """Produces the best vectors possible given a pricing model
+    def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
+        """Produces the best columns possible given a pricing model
 
         Parameters
         ----------
@@ -847,7 +817,7 @@ class ComplexConstruct:
         inverse_priced_indices : np.ndarray
             What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+            Dual vector to calculate with, if None is given, give the module-less beacon-less design
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
 
@@ -857,16 +827,16 @@ class ComplexConstruct:
             Table of columns for this construct
         """
         assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        table = [sc.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]
+        table = [sc.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]
         out = ColumnTable.sum(table, inverse_priced_indices.shape[0])
 
-        assert out.vector.shape[0] == out.true_cost.shape[0]
-        assert out.vector.shape[1] == out.true_cost.shape[1]
-        assert out.vector.shape[1] == out.cost.shape[0]
-        assert out.vector.shape[1] == out.ident.shape[0]
+        assert out.columns.shape[0] == out.true_costs.shape[0]
+        assert out.columns.shape[1] == out.true_costs.shape[1]
+        assert out.columns.shape[1] == out.costs.shape[0]
+        assert out.columns.shape[1] == out.idents.shape[0]
 
-        assert out.vector.shape[0]==self.subconstructs[0].subconstructs[0].base_cost_vector.shape[0] # type: ignore
-        return out # type: ignore
+        assert out.columns.shape[0]==self.subconstructs[0].subconstructs[0].base_cost.shape[0] # type: ignore
+        return out
 
         for stab_row, stab_dir in self.stabilization.items():
             raise NotImplementedError("Cost true cost issue.")
@@ -914,7 +884,7 @@ class ComplexConstruct:
         inverse_priced_indices : np.ndarray
             What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+            Dual vector to calculate with, if None is given, give the module-less beacon-less design
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
         valid_rows : np.ndarray
@@ -930,23 +900,23 @@ class ComplexConstruct:
         RuntimeError
             Error with optimization that shouldn't happen
         """
-        vector_table = self.vectors(cost_function, inverse_priced_indices, dual_vector, known_technologies)
+        vector_table = self.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies)
 
-        vector_table.mask(np.logical_not(np.asarray((vector_table.vector[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
+        vector_table.mask(np.logical_not(np.asarray((vector_table.columns[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
 
-        if vector_table.vector.shape[1]==0:
+        if vector_table.columns.shape[1]==0:
             return np.nan
         
         if not self.ident in post_analyses.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
-            return np.max(np.divide(vector_table.vector.T @ dual_vector, vector_table.cost)) # type: ignore
+            return np.max(np.divide(vector_table.columns.T @ dual_vector, vector_table.costs)) # type: ignore
         else:
             logging.debug("Doing special post analysis calculating for: "+self.ident)
-            stabilizable_rows = np.where(np.logical_and(np.asarray((vector_table.vector > 0).sum(axis=1)), np.asarray((vector_table.vector < 0).sum(axis=1))))[0]
+            stabilizable_rows = np.where(np.logical_and(np.asarray((vector_table.columns > 0).sum(axis=1)), np.asarray((vector_table.columns < 0).sum(axis=1))))[0]
             stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(post_analyses[self.ident].keys())))[0])
 
-            R = vector_table.vector[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
+            R = vector_table.columns[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
             u = np.concatenate([np.array([v for v in post_analyses[self.ident].values()]), np.zeros_like(stabilizable_rows)])
-            c = vector_table.cost - (vector_table.vector.T @ dual_vector)
+            c = vector_table.costs - (vector_table.columns.T @ dual_vector)
 
             primal_diluted, dual = BEST_LP_SOLVER(R, u, c)
             if primal_diluted is None or dual is None:
@@ -962,7 +932,7 @@ class ComplexConstruct:
                 assert linear_transform_is_gt(Rp, primal_diluted, up).all()
                 raise RuntimeError("Alegedly no primal found but we have one.")
 
-            return np.dot(vector_table.vector.T @ dual_vector, primal) / np.dot(c, primal)
+            return np.dot(vector_table.columns.T @ dual_vector, primal) / np.dot(c, primal)
 
     def __repr__(self) -> str:
         return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
@@ -1001,8 +971,8 @@ class SingularConstruct(ComplexConstruct):
         """        
         raise RuntimeError("Cannot stabilize a singular constuct.")
 
-    def vectors(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
-        """Produces the best vector possible given a pricing model
+    def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
+        """Produces the best column possible given a pricing model
 
         Parameters
         ----------
@@ -1011,7 +981,7 @@ class SingularConstruct(ComplexConstruct):
         inverse_priced_indices : np.ndarray
             What indices of the pricing vector aren't priced
         dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less setup
+            Dual vector to calculate with, if None is given, give the module-less beacon-less design
         known_technologies : TechnologicalLimitation
             Current tech level to calculate for
 
@@ -1020,5 +990,5 @@ class SingularConstruct(ComplexConstruct):
         ColumnTable
             Table of columns for this construct
         """
-        return self.subconstructs[0].vectors(cost_function, inverse_priced_indices,  dual_vector, known_technologies)
+        return self.subconstructs[0].columns(cost_function, inverse_priced_indices,  dual_vector, known_technologies)
 

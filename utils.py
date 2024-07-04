@@ -369,17 +369,17 @@ class TechnologicalLimitation:
 class ColumnTable:
     """Container for columns of a LP problem
     """
-    vector: np.ndarray
-    cost: np.ndarray
-    true_cost: np.ndarray
-    ident: np.ndarray[CompressedVector, Any]
+    columns: np.ndarray
+    costs: np.ndarray
+    true_costs: np.ndarray
+    idents: np.ndarray[CompressedVector, Any]
     _valid_rows: np.ndarray | None
 
-    def __init__(self, vector: np.ndarray, cost: np.ndarray, true_cost: np.ndarray, ident: np.ndarray[CompressedVector, Any]):
+    def __init__(self, columns: np.ndarray, costs: np.ndarray, true_costs: np.ndarray, idents: np.ndarray[CompressedVector, Any]):
         """
         Parameters
         ----------
-        vectors : np.ndarray
+        column : np.ndarray
             _description_
         costs : np.ndarray
             _description_
@@ -388,10 +388,10 @@ class ColumnTable:
         ident : np.ndarray
             _description_
         """
-        self.vector = vector
-        self.cost = cost
-        self.true_cost = true_cost
-        self.ident = ident
+        self.columns = columns
+        self.costs = costs
+        self.true_costs = true_costs
+        self.idents = idents
         self._valid_rows = None
 
     @staticmethod
@@ -414,17 +414,17 @@ class ColumnTable:
         """Rows with positive output
         """        
         if self._valid_rows is None:
-            self._valid_rows = (self.vector > 0).sum(axis=1) > 0
+            self._valid_rows = (self.columns > 0).sum(axis=1) > 0
         return self._valid_rows
     
     @property
     def sorted(self) -> ColumnTable:
         """A sorted version of self for easier equality filtering
         """        
-        ident_hashes = np.array([hash(ide) for ide in self.ident])
+        ident_hashes = np.array([hash(ide) for ide in self.idents])
         sort_list = ident_hashes.argsort()
 
-        return ColumnTable(self.vector[:, sort_list], self.cost[sort_list], self.true_cost[:, sort_list], self.ident[sort_list])
+        return ColumnTable(self.columns[:, sort_list], self.costs[sort_list], self.true_costs[:, sort_list], self.idents[sort_list])
 
     def __add__(self, other: ColumnTable) -> ColumnTable:
         """Adds two tables together
@@ -439,8 +439,8 @@ class ColumnTable:
         ColumnTable
             Added tables
         """
-        return ColumnTable(np.concatenate((self.vector, other.vector), axis=1), np.concatenate((self.cost, other.cost)), 
-                           np.concatenate((self.true_cost, other.true_cost), axis=1), np.concatenate((self.ident, other.ident)))
+        return ColumnTable(np.concatenate((self.columns, other.columns), axis=1), np.concatenate((self.costs, other.costs)), 
+                           np.concatenate((self.true_costs, other.true_costs), axis=1), np.concatenate((self.idents, other.idents)))
 
     def mask(self, mask: np.ndarray) -> ColumnTable:
         """Returns a new ColumnTable with masked columns removed
@@ -455,7 +455,7 @@ class ColumnTable:
         ColumnTable
             New ColumnTable
         """
-        return ColumnTable(self.vector[:, mask], self.cost[mask], self.true_cost[:, mask], self.ident[mask])
+        return ColumnTable(self.columns[:, mask], self.costs[mask], self.true_costs[:, mask], self.idents[mask])
     
     def shadow_attachment(self, other: ColumnTable) -> ColumnTable:
         """Attaches another ColumnTable onto this one.
@@ -472,12 +472,12 @@ class ColumnTable:
         ColumnTable
             Combined table with added true_cost row
         """        
-        vector = np.concatenate((self.vector, other.vector), axis=1)
-        cost = np.concatenate((self.cost, np.zeros_like(other.cost)))
-        true_cost = np.concatenate((np.concatenate((self.true_cost, other.true_cost), axis=1), np.concatenate((np.zeros(self.true_cost.shape[1]), other.cost)).reshape(1, -1)), axis=0)
+        vector = np.concatenate((self.columns, other.columns), axis=1)
+        cost = np.concatenate((self.costs, np.zeros_like(other.costs)))
+        true_cost = np.concatenate((np.concatenate((self.true_costs, other.true_costs), axis=1), np.concatenate((np.zeros(self.true_costs.shape[1]), other.costs)).reshape(1, -1)), axis=0)
         assert true_cost.shape[1]==vector.shape[1]
         assert (true_cost.shape[0]-1)==vector.shape[0]
-        ident = np.concatenate((self.ident, other.ident))
+        ident = np.concatenate((self.idents, other.idents))
         return ColumnTable(vector, cost, true_cost, ident)
     
     @property
@@ -489,14 +489,14 @@ class ColumnTable:
         ColumnTable
             New table without any rows that cannot be produced
         """        
-        logging.debug("Beginning reduction of "+str(self.vector.shape[1])+" constructs with "+str(np.count_nonzero(self.valid_rows))+" counted outputs.")
-        size: int = self.vector.shape[1]
-        last_size: int = self.vector.shape[1]+1
+        logging.debug("Beginning reduction of "+str(self.columns.shape[1])+" constructs with "+str(np.count_nonzero(self.valid_rows))+" counted outputs.")
+        size: int = self.columns.shape[1]
+        last_size: int = self.columns.shape[1]+1
         reduced: ColumnTable = self
         while last_size!=size:
-            last_size = reduced.vector.shape[1]
-            reduced = reduced.mask(np.logical_not(np.asarray((reduced.vector[~reduced.valid_rows, :] < 0).sum(axis=0)).flatten()))
-            size = reduced.vector.shape[1]
+            last_size = reduced.columns.shape[1]
+            reduced = reduced.mask(np.logical_not(np.asarray((reduced.columns[~reduced.valid_rows, :] < 0).sum(axis=0)).flatten()))
+            size = reduced.columns.shape[1]
             logging.debug("Reduced to "+str(size)+" constructs with "+str(np.count_nonzero(reduced.valid_rows))+" counted outputs.")
     
         return reduced
@@ -514,7 +514,7 @@ class ColumnTable:
         list[int]
             List of indexes that have zero throughput
         """        
-        positive = self.vector.copy()
+        positive = self.columns.copy()
         positive[positive < 0] = 0
         return np.where(np.isclose(positive @ cv, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol']))[0].tolist()
     

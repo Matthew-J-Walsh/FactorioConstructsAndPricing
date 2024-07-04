@@ -26,7 +26,7 @@ What updates have to be done to handle diminishing beacons?
 
 ## Calculation orders
 
-Should be make an array and fill it rather than concat?
+Should be: make an array and fill it rather than concat?
 np.einsum vs np.kron
 Transposing stuff outside function
 Combining beacon operations together?
@@ -56,8 +56,14 @@ Additionally private vs public class variables
 
 ## We aren't using base productivity
 
+## Fix stabilization
+
 
 # Progression accuracy
+
+## Quality in science factories!
+
+How do we handle more optimal processing in science factories (which may include running items through quality for material factories)?
 
 ## Better catalyst managment
 
