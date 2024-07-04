@@ -1083,14 +1083,14 @@ def _science_factory_parameters(instance: FactorioInstance, previous_science: Fa
 
     return targets, covering_to, last_coverage
 
-def _new_material_factory_targets(instance, valid_rows) -> list[str]:
+def _new_material_factory_targets(instance: FactorioInstance, valid_rows: np.ndarray) -> list[str]:
     """Determines all possible material targets for a material factory
 
     Parameters
     ----------
-    instance : _type_
+    instance : FactorioInstance
         The Factorio instance to use
-    valid_rows : _type_
+    valid_rows : np.ndarray
         What values of the reference list can be produced
 
     Returns
@@ -1107,14 +1107,14 @@ def _new_material_factory_targets(instance, valid_rows) -> list[str]:
     for item_cata in ITEM_SUB_PROTOTYPES:
         if item_cata=='tool':
             continue #skip tools in material factories
-        for item in instance.data_raw[item_cata].keys():
+        for item in instance._data_raw[item_cata].keys():
             if not item in instance.reference_list:
                 if not item in OUTPUT_WARNING_LIST:
                     logging.warning("Detected some a weird "+item_cata+": "+item)
                     OUTPUT_WARNING_LIST.append(item)
             elif valid_rows[instance.reference_list.index(item)] and item in instance.active_list:
                 target_names.append(item)
-    for fluid in instance.data_raw['fluid'].keys():
+    for fluid in instance._data_raw['fluid'].keys():
         if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
             for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
                 if not fluid+'@'+str(temp) in instance.reference_list:

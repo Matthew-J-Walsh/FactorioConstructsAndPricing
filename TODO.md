@@ -40,15 +40,7 @@ Combining beacon operations together?
 
 ## Special case where there are disjoint research bonuses for productivity???
 
-## Fix many typing comments that changed
-
-## Beacon Setups naming in construct
-
 ## Changes in cost functions due to effective area and the like
-
-## Lots of naming stuff
-
-Additionally private vs public class variables
 
 ## We aren't using base productivity
 

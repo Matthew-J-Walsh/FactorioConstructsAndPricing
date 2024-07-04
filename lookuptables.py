@@ -80,6 +80,8 @@ class ModuleLookupTable:
         Electricity cost of the beacon
     _electric_index : int
         Index of electricity in the reference list
+    _base_effect_vector : np.ndarray
+        Effect vector
     _internal_effect_matrix : np.ndarray
         Matrix to calculate the internal module effects given a point
     _internal_cost_matrix : np.ndarray
@@ -111,6 +113,7 @@ class ModuleLookupTable:
     _beacon_design_beacon_cost_index: np.ndarray
     _beacon_design_electric_cost: np.ndarray
     _electric_index: int
+    _base_effect_vector: np.ndarray
     _internal_effect_matrix: np.ndarray
     _internal_cost_matrix: np.ndarray
     _external_effect_matrix: np.ndarray
@@ -147,14 +150,14 @@ class ModuleLookupTable:
                 external_modules.append(instance._data_raw['module'][module_name])
 
         if len(avaiable_modules)==0:
-            beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
+            beacon_module_designs: list[tuple[dict, str, list[tuple[Fraction, Fraction]]]] = []
         else:
-            beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
+            beacon_module_designs: list[tuple[dict, str, list[tuple[Fraction, Fraction]]]] = []
             for beacon in list(instance._data_raw['beacon'].values()):
-                for design in beacon_designs((self.building_width, self.building_height), beacon):
-                    beacon_module_designs.append((beacon, [design]))
+                for design_name, design in beacon_designs((self.building_width, self.building_height), beacon):
+                    beacon_module_designs.append((beacon, design_name, [design]))
 
-        self._string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name'] for beacon, designs in beacon_module_designs]
+        self._string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name']+": "+design_name for beacon, design_name, designs in beacon_module_designs]
         self._point_length = len(self._string_table)
 
         point_restrictions_transform = sparse.lil_matrix((self._point_length, len(instance.reference_list)))
@@ -165,7 +168,7 @@ class ModuleLookupTable:
         for external_module in external_modules:
             point_restrictions_transform[i, instance.reference_list.index(external_module['name'])] = 1
             i += 1
-        for beacon, designs in beacon_module_designs:
+        for beacon, design_name, designs in beacon_module_designs:
             point_restrictions_transform[i, instance.reference_list.index(beacon['name'])] = 1
             i += 1
         self._point_restrictions_transform = sparse.csr_matrix(point_restrictions_transform)
@@ -178,21 +181,21 @@ class ModuleLookupTable:
         self._allowed_external_module_count = len(external_modules)
 
 
-        self._beacon_design_sizes = np.array([len(designs) for beacon, designs in beacon_module_designs])
-        self._beacon_module_slots = np.array([beacon['module_specification']['module_slots'] for beacon, designs in beacon_module_designs])
+        self._beacon_design_sizes = np.array([len(designs) for beacon, design_name, designs in beacon_module_designs])
+        self._beacon_module_slots = np.array([beacon['module_specification']['module_slots'] for beacon, design_name, designs in beacon_module_designs])
         self._point_length = self._allowed_internal_module_count + self._allowed_external_module_count + len(beacon_module_designs)
 
 
 
-        self._beacon_design_count = sum([len(designs) for beacon, designs in beacon_module_designs])+1
-        self._beacon_design_one_form = np.array([k for k in itertools.accumulate([len(designs) for beacon, designs in beacon_module_designs])])
+        self._beacon_design_count = sum([len(designs) for beacon, design_name, designs in beacon_module_designs])+1
+        self._beacon_design_one_form = np.array([k for k in itertools.accumulate([len(designs) for beacon, design_name, designs in beacon_module_designs])])
 
         self._beacon_design_effect_multi = np.zeros(self._beacon_design_count)
         self._beacon_design_cost_multi = np.zeros(self._beacon_design_count)
         self._beacon_design_beacon_cost_index = np.zeros(self._beacon_design_count, dtype=int)
         self._beacon_design_electric_cost = np.zeros(self._beacon_design_count)
         i = 1
-        for j, (beacon, designs) in enumerate(beacon_module_designs):
+        for j, (beacon, design_name, designs) in enumerate(beacon_module_designs):
             for design in designs:
                 self._beacon_design_effect_multi[i] = design[0] * beacon['distribution_effectivity']
                 self._beacon_design_cost_multi[i] = design[1]
@@ -201,6 +204,9 @@ class ModuleLookupTable:
                 i += 1
             assert self._beacon_design_one_form[j]==(i-1), self._beacon_design_one_form[j] - (i - 1)
         self._electric_index = instance.reference_list.index('electric')
+
+        self._base_effect_vector = np.ones(len(ACTIVE_MODULE_EFFECTS))
+        self._base_effect_vector[ACTIVE_MODULE_EFFECTS.index("productivity")] += self.base_productivity
 
         self._internal_effect_matrix = np.zeros((len(ACTIVE_MODULE_EFFECTS), self._allowed_internal_module_count))
         self._internal_cost_matrix = np.zeros((self._ref_length, self._allowed_internal_module_count))
@@ -219,7 +225,7 @@ class ModuleLookupTable:
             self._external_cost_matrix[instance.reference_list.index(module['name']), i] = 1
 
         beacon_areas = [0]
-        for beacon, designs in beacon_module_designs:
+        for beacon, design_name, designs in beacon_module_designs:
             for design in designs:
                 beacon_areas.append(design[1] * beacon['tile_height'] * beacon['tile_width'])
         self._beacon_areas = np.array(beacon_areas)
@@ -258,7 +264,8 @@ class ModuleLookupTable:
         else:
             point, evaluation = self.search(construct, cost_function, inverse_priced_indices, dual_vector)
             #print("C")
-        module_string = (" with module setup: " + " & ".join([self._string_table[i]+" x"+str(v) for i, v in enumerate(point) if v>0]) if np.sum(point)>0 else "")
+        module_string = (" with module setup: " + " & ".join([self._string_table[i]+" x"+str(v) for i, v in enumerate(point[:self._allowed_internal_module_count+self._allowed_external_module_count]) if v>0]) + " " + \
+                                                       " & ".join([self._string_table[i+self._allowed_internal_module_count+self._allowed_external_module_count]+" density-"+str(v) for i, v in enumerate(point[self._allowed_internal_module_count+self._allowed_external_module_count:]) if v>0]) if np.sum(point)>0 else "")
         return evaluation, module_string
     
     def search(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, PointEvaluations]:
@@ -471,7 +478,7 @@ class ModuleLookupTable:
         external_effect = (self._external_effect_matrix @ external_module_portion.T) * beacon_effect_multi #2.9
         external_cost = np.einsum("ij,kj,i->ik", external_module_portion, self._external_cost_matrix, beacon_cost_multi) + beacon_direct_cost #40.3
 
-        total_effect = (internal_effect + external_effect).T + 1 #2.6
+        total_effect = (internal_effect + external_effect).T + self._base_effect_vector #2.6
         total_effect = (total_effect + MODULE_EFFECT_MINIMUMS_NUMPY + np.abs(total_effect - MODULE_EFFECT_MINIMUMS_NUMPY))/2 #4.7
 
         multilinear_effect = (np.einsum("ij,jklm->ijklm", total_effect, MODULE_MULTILINEAR_EFFECT_SELECTORS) + MODULE_MULTILINEAR_VOID_SELECTORS[None, ]).prod(axis=1) #11.3

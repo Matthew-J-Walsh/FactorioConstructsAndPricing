@@ -218,7 +218,7 @@ class ManualConstruct:
                 "\n\tRequiring: "+str(self.limit)
                 #"\n\tWith a vector of: "+str(self.effect_vector)+\
 
-def beacon_designs(building_size: tuple[int, int], beacon: dict) -> list[tuple[Fraction, Fraction]]:
+def beacon_designs(building_size: tuple[int, int], beacon: dict) -> list[tuple[str, tuple[Fraction, Fraction]]]:
     """Determines the possible optimal beacon designs for a building and beacon
 
     Parameters
@@ -252,31 +252,35 @@ def beacon_designs(building_size: tuple[int, int], beacon: dict) -> list[tuple[F
     #surrounded buildings: same direction
     surrounded_buildings_same_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_plus - 1)/B_minus)
     surrounded_buildings_same_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_minus - 1)/B_minus)
-    designs.append((4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
-                   2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B))
+    designs.append(("surrounded-beacons same-direction",
+                    (4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+                     2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
     #surrounded buildings: opposite direction
     surrounded_buildings_opp_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_minus - 1)/B_minus)
     surrounded_buildings_opp_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_plus - 1)/B_minus)
-    designs.append((4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
-                   1*2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B))
+    designs.append(("surrounded-beacons opposite-direction",
+                    (4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+                     1*2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
     #efficient rows: beacons long way
     efficient_rows_long_way_D = int(M_minus * np.ceil(B_plus / M_minus) - B_plus)
     efficient_rows_long_way_LCM = int(np.lcm(M_minus, B_plus + efficient_rows_long_way_D))
     efficient_rows_long_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_plus-2)/(B_plus + efficient_rows_long_way_D))-np.ceil(i*M_minus/(B_plus + efficient_rows_long_way_D))+1 for i in np.arange(efficient_rows_long_way_LCM)]).sum()/float(efficient_rows_long_way_LCM)).limit_denominator()
-    designs.append((efficient_rows_long_way_sum,
-                   float(efficient_rows_long_way_LCM)/(B_plus + efficient_rows_long_way_D)))
+    designs.append(("efficient-rows long-way",
+                    (efficient_rows_long_way_sum,
+                     float(efficient_rows_long_way_LCM)/(B_plus + efficient_rows_long_way_D))))
     #efficient rows: beacons short way
     efficient_rows_short_way_D = int(M_minus * np.ceil(B_minus / M_minus) - B_minus)
     efficient_rows_short_way_LCM = int(np.lcm(M_minus, B_minus + efficient_rows_short_way_D))
     efficient_rows_short_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_minus-2)/(B_minus + efficient_rows_short_way_D))-np.ceil(i*M_minus/(B_minus + efficient_rows_short_way_D))+1 for i in np.arange(efficient_rows_short_way_LCM)]).sum()/float(efficient_rows_short_way_LCM)).limit_denominator()
-    designs.append((efficient_rows_short_way_sum,
-                   float(efficient_rows_short_way_LCM)/(B_minus + efficient_rows_short_way_D)))
+    designs.append(("efficient-rows short-way",
+                    (efficient_rows_short_way_sum,
+                     float(efficient_rows_short_way_LCM)/(B_minus + efficient_rows_short_way_D))))
     
     mask = [True]*4
     for i in range(4): #ew
         for j in range(4):
             if i!=j:
-                if (designs[i][0] >= designs[j][0] and designs[i][1] < designs[j][1]) or (designs[i][0] < designs[j][0] and designs[i][1] >= designs[j][1]):
+                if (designs[i][0][0] >= designs[j][0][0] and designs[i][0][1] < designs[j][0][1]) or (designs[i][0][0] < designs[j][0][0] and designs[i][0][1] >= designs[j][0][1]):
                     mask[j] = False
     filtered_designs = []
     for i in range(4):
