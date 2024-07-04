@@ -11,17 +11,17 @@ class CompressedVector(dict):
 
     They also have hashes for easier search through collections
     """
-    hash_value: int | None
+    _hash_value: int | None
 
     def __init__(self, input = None) -> None: # type: ignore
         if input is None:
             super().__init__()
         else:
             super().__init__(input) # type: ignore
-        self.hash_value = None
+        self._hash_value = None
 
     def __add__(self, other: CompressedVector) -> CompressedVector:
-        self.hash_value = None
+        self._hash_value = None
         new_cv = CompressedVector()
         for k, v in self.items():
             new_cv.key_addition(k, v)
@@ -30,30 +30,30 @@ class CompressedVector(dict):
         return new_cv
 
     def __mul__(self, multiplier: Number) -> CompressedVector:
-        self.hash_value = None
+        self._hash_value = None
         dn = CompressedVector()
         for k, v in self.items():
             dn[k] = multiplier * v
         return dn
     
     def __rmul__(self, multiplier: Number) -> CompressedVector:
-        self.hash_value = None
+        self._hash_value = None
         return self.__mul__(multiplier)
     
     def key_addition(self, key, value) -> None:
         """
         Single line adding key or adding to value in key.
         """
-        self.hash_value = None
+        self._hash_value = None
         if key in self.keys():
             self[key] += value
         else:
             self[key] = value
     
     def __hash__(self) -> int: # type: ignore
-        if self.hash_value is None:
-            self.hash_value = hash(tuple(sorted(self.items())))
-        return self.hash_value
+        if self._hash_value is None:
+            self._hash_value = hash(tuple(sorted(self.items())))
+        return self._hash_value
     
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, dict)
@@ -118,9 +118,9 @@ class TechnologyTree:
 
     A X B (X = 'skew') iff None of the above 3 apply.
     """
-    reference_map: dict[str, int]
-    inverse_map: dict[int, str]
-    comparison_table: np.ndarray
+    _reference_map: dict[str, int]
+    _inverse_map: dict[int, str]
+    _comparison_table: np.ndarray
 
     def __init__(self, technology_data: Collection[dict]) -> None:
         """
@@ -129,23 +129,23 @@ class TechnologyTree:
         technology_data : Collection[dict]
             All values of data.raw['technology']
         """        
-        self.reference_map = {}
-        self.inverse_map = {}
-        self.comparison_table = np.full((len(technology_data), len(technology_data)), 13, dtype=float) #random number to check for at end to make sure we filled it
+        self._reference_map = {}
+        self._inverse_map = {}
+        self._comparison_table = np.full((len(technology_data), len(technology_data)), 13, dtype=float) #random number to check for at end to make sure we filled it
         for i, tech in enumerate(technology_data):
-            self.reference_map.update({tech['name']: i})
-            self.inverse_map.update({i: tech['name']})
+            self._reference_map.update({tech['name']: i})
+            self._inverse_map.update({i: tech['name']})
             tech.update({'tech_tree_identifier': i})
             for j, other_tech in enumerate(technology_data):
                 if tech['name']==other_tech['name']:
-                    self.comparison_table[i, j] = 0
+                    self._comparison_table[i, j] = 0
                 elif other_tech in tech['all_prereq']:
-                    self.comparison_table[i, j] = 1
+                    self._comparison_table[i, j] = 1
                 elif tech in other_tech['all_prereq']:
-                    self.comparison_table[i, j] = -1
+                    self._comparison_table[i, j] = -1
                 else:
-                    self.comparison_table[i, j] = float('nan')
-        assert not (self.comparison_table==13).any()
+                    self._comparison_table[i, j] = float('nan')
+        assert not (self._comparison_table==13).any()
 
     def compare(self, rA: int, rB: int) -> int:
         """Compares two technologies.
@@ -168,7 +168,7 @@ class TechnologyTree:
 
             A X B = nan (X = 'skew') iff None of the above 3 apply.
         """
-        return self.comparison_table[rA, rB]
+        return self._comparison_table[rA, rB]
 
     def simplify(self, sets_of_references: Collection[Collection[int]]) -> frozenset[frozenset[int]]:
         """Simplifies a set of set of research indicies
@@ -220,7 +220,7 @@ class TechnologyTree:
         frozenset[frozenset[int]]
             Simplified version
         """
-        sets_of_references: list[list[int]] = [[self.reference_map[research_str] for research_str in sublist] for sublist in sets_of_researches]
+        sets_of_references: list[list[int]] = [[self._reference_map[research_str] for research_str in sublist] for sublist in sets_of_researches]
         return self.simplify(sets_of_references)
     
     def techlimit_ge(self, A: TechnologicalLimitation, B: TechnologicalLimitation) -> bool:
@@ -261,12 +261,12 @@ class TechnologicalLimitation:
 
     Members
     -------
-    tree : TechnologyTree
+    _tree : TechnologyTree
         Tree that this limit is a part of
     canonical_form : frozenset[frozenset[int]]
         Canonical form of the research
     """
-    tree: TechnologyTree
+    _tree: TechnologyTree
     canonical_form: frozenset[frozenset[int]]
 
     def __init__(self, tree: TechnologyTree, sets_of_researches: Collection[Collection[str]] = [], sets_of_references: Collection[Collection[int]] = []) -> None:
@@ -281,11 +281,11 @@ class TechnologicalLimitation:
             A set of possible sets of research ids, by default []
         """        
         assert len(sets_of_researches)==0 or len(sets_of_references)==0, "Can't take both input types"
-        self.tree = tree
+        self._tree = tree
         if len(sets_of_references)==0:
-            self.canonical_form = self.tree.reference(sets_of_researches)
+            self.canonical_form = self._tree.reference(sets_of_researches)
         else:
-            self.canonical_form = self.tree.simplify(sets_of_references)
+            self.canonical_form = self._tree.simplify(sets_of_references)
         
     def __repr__(self) -> str:
         if len(self.canonical_form)==0:
@@ -294,7 +294,7 @@ class TechnologicalLimitation:
         for outer in self.canonical_form:
             out += "Technology set of:"
             for inner in outer:
-                out += "\n\t"+self.tree.inverse_map[inner]
+                out += "\n\t"+self._tree._inverse_map[inner]
                 
         return out
 
@@ -311,7 +311,7 @@ class TechnologicalLimitation:
         TechnologicalLimitation
             Result of the addition
         """
-        assert self.tree == other.tree
+        assert self._tree == other._tree
         if len(self.canonical_form)==0:
             return other
         if len(other.canonical_form)==0:
@@ -320,7 +320,7 @@ class TechnologicalLimitation:
         for s1 in self.canonical_form:
             for s2 in other.canonical_form:
                 added.add(s1.union(s2))
-        return TechnologicalLimitation(self.tree, sets_of_references=added)
+        return TechnologicalLimitation(self._tree, sets_of_references=added)
 
     def __sub__(self, other: TechnologicalLimitation) -> TechnologicalLimitation:
         """Possible additions other to research this research status
@@ -352,8 +352,8 @@ class TechnologicalLimitation:
         bool
             If having self means that other has been unlocked
         """        
-        assert self.tree == other.tree
-        return self.tree.techlimit_ge(self, other)
+        assert self._tree == other._tree
+        return self._tree.techlimit_ge(self, other)
     
     @property
     def tech_coverage(self) -> TechnologicalLimitation:
@@ -368,6 +368,17 @@ class TechnologicalLimitation:
 
 class ColumnTable:
     """Container for columns of a LP problem
+
+    Members
+    -------
+    column : np.ndarray
+        Columns of the problem
+    costs : np.ndarray
+        Costs of the problem
+    true_costs : np.ndarray
+        True costs of the columns
+    ident : np.ndarray
+        Identifiers of the columns
     """
     columns: np.ndarray
     costs: np.ndarray
@@ -380,13 +391,13 @@ class ColumnTable:
         Parameters
         ----------
         column : np.ndarray
-            _description_
+            Columns of the problem
         costs : np.ndarray
-            _description_
+            Costs of the problem
         true_costs : np.ndarray
-            _description_
+            True costs of the columns
         ident : np.ndarray
-            _description_
+            Identifiers of the columns
         """
         self.columns = columns
         self.costs = costs
@@ -396,18 +407,52 @@ class ColumnTable:
 
     @staticmethod
     def empty(size: int) -> ColumnTable:
+        """Makes an empty column table
+
+        Parameters
+        ----------
+        size : int
+            Column size
+
+        Returns
+        -------
+        ColumnTable
+            Column table with correct size without any values
+        """        
         return ColumnTable(np.zeros((size, 0)), np.zeros(0), np.zeros((size, 0)), np.zeros(0, dtype=CompressedVector))
     
     @staticmethod
     def sum(all_tables: Sequence[ColumnTable], size_backup: int | None = None) -> ColumnTable:
+        """Adds a set of column tables together
+
+        Parameters
+        ----------
+        all_tables : Sequence[ColumnTable]
+            ColumnTables to add
+        size_backup : int | None, optional
+            Backup column size to use 
+            should be given if all_tables could be empty, by default None
+
+        Returns
+        -------
+        ColumnTable
+            Resulting tables
+
+        Raises
+        ------
+        ValueError
+            _description_
+        """        
         if len(all_tables)==0:
             if size_backup is None:
                 raise ValueError("Empty Column Table and no size backup")
             return ColumnTable.empty(size_backup)
-        s: ColumnTable = all_tables[0]
-        for i in range(1, len(all_tables)):
-            s = s + all_tables[i]
-        return s
+        return ColumnTable(np.concatenate([tab.columns for tab in all_tables], axis=1), np.concatenate([tab.costs for tab in all_tables]), 
+                           np.concatenate([tab.true_costs for tab in all_tables], axis=1), np.concatenate([tab.idents for tab in all_tables]))
+        #s: ColumnTable = all_tables[0]
+        #for i in range(1, len(all_tables)):
+        #    s = s + all_tables[i]
+        #return s
     
     @property
     def valid_rows(self) -> np.ndarray:
@@ -482,12 +527,7 @@ class ColumnTable:
     
     @property
     def reduced(self) -> ColumnTable:
-        """Removes columns that cannot be used because their >0 rows cannot be made and returns the new table
-
-        Returns
-        -------
-        ColumnTable
-            New table without any rows that cannot be produced
+        """Removes columns that cannot be used because their >0 rows cannot be made, makes a copy
         """        
         logging.debug("Beginning reduction of "+str(self.columns.shape[1])+" constructs with "+str(np.count_nonzero(self.valid_rows))+" counted outputs.")
         size: int = self.columns.shape[1]
@@ -523,19 +563,19 @@ class ResearchTable:
 
     Members
     -------
-    limits : list[TechnologicalLimitation]
+    _limits : list[TechnologicalLimitation]
         Technological Levels
-    values : list[Any]
+    _values : list[Any]
         Research dependent values
     """    
-    limits: list[TechnologicalLimitation]
-    values: list[Any]
+    _limits: list[TechnologicalLimitation]
+    _values: list[Any]
 
     def __init__(self):
         """Empty init for ordering
         """        
-        self.limits = []
-        self.values = []
+        self._limits = []
+        self._values = []
     
     def add(self, limit: TechnologicalLimitation, value: Any):
         """Adds an value to the table
@@ -547,14 +587,14 @@ class ResearchTable:
         element : Any
             Value to add
         """        
-        if len(self.limits)!=0:
-            for i in range(len(self.limits)):
-                if not limit >= self.limits[i]:
-                    self.limits.insert(i, limit)
-                    self.values.insert(i, value)
+        if len(self._limits)!=0:
+            for i in range(len(self._limits)):
+                if not limit >= self._limits[i]:
+                    self._limits.insert(i, limit)
+                    self._values.insert(i, value)
                     return
-        self.limits.append(limit)
-        self.values.append(value)
+        self._limits.append(limit)
+        self._values.append(value)
 
     def value(self, known_technologies: TechnologicalLimitation) -> Any:
         """Evalutes the sum of bonuses up to a tech level
@@ -569,7 +609,7 @@ class ResearchTable:
         Any
             Sum of bonuses
         """        
-        return sum([value for limit, value in zip(self.limits, self.values) if known_technologies >= limit])
+        return sum([value for limit, value in zip(self._limits, self._values) if known_technologies >= limit])
     
     def max(self, known_technologies: TechnologicalLimitation) -> Any:
         """Evaluates the maximum (ordered) value given the tech level
@@ -584,17 +624,17 @@ class ResearchTable:
         Any
             Maximum tech level's associated value
         """        
-        for i in range(len(self.limits)):
-            if not known_technologies >= self.limits[i]:
-                return self.values[i-1]
-        return self.values[-1]
+        for i in range(len(self._limits)):
+            if not known_technologies >= self._limits[i]:
+                return self._values[i-1]
+        return self._values[-1]
     
     def __iter__(self) -> Iterator[tuple[TechnologicalLimitation, Any]]:
-        for limit in self.limits:
+        for limit in self._limits:
             yield limit, self.value(limit)
 
     def __repr__(self) -> str:
-        return repr(self.limits)+"\n"+repr(self.values)
+        return repr(self._limits)+"\n"+repr(self._values)
 
 
 
@@ -671,13 +711,13 @@ def technological_limitation_from_specification(instance: FactorioInstance, full
     
     #assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
     for pack in fully_automated:
-        assert pack in instance.data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
+        assert pack in instance._data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
     for tech in extra_technologies:
-        assert tech in instance.data_raw['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+        assert tech in instance._data_raw['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
     for recipe in extra_recipes:
-        assert recipe in instance.data_raw['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
+        assert recipe in instance._data_raw['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
 
-    for tech in instance.data_raw['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+    for tech in instance._data_raw['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
         if instance.COST_MODE in tech.keys():
             unit = tech[instance.COST_MODE]['unit']
         else:
@@ -686,13 +726,13 @@ def technological_limitation_from_specification(instance: FactorioInstance, full
             tech_obj.add(tech['name'])
     
     for tech in extra_technologies:
-        tech_obj = tech_obj.union(next(iter(instance.data_raw['technology'][tech]['limit'].canonical_form)))
+        tech_obj = tech_obj.union(next(iter(instance._data_raw['technology'][tech]['limit'].canonical_form)))
         tech_obj.add(tech)
     
     for recipe in extra_recipes:
-        tech_obj = tech_obj.union(instance.data_raw['recipe'][recipe]['limit'])
+        tech_obj = tech_obj.union(instance._data_raw['recipe'][recipe]['limit'])
     
-    return TechnologicalLimitation(instance.tech_tree, [tech_obj])
+    return TechnologicalLimitation(instance._tech_tree, [tech_obj])
 
 def evaluate_formulaic_count(expression: str, level: int) -> int:
     """Evaluates the count for a formulaic expression at a level

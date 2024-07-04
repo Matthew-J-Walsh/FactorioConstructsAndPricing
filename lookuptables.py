@@ -52,13 +52,13 @@ class ModuleLookupTable:
         Modules that can be used for this lookup table
     base_productivity : Fraction
         Base productivity for this lookup table
-    ref_length : int
+    _ref_length : int
         Length of the reference list
-    point_length : int
+    _point_length : int
         Length of points of this lookup table
-    point_restrictions_transform : sparse.csr_matrix
+    _point_restrictions_transform : sparse.csr_matrix
         Transformation on inverse_pricing_indicies to calculate what indicies of the points are allowed to be nonzero
-    string_table : list[str]
+    _string_table : list[str]
         Table of strings for point indicies
     _allowed_internal_module_count : int
         Number of interal modules
@@ -97,11 +97,10 @@ class ModuleLookupTable:
     avaiable_modules: list[tuple[str, bool, bool]]
     base_productivity: Fraction
 
-    ref_length: int
-    point_length: int
-    point_restrictions_transform: sparse.csr_matrix
-    string_table: list[str]
-
+    _ref_length: int
+    _point_length: int
+    _point_restrictions_transform: sparse.csr_matrix
+    _string_table: list[str]
     _allowed_internal_module_count: int
     _allowed_external_module_count: int
     _beacon_design_sizes: np.ndarray
@@ -143,22 +142,22 @@ class ModuleLookupTable:
         external_modules: list[dict] = []
         for module_name, internal, external in avaiable_modules:
             if internal:
-                internal_modules.append(instance.data_raw['module'][module_name])
+                internal_modules.append(instance._data_raw['module'][module_name])
             if external:
-                external_modules.append(instance.data_raw['module'][module_name])
+                external_modules.append(instance._data_raw['module'][module_name])
 
         if len(avaiable_modules)==0:
             beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
         else:
             beacon_module_designs: list[tuple[dict, list[tuple[Fraction, Fraction]]]] = []
-            for beacon in list(instance.data_raw['beacon'].values()):
+            for beacon in list(instance._data_raw['beacon'].values()):
                 for design in beacon_designs((self.building_width, self.building_height), beacon):
                     beacon_module_designs.append((beacon, [design]))
 
-        self.string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name'] for beacon, designs in beacon_module_designs]
-        self.point_length = len(self.string_table)
+        self._string_table = [module['name']+"|i" for module in internal_modules] + [module['name']+"|e" for module in external_modules] + [beacon['name'] for beacon, designs in beacon_module_designs]
+        self._point_length = len(self._string_table)
 
-        point_restrictions_transform = sparse.lil_matrix((self.point_length, len(instance.reference_list)))
+        point_restrictions_transform = sparse.lil_matrix((self._point_length, len(instance.reference_list)))
         i = 0
         for internal_module in internal_modules:
             point_restrictions_transform[i, instance.reference_list.index(internal_module['name'])] = 1
@@ -169,10 +168,10 @@ class ModuleLookupTable:
         for beacon, designs in beacon_module_designs:
             point_restrictions_transform[i, instance.reference_list.index(beacon['name'])] = 1
             i += 1
-        self.point_restrictions_transform = sparse.csr_matrix(point_restrictions_transform)
+        self._point_restrictions_transform = sparse.csr_matrix(point_restrictions_transform)
 
 
-        self.ref_length = len(instance.reference_list)
+        self._ref_length = len(instance.reference_list)
 
 
         self._allowed_internal_module_count = len(internal_modules)
@@ -181,7 +180,7 @@ class ModuleLookupTable:
 
         self._beacon_design_sizes = np.array([len(designs) for beacon, designs in beacon_module_designs])
         self._beacon_module_slots = np.array([beacon['module_specification']['module_slots'] for beacon, designs in beacon_module_designs])
-        self.point_length = self._allowed_internal_module_count + self._allowed_external_module_count + len(beacon_module_designs)
+        self._point_length = self._allowed_internal_module_count + self._allowed_external_module_count + len(beacon_module_designs)
 
 
 
@@ -204,7 +203,7 @@ class ModuleLookupTable:
         self._electric_index = instance.reference_list.index('electric')
 
         self._internal_effect_matrix = np.zeros((len(ACTIVE_MODULE_EFFECTS), self._allowed_internal_module_count))
-        self._internal_cost_matrix = np.zeros((self.ref_length, self._allowed_internal_module_count))
+        self._internal_cost_matrix = np.zeros((self._ref_length, self._allowed_internal_module_count))
         for i, module in enumerate(internal_modules):
             for j, effect_name in enumerate(ACTIVE_MODULE_EFFECTS):
                 if effect_name in module['effect'].keys():
@@ -212,7 +211,7 @@ class ModuleLookupTable:
             self._internal_cost_matrix[instance.reference_list.index(module['name']), i] = 1
 
         self._external_effect_matrix = np.zeros((len(ACTIVE_MODULE_EFFECTS), self._allowed_external_module_count))
-        self._external_cost_matrix = np.zeros((self.ref_length, self._allowed_external_module_count))
+        self._external_cost_matrix = np.zeros((self._ref_length, self._allowed_external_module_count))
         for i, module in enumerate(external_modules):
             for j, effect_name in enumerate(ACTIVE_MODULE_EFFECTS):
                 if effect_name in module['effect'].keys():
@@ -249,17 +248,17 @@ class ModuleLookupTable:
             PointEvaluations of the best point
             Associated string of the best point
         """        
-        if self.point_length==0:
-            return PointEvaluations(np.ones((1, 2**len(ACTIVE_MODULE_EFFECTS))), np.zeros((1, self.ref_length)), np.zeros((1, self.ref_length)), np.zeros(1)), ""
+        if self._point_length==0:
+            return PointEvaluations(np.ones((1, 2**len(ACTIVE_MODULE_EFFECTS))), np.zeros((1, self._ref_length)), np.zeros((1, self._ref_length)), np.zeros(1)), ""
         
         if dual_vector is None:
-            point = np.zeros(self.point_length)
+            point = np.zeros(self._point_length)
             evaluation = self.get_point_evaluations(point)
             #print("B")
         else:
             point, evaluation = self.search(construct, cost_function, inverse_priced_indices, dual_vector)
             #print("C")
-        module_string = (" with module setup: " + " & ".join([self.string_table[i]+" x"+str(v) for i, v in enumerate(point) if v>0]) if np.sum(point)>0 else "")
+        module_string = (" with module setup: " + " & ".join([self._string_table[i]+" x"+str(v) for i, v in enumerate(point) if v>0]) if np.sum(point)>0 else "")
         return evaluation, module_string
     
     def search(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, PointEvaluations]:
@@ -287,11 +286,11 @@ class ModuleLookupTable:
         RuntimeError
             Potential infinite loop
         """        
-        point_inverse_restrictions = self.point_restrictions_transform @ inverse_priced_indices
+        point_inverse_restrictions = self._point_restrictions_transform @ inverse_priced_indices
 
         multilinear_weighting_vector = construct.effect_transform @ dual_vector
 
-        current_point = np.zeros(self.point_length)
+        current_point = np.zeros(self._point_length)
         current_point_evaluation = self.get_point_evaluations(current_point)
         current_point_cost = cost_function(construct, current_point_evaluation)[0]
         cost_mode = current_point_cost==0
@@ -333,7 +332,7 @@ class ModuleLookupTable:
             Neighboring points
         """        
         point = point.reshape(1, -1)
-        assert point.shape[1]==self.point_length, point.shape[1]-self.point_length
+        assert point.shape[1]==self._point_length, point.shape[1]-self._point_length
         
         internal_module_portion = point[:, :self._allowed_internal_module_count]
         external_module_portion = point[:, self._allowed_internal_module_count:self._allowed_internal_module_count+self._allowed_external_module_count]
@@ -410,7 +409,7 @@ class ModuleLookupTable:
             If it's valid
         """        
         point = point.reshape(1, -1)
-        if point.shape[1]!=self.point_length:
+        if point.shape[1]!=self._point_length:
             return False
 
         internal_module_portion = point[:, :self._allowed_internal_module_count]
@@ -449,7 +448,7 @@ class ModuleLookupTable:
         if len(points.shape)==1 or points.shape[1]==1: #.7
             points = points.reshape(1, -1) #.2
 
-        assert points.shape[1]==self.point_length #.3
+        assert points.shape[1]==self._point_length #.3
 
         if points.shape[1]==0: #.2
             raise ValueError()
@@ -461,9 +460,9 @@ class ModuleLookupTable:
         chosen_beacon_design = (self._beacon_design_one_form @ beacon_design_portion.T).astype(int) #4.2
         beacon_effect_multi = self._beacon_design_effect_multi[chosen_beacon_design] #1.5
         beacon_cost_multi = self._beacon_design_cost_multi[chosen_beacon_design] #.9
-        beacon_direct_cost = np.zeros((points.shape[0], self.ref_length)) #2.0
+        beacon_direct_cost = np.zeros((points.shape[0], self._ref_length)) #2.0
         beacon_direct_cost[:, self._beacon_design_beacon_cost_index[chosen_beacon_design]] = beacon_cost_multi #3.0
-        beacon_electric_effect = np.zeros((self.ref_length, points.shape[0])) #1.5
+        beacon_electric_effect = np.zeros((self._ref_length, points.shape[0])) #1.5
         beacon_electric_effect[self._electric_index, :] = beacon_cost_multi * self._beacon_design_electric_cost[chosen_beacon_design] #2.3
 
         internal_effect = self._internal_effect_matrix @ internal_module_portion.T #3.2
@@ -559,33 +558,31 @@ class CompiledConstruct:
 
     Members
     -------
-    origin : UncompiledConstruct
+    _origin : UncompiledConstruct
         Construct to compile
-    technological_lookup_tables : ResearchTable
+    _technological_lookup_tables : ResearchTable
         ResearchTable containing lookup tables associated with this Construct given a Tech Level
-    technological_speed_multipliers : ResearchTable
+    _technological_speed_multipliers : ResearchTable
         ResearchTable containing speed multipliers associated with this Construct given a Tech Level
     effect_transform : sparse.csr_matrix
         Effect this construct has in multilinear form
     base_cost : np.ndarray
         Cost vector associated with the module-less and beacon-less construct
-    required_price_indices : np.ndarray
+    _required_price_indices : np.ndarray
         Indicies that must be priced to build this construct
-    paired_cost_transform : np.ndarray
-        Additional cost vector from effects, Currently 0 for various reasons
-    effective_area : int
+    _effective_area : int
         Area usage of an instance without beacons.
-    isa_mining_drill : bool
+    _isa_mining_drill : bool
         If this construct should be priced based on size when calculating in size restricted mode
     """
-    origin: UncompiledConstruct
-    technological_lookup_tables: ResearchTable
-    technological_speed_multipliers: ResearchTable
+    _origin: UncompiledConstruct
+    _technological_lookup_tables: ResearchTable
+    _technological_speed_multipliers: ResearchTable
     effect_transform: sparse.csr_matrix
     base_cost: np.ndarray
-    required_price_indices: np.ndarray
-    effective_area: int
-    isa_mining_drill: bool
+    _required_price_indices: np.ndarray
+    _effective_area: int
+    _isa_mining_drill: bool
 
     def __init__(self, origin: UncompiledConstruct, instance: FactorioInstance):
         """
@@ -596,23 +593,23 @@ class CompiledConstruct:
         instance : FactorioInstance
             Origin FactorioInstance
         """        
-        self.origin = origin
+        self._origin = origin
 
         if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
-            self.technological_lookup_tables = ResearchTable()
+            self._technological_lookup_tables = ResearchTable()
             for limit, base_prod in instance.research_modifiers['laboratory-productivity']:
-                self.technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+                self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
         elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
-            self.technological_lookup_tables = ResearchTable()
+            self._technological_lookup_tables = ResearchTable()
             for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']:
-                self.technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+                self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
         else:
-            self.technological_lookup_tables = ResearchTable()
-            self.technological_lookup_tables.add(origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity))
+            self._technological_lookup_tables = ResearchTable()
+            self._technological_lookup_tables.add(origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity))
         if "laboratory-speed" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratorySpeedModifier.html
-            self.technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
+            self._technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
         else:
-            self.technological_speed_multipliers = instance.research_modifiers['no-speed-modifier']
+            self._technological_speed_multipliers = instance.research_modifiers['no-speed-modifier']
 
         self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list)
         
@@ -625,11 +622,11 @@ class CompiledConstruct:
         for k, v in true_cost.items():
             self.base_cost[instance.reference_list.index(k)] = v
         
-        self.required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
+        self._required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
 
-        self.effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
+        self._effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
 
-        self.isa_mining_drill = origin.building['type']=="mining-drill"
+        self._isa_mining_drill = origin.building['type']=="mining-drill"
             
     def lookup_table(self, known_technologies: TechnologicalLimitation) -> ModuleLookupTable:
         """Calculate the highest ModuleLookupTable that has been unlocked
@@ -644,7 +641,7 @@ class CompiledConstruct:
         ModuleLookupTable
             The highest unlocked lookup table
         """
-        return self.technological_lookup_tables.max(known_technologies)
+        return self._technological_lookup_tables.max(known_technologies)
     
     def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
         """Calculate the speed multiplier at a technological level
@@ -659,7 +656,7 @@ class CompiledConstruct:
         float
             Multiplier
         """
-        return self.technological_speed_multipliers.value(known_technologies)
+        return self._technological_speed_multipliers.value(known_technologies)
 
     def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best column possible given a pricing model
@@ -680,7 +677,7 @@ class CompiledConstruct:
         ColumnTable
             Table of column for this construct
         """
-        if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
+        if not (known_technologies >= self._origin.limit) or inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
             #print("A")
         else:
@@ -692,7 +689,7 @@ class CompiledConstruct:
             column = (evaluation.multilinear_effect @ self.effect_transform + evaluation.running_cost.flatten()).reshape(-1, 1) * speed_multi
             cost = cost_function(self, evaluation)
             true_cost = (self.base_cost + evaluation.beacon_cost).reshape(-1, 1)
-            ident = np.array([CompressedVector({self.origin.ident + module_string: 1})])
+            ident = np.array([CompressedVector({self._origin.ident + module_string: 1})])
             #logging.debug(self.origin.ident)
             #logging.debug(evaluation)
             #logging.debug(sparse.csr_matrix(column))
@@ -735,14 +732,14 @@ class CompiledConstruct:
         raise NotImplementedError("Hasn't been reimplemented since change to lookup tables. Likely needs to change to only look at some points.")
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
-        if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self.required_price_indices].sum()>0: #rough line, ordered?
+        if not (known_technologies >= self._origin.limit) or inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
             return CompressedVector()
         else:
             e, c = self._evaluate(cost_function, inverse_priced_indices, dual_vector, lookup_table, speed_multi)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
             if np.isclose(c, 0).any():
-                assert np.isclose(c, 0).all(), self.origin.ident
+                assert np.isclose(c, 0).all(), self._origin.ident
                 evaluation = e
             else:
                 evaluation = (e / c)
@@ -753,14 +750,14 @@ class CompiledConstruct:
                 logging.debug(np.isclose(c, 0))
                 logging.debug(e)
                 logging.debug(c)
-                raise ValueError(self.origin.ident)
+                raise ValueError(self._origin.ident)
             for i in range(evaluation.shape[0]):
                 output.update({self._generate_vector(i, lookup_table, speed_multi)[2]: evaluation[i]})
 
             return output
 
     def __repr__(self) -> str:
-        return self.origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
+        return self._origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
 
 class ComplexConstruct:
     """A true construct. A formation of subconstructs with stabilization values.
@@ -774,8 +771,8 @@ class ComplexConstruct:
     ident : str
         Name for this construct
     """
-    subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
-    stabilization: dict
+    _subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
+    _stabilization: dict
     ident: str
 
     def __init__(self, subconstructs: list[ComplexConstruct], ident: str) -> None:
@@ -787,8 +784,8 @@ class ComplexConstruct:
         ident : str
             Name for this construct
         """
-        self.subconstructs = subconstructs
-        self.stabilization = {}
+        self._subconstructs = subconstructs
+        self._stabilization = {}
         self.ident = ident
 
     def stabilize(self, row: int, direction: int) -> None:
@@ -801,11 +798,11 @@ class ComplexConstruct:
         direction : int
             Direction of stabilization. 1: Positive, 0: Positive and Negative, -1: Negative
         """
-        if row in self.stabilization.keys():
-            if direction==0 or self.stabilization[row]==0 or direction!=self.stabilization[row]:
-                self.stabilization[row] = 0
+        if row in self._stabilization.keys():
+            if direction==0 or self._stabilization[row]==0 or direction!=self._stabilization[row]:
+                self._stabilization[row] = 0
         else:
-            self.stabilization[row] = direction
+            self._stabilization[row] = direction
 
     def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best columns possible given a pricing model
@@ -826,8 +823,8 @@ class ComplexConstruct:
         ColumnTable
             Table of columns for this construct
         """
-        assert len(self.stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        table = [sc.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self.subconstructs]
+        assert len(self._stabilization)==0, "Stabilization not implemented yet." #linear combinations
+        table = [sc.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self._subconstructs]
         out = ColumnTable.sum(table, inverse_priced_indices.shape[0])
 
         assert out.columns.shape[0] == out.true_costs.shape[0]
@@ -835,10 +832,10 @@ class ComplexConstruct:
         assert out.columns.shape[1] == out.costs.shape[0]
         assert out.columns.shape[1] == out.idents.shape[0]
 
-        assert out.columns.shape[0]==self.subconstructs[0].subconstructs[0].base_cost.shape[0] # type: ignore
+        assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore
         return out
 
-        for stab_row, stab_dir in self.stabilization.items():
+        for stab_row, stab_dir in self._stabilization.items():
             raise NotImplementedError("Cost true cost issue.")
             if stab_dir >= 0:
                 violating_columns = np.where(vector[:, stab_row] < 0)[0]
@@ -935,8 +932,8 @@ class ComplexConstruct:
             return np.dot(vector_table.columns.T @ dual_vector, primal) / np.dot(c, primal)
 
     def __repr__(self) -> str:
-        return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
-               ("\n\tWith Stabilization: "+str(self.stabilization) if len(self.stabilization.keys()) > 0 else "")
+        return self.ident + " with " + str(len(self._subconstructs)) + " subconstructs." + \
+               ("\n\tWith Stabilization: "+str(self._stabilization) if len(self._stabilization.keys()) > 0 else "")
 
 class SingularConstruct(ComplexConstruct):
     """Base case ComplexConstruct, only a single UncompiledConstruct is used to create.
@@ -950,9 +947,9 @@ class SingularConstruct(ComplexConstruct):
         subconstruct : CompiledConstruct
             The singular element of this construct.
         """        
-        self.subconstructs = [subconstruct]
-        self.stabilization = {}
-        self.ident = subconstruct.origin.ident
+        self._subconstructs = [subconstruct]
+        self._stabilization = {}
+        self.ident = subconstruct._origin.ident
 
     def stabilize(self, row: int, direction: int) -> None:
         """Cannot stabilize a singular constuct
@@ -990,5 +987,5 @@ class SingularConstruct(ComplexConstruct):
         ColumnTable
             Table of columns for this construct
         """
-        return self.subconstructs[0].columns(cost_function, inverse_priced_indices,  dual_vector, known_technologies)
+        return self._subconstructs[0].columns(cost_function, inverse_priced_indices,  dual_vector, known_technologies)
 

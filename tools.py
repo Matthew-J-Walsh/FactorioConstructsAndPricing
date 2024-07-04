@@ -18,15 +18,17 @@ class FactorioInstance():
 
     Members
     -------
-    data_raw : dict
+    _data_raw : dict
         Whole data.raw dictonary post-premanagment
-    tech_tree : TechnologyTree
+    _tech_tree : TechnologyTree
         Technology Tree of this instance
-    uncompiled_constructs : tuple[UncompiledConstruct, ...]
+    _uncompiled_constructs : tuple[UncompiledConstruct, ...]
         All UncompiledConstructs for the game instance
-    complex_constructs : list[ComplexConstruct]
+    _manual_constructs : tuple[ManualConstruct, ...]
+        ManualConstructs in the instance
+    _complex_constructs : list[ComplexConstruct]
         ComplexConstructs in the instance
-    disabled_constructs : list[ComplexConstruct]
+    _disabled_constructs : list[ComplexConstruct]
         ComplexConstructs that have been disabled
     _compiled : ComplexConstruct | None
         ComplexConstruct of the entire instance or None if hasn't been compiled since last change
@@ -50,12 +52,12 @@ class FactorioInstance():
     post_analyses : dict[str, dict[int, float]]
         Post analysis calculations to run, construct name and target outputs
     """
-    data_raw: dict
-    tech_tree: TechnologyTree
-    uncompiled_constructs: tuple[UncompiledConstruct, ...]
-    manual_constructs: tuple[ManualConstruct, ...]
-    complex_constructs: list[ComplexConstruct]
-    disabled_constructs: list[ComplexConstruct]
+    _data_raw: dict
+    _tech_tree: TechnologyTree
+    _uncompiled_constructs: tuple[UncompiledConstruct, ...]
+    _manual_constructs: tuple[ManualConstruct, ...]
+    _complex_constructs: list[ComplexConstruct]
+    _disabled_constructs: list[ComplexConstruct]
     _compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
     catalyst_list: tuple[str, ...]
@@ -81,27 +83,27 @@ class FactorioInstance():
             A particular raw ore pricing model. If None its assumed to be standard
         """
         with open(filename) as f:
-            self.data_raw = json.load(f)
+            self._data_raw = json.load(f)
         
         self.COST_MODE = COST_MODE
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
-        self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
-        self.research_modifiers = generate_research_effect_tables(self.data_raw, self.tech_tree)
-        self.uncompiled_constructs = generate_all_constructs(self)
-        self.reference_list = create_reference_list(self.uncompiled_constructs)
-        self.catalyst_list = determine_catalysts(self.uncompiled_constructs, self.reference_list)
-        self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)
-        self.manual_constructs = generate_manual_constructs(self)
+        self._tech_tree = complete_premanagement(self._data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.research_modifiers = generate_research_effect_tables(self._data_raw, self._tech_tree)
+        self._uncompiled_constructs = generate_all_constructs(self)
+        self.reference_list = create_reference_list(self._uncompiled_constructs)
+        self.catalyst_list = determine_catalysts(self._uncompiled_constructs, self.reference_list)
+        self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self._data_raw)
+        self._manual_constructs = generate_manual_constructs(self)
         
-        self.disabled_constructs = []
+        self._disabled_constructs = []
 
         self.spatial_pricing = np.zeros(len(self.reference_list))
         logging.debug("Spatial pricing info:")
-        for mining_drill in self.data_raw['mining-drill'].values():
+        for mining_drill in self._data_raw['mining-drill'].values():
             self.spatial_pricing[self.reference_list.index(mining_drill['name'])] = mining_drill['tile_width'] * mining_drill['tile_height']
             logging.debug(mining_drill['name']+" point:"+str(self.reference_list.index(mining_drill['name']))+" area:"+str(mining_drill['tile_width'] * mining_drill['tile_height']))
-        for beacon in self.data_raw['beacon'].values():
+        for beacon in self._data_raw['beacon'].values():
             self.spatial_pricing[self.reference_list.index(beacon['name'])] = beacon['tile_width'] * beacon['tile_height']
             logging.debug(beacon['name']+" point:"+str(self.reference_list.index(beacon['name']))+" area:"+str(beacon['tile_width'] * beacon['tile_height']))
         self.spatial_pricing = self.spatial_pricing / np.linalg.norm(self.spatial_pricing)
@@ -111,7 +113,7 @@ class FactorioInstance():
             for k, v in raw_ore_pricing.items():
                 self.raw_ore_pricing[self.reference_list.index(k)] = v
         else:
-            for resource in self.data_raw['resource'].values():
+            for resource in self._data_raw['resource'].values():
                 if resource['category']=='basic-solid':
                     self.raw_ore_pricing[self.reference_list.index(resource['name'])] = 10
                 elif resource['category']=='basic-fluid':
@@ -124,7 +126,7 @@ class FactorioInstance():
 
         if not nobuild:
             logging.debug("Building complex constructs.")
-            self.complex_constructs = [SingularConstruct(CompiledConstruct(uc, self)) for uc in self.uncompiled_constructs]
+            self._complex_constructs = [SingularConstruct(CompiledConstruct(uc, self)) for uc in self._uncompiled_constructs]
             self._compiled = None
             self.compiled
     
@@ -155,7 +157,7 @@ class FactorioInstance():
     @property
     def compiled(self) -> ComplexConstruct:
         if self._compiled is None:
-            self._compiled = ComplexConstruct(tuple([cc for cc in self.complex_constructs if not cc in self.disabled_constructs]), "Whole Game Construct") # type: ignore
+            self._compiled = ComplexConstruct(tuple([cc for cc in self._complex_constructs if not cc in self._disabled_constructs]), "Whole Game Construct") # type: ignore
         return self._compiled
 
     def disable_complex_construct(self, target_name: str) -> None:
@@ -166,7 +168,7 @@ class FactorioInstance():
         target_name : str
             Target name of complex construct to be disabled
         """
-        self.disabled_constructs.append(self.search_complex_constructs(target_name))
+        self._disabled_constructs.append(self.search_complex_constructs(target_name))
         self._compiled = None
     
     def enable_complex_construct(self, target_name: str) -> None:
@@ -179,7 +181,7 @@ class FactorioInstance():
         """
         construct = self.search_complex_constructs(target_name)
         try:
-            self.disabled_constructs.remove(construct)
+            self._disabled_constructs.remove(construct)
             self._compiled = None
         except:
             logging.warning(construct.ident+" was not disabled in the first place.")
@@ -198,9 +200,9 @@ class FactorioInstance():
             Closest match
         """ 
         best_matches: list[ComplexConstruct] = []
-        match_distance = Levenshtein.distance(target_name, self.complex_constructs[0].ident)
-        logging.debug("Atempting to translate: "+"\""+target_name+"\" starting distance is: "+str(match_distance)+" there "+("is" if target_name in [c.ident for c in self.complex_constructs] else "is not")+" a 0 length translation.")
-        for c in self.complex_constructs:
+        match_distance = Levenshtein.distance(target_name, self._complex_constructs[0].ident)
+        logging.debug("Atempting to translate: "+"\""+target_name+"\" starting distance is: "+str(match_distance)+" there "+("is" if target_name in [c.ident for c in self._complex_constructs] else "is not")+" a 0 length translation.")
+        for c in self._complex_constructs:
             dist = Levenshtein.distance(target_name, c.ident)
             if dist < match_distance:
                 best_matches = [c]
@@ -245,7 +247,7 @@ class FactorioInstance():
         else:
             logging.warning("new_names past to bind_complex_construct aren't checked for duplication TODO")
 
-        self.complex_constructs.append(ComplexConstruct(tuple(constructs), new_name)) # type: ignore
+        self._complex_constructs.append(ComplexConstruct(tuple(constructs), new_name)) # type: ignore
         for i, construct in enumerate(constructs):
             if disable_list[i]:
                 self.disable_complex_construct(construct.ident)
@@ -305,7 +307,7 @@ class FactorioInstance():
 
         if use_manual:
             logging.info("Starting a manual program solving.")
-            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.columns(self.manual_constructs, known_technologies), recovered_run)
+            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.columns(self._manual_constructs, known_technologies), recovered_run)
         else:
             logging.info("Starting a program solving.")
             s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, recovered_run)
@@ -399,7 +401,7 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: CompiledCos
         The efficiency analysis
     """        
     efficiencies: CompressedVector = CompressedVector({})
-    for sc in construct.subconstructs:
+    for sc in construct._subconstructs:
         if isinstance(sc, ComplexConstruct):
             efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)})
             efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)
@@ -411,11 +413,11 @@ class FactorioFactory():
 
     Members
     -------
-    instance : FactorioInstance
+    _instance : FactorioInstance
         Instance associated with this factory
-    known_technologies : TechnologicalLimitation
+    _known_technologies : TechnologicalLimitation
         Tech level for this factory
-    targets : CompressedVector
+    _targets : CompressedVector
         Target outputs and amounts
     optimal_factory : CompressedVector
         Calculated optimal factory from last calculate_optimal_factory run
@@ -423,31 +425,33 @@ class FactorioFactory():
         Calculated pricing model of self.optimal_factory
     full_optimal_pricing_model : CompressedVector
         Calculated full pricing model of self.optimal_factory
-    construct_efficiencies : CompressedVector
+    _construct_efficiencies : CompressedVector
         Calculated efficiencies of available constructs
-    zero_throughputs : list[int]
+    _zero_throughputs : list[int]
         List of indicies of items and fluids of which none were produced in optimal factory
     optimized : bool
         If an optimal factory has been calculated since targets were last updated
-    intermediate_scale_factor : float
+    _intermediate_scale_factor : float
         Scaling factor difference between input and output pricing model
     true_cost : CompressedVector
         Full item/fluid cost of the optimal factory
-    no_module_value : CompressedVector
+    _no_module_value : CompressedVector
         Evaluations of unmodded constructs
+    last_run_columns : ColumnTable | None
+        Columns used in the last run to pass to solver when retargeting is done
     """
-    instance: FactorioInstance
-    known_technologies: TechnologicalLimitation
-    targets: CompressedVector
+    _instance: FactorioInstance
+    _known_technologies: TechnologicalLimitation
+    _targets: CompressedVector
     optimal_factory: CompressedVector
     optimal_pricing_model: CompressedVector
     full_optimal_pricing_model: CompressedVector
-    construct_efficiencies: CompressedVector
-    zero_throughputs: list[int]
+    _construct_efficiencies: CompressedVector
+    _zero_throughputs: list[int]
     optimized: bool
-    intermediate_scale_factor: float
+    _intermediate_scale_factor: float
     true_cost: CompressedVector
-    no_module_value: CompressedVector
+    _no_module_value: CompressedVector
     last_run_columns: ColumnTable | None
 
     def __init__(self, instance: FactorioInstance, known_technologies: TechnologicalLimitation, targets: CompressedVector) -> None:
@@ -464,16 +468,16 @@ class FactorioFactory():
         assert isinstance(instance, FactorioInstance)
         assert isinstance(known_technologies, TechnologicalLimitation)
         assert isinstance(targets, CompressedVector)
-        self.instance = instance
-        self.known_technologies = known_technologies
-        self.targets = targets.norm()
+        self._instance = instance
+        self._known_technologies = known_technologies
+        self._targets = targets.norm()
         self.optimal_factory = CompressedVector()
         self.optimal_pricing_model = CompressedVector()
         self.full_optimal_pricing_model = CompressedVector()
         self.optimized = False
-        self.intermediate_scale_factor = 0
+        self._intermediate_scale_factor = 0
         self.true_cost = CompressedVector()
-        self.no_module_value = CompressedVector()
+        self._no_module_value = CompressedVector()
         self.last_run_columns = None
 
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: CostFunction, use_manual: bool = False) -> bool:
@@ -493,11 +497,11 @@ class FactorioFactory():
         bool
             If pricing model has changed since this factory was last optimized
         """
-        s, p, pf, k, zs, scale, tc, nmv, recovery = self.instance.solve_for_target(self.targets, self.known_technologies, reference_model, uncompiled_cost_function, self.last_run_columns, use_manual=use_manual)
+        s, p, pf, k, zs, scale, tc, nmv, recovery = self._instance.solve_for_target(self._targets, self._known_technologies, reference_model, uncompiled_cost_function, self.last_run_columns, use_manual=use_manual)
         same = p==self.optimal_pricing_model
-        self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self.construct_efficiencies, self.intermediate_scale_factor, self.true_cost, self.no_module_value = s, p, pf, k, scale, tc, nmv
+        self.optimal_factory, self.optimal_pricing_model, self.full_optimal_pricing_model, self._construct_efficiencies, self._intermediate_scale_factor, self.true_cost, self._no_module_value = s, p, pf, k, scale, tc, nmv
         self.last_run_columns = recovery
-        self.zero_throughputs = zs
+        self._zero_throughputs = zs
         self.optimized = True
 
         for k, v in self.true_cost.items():
@@ -518,10 +522,10 @@ class FactorioFactory():
             With 0 retainment this factory may start mispricing those targets. 
             By default global RETAINMENT_VALUE
         """
-        for k in self.targets.keys():
+        for k in self._targets.keys():
             if not k in targets.keys():
                 targets[k] = retainment
-        self.targets = targets.norm()
+        self._targets = targets.norm()
 
         self.optimized = False
     
@@ -542,12 +546,12 @@ class FactorioFactory():
         """
         if not self.optimized:
             raise RuntimeError("Dump asked but factory isn't nessisarily correct.")
-        targets_df = pd.DataFrame(list(self.targets.items()), columns=['target', 'count'])
+        targets_df = pd.DataFrame(list(self._targets.items()), columns=['target', 'count'])
         optimal_factory_df = pd.DataFrame(list(self.optimal_factory.items()), columns=['construct', 'count'])
         optimal_pricing_model_df = pd.DataFrame(list(self.optimal_pricing_model.items()), columns=['item', 'value'])
-        inefficient_constructs_df = pd.DataFrame(list(self.construct_efficiencies.items()), columns=['construct', 'relative value'])
-        transport_df = pd.DataFrame(list(compute_transportation_densities(self.full_optimal_pricing_model, self.instance.data_raw)), columns=['item', 'via', 'relative density'])
-        no_module_df = pd.DataFrame(list(self.no_module_value.items()), columns=['construct', 'relative value'])
+        inefficient_constructs_df = pd.DataFrame(list(self._construct_efficiencies.items()), columns=['construct', 'relative value'])
+        transport_df = pd.DataFrame(list(compute_transportation_densities(self.full_optimal_pricing_model, self._instance._data_raw)), columns=['item', 'via', 'relative density'])
+        no_module_df = pd.DataFrame(list(self._no_module_value.items()), columns=['construct', 'relative value'])
         merged_df = pd.concat([targets_df, pd.DataFrame({}, columns=['']), 
                             optimal_factory_df, pd.DataFrame({}, columns=['']),
                             optimal_pricing_model_df, pd.DataFrame({}, columns=['']),
@@ -562,10 +566,10 @@ class FactorioMaterialFactory(FactorioFactory):
 
     Added Members
     -------------
-    last_material_factory : FactorioMaterialFactory | InitialFactory
+    _last_material_factory : FactorioMaterialFactory | InitialFactory
         Factory to base the pricing model of this factory on
     """
-    last_material_factory: FactorioMaterialFactory | InitialFactory
+    _last_material_factory: FactorioMaterialFactory | InitialFactory
 
     def __init__(self, instance: FactorioInstance, previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation, 
                  last_material_factory: FactorioMaterialFactory | InitialFactory, material_targets: CompressedVector) -> None:
@@ -589,7 +593,7 @@ class FactorioMaterialFactory(FactorioFactory):
             super().__init__(instance, previous_science.tech_coverage, material_targets)
         else: #we probably got here via self.startup_base
             super().__init__(instance, previous_science, material_targets)
-        self.last_material_factory = last_material_factory
+        self._last_material_factory = last_material_factory
 
 
 class FactorioManualFactory(FactorioMaterialFactory):
@@ -605,21 +609,21 @@ class FactorioScienceFactory(FactorioFactory):
 
     Added Members
     -------------
-    last_material_factory : FactorioMaterialFactory
+    _last_material_factory : FactorioMaterialFactory
         Factory to base the pricing model of this factory on
-    previous_science : FactorioScienceFactory | InitialFactory | TechnologicalLimitation
+    _previous_science : FactorioScienceFactory | InitialFactory | TechnologicalLimitation
         Last science factory or tech limit
-    clear : list[str]
+    _clear : list[str]
         Set of tools that define which must be produced to clear all researches possible with just those tools.
         Example: If this was a set of red and green science pack that would indicate all research that only red and
                  green science packs are needed for MUST be completed within this factory, regardless of other calculations
-    extra : list[str]
+    _extra : list[str]
         Set of extra technologies to research
     """
-    last_material_factory: FactorioMaterialFactory
-    previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation
-    clear: list[str]
-    extra: list[str]
+    _last_material_factory: FactorioMaterialFactory
+    _previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation
+    _clear: list[str]
+    _extra: list[str]
 
     def __init__(self, instance: FactorioInstance, previous_science: FactorioScienceFactory | InitialFactory | TechnologicalLimitation, last_material_factory: FactorioMaterialFactory | InitialFactory, 
                  science_targets: CompressedVector) -> None:
@@ -639,15 +643,15 @@ class FactorioScienceFactory(FactorioFactory):
         assert isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, InitialFactory) or isinstance(previous_science, TechnologicalLimitation)
         assert isinstance(last_material_factory, FactorioMaterialFactory) or isinstance(last_material_factory, InitialFactory)
         assert isinstance(science_targets, CompressedVector)
-        self.clear = [target for target in science_targets.keys() if target in instance.data_raw['tool'].keys()]
-        self.extra = [target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in science_targets.keys() if RESEARCH_SPECIAL_STRING in target]
-        self.previous_science = previous_science
+        self._clear = [target for target in science_targets.keys() if target in instance._data_raw['tool'].keys()]
+        self._extra = [target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in science_targets.keys() if RESEARCH_SPECIAL_STRING in target]
+        self._previous_science = previous_science
         
-        targets, covering_to, last_coverage  = _science_factory_parameters(instance, previous_science, self.clear, self.extra)
+        targets, covering_to, last_coverage  = _science_factory_parameters(instance, previous_science, self._clear, self._extra)
 
         super().__init__(instance, last_coverage, targets)
 
-        self.last_material_factory = last_material_factory
+        self._last_material_factory = last_material_factory
     
     def _previous_coverage(self) -> TechnologicalLimitation:
         """
@@ -656,10 +660,10 @@ class FactorioScienceFactory(FactorioFactory):
         TechnologicalLimitation
             Last science coverage
         """        
-        if isinstance(self.previous_science, TechnologicalLimitation):
-            return self.previous_science
+        if isinstance(self._previous_science, TechnologicalLimitation):
+            return self._previous_science
         else:
-            return self.previous_science.tech_coverage
+            return self._previous_science.tech_coverage
         
     @property
     def tech_coverage(self) -> TechnologicalLimitation:
@@ -669,7 +673,7 @@ class FactorioScienceFactory(FactorioFactory):
         TechnologicalLimitation
             Tech level that will be unlocked when this factory is done
         """
-        return self._previous_coverage() + TechnologicalLimitation(self.instance.tech_tree, [set([targ[:targ.rfind("=")] for targ in self.targets.keys()])])
+        return self._previous_coverage() + TechnologicalLimitation(self._instance._tech_tree, [set([targ[:targ.rfind("=")] for targ in self._targets.keys()])])
 
     def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Rebuilds targets. This is useful if iteratively optimizing a built chain.
@@ -686,9 +690,9 @@ class FactorioScienceFactory(FactorioFactory):
             By default global RETAINMENT_VALUE
         """
         #assert not any([target in self.instance.data_raw['tool'].keys() for target in targets.keys()]), "retarget should NEVER be given a tool. Only researches."
-        assert all([t in self.targets.keys() for t in targets]), "retarget should never add new targets... yet."
-        covering_to: TechnologicalLimitation = self.instance.technological_limitation_from_specification(fully_automated=self.clear) + \
-                      TechnologicalLimitation(self.instance.tech_tree, [set([target for target in targets.keys()])])
+        assert all([t in self._targets.keys() for t in targets]), "retarget should never add new targets... yet."
+        covering_to: TechnologicalLimitation = self._instance.technological_limitation_from_specification(fully_automated=self._clear) + \
+                      TechnologicalLimitation(self._instance._tech_tree, [set([target for target in targets.keys()])])
         last_coverage: TechnologicalLimitation = self._previous_coverage()
 
         raise NotImplementedError("actually fix this line this time.")
@@ -715,13 +719,13 @@ class InitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         assert isinstance(instance, FactorioInstance)
         assert isinstance(pricing_model, CompressedVector)
         assert isinstance(known_technologies, TechnologicalLimitation)
-        self.instance = instance
-        self.known_technologies = known_technologies
-        self.targets = pricing_model
+        self._instance = instance
+        self._known_technologies = known_technologies
+        self._targets = pricing_model
         self.optimal_factory = CompressedVector()
         self.optimal_pricing_model = pricing_model.norm()
-        self.construct_efficiencies = CompressedVector()
-        self.previous_science = known_technologies
+        self._construct_efficiencies = CompressedVector()
+        self._previous_science = known_technologies
     
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: CostFunction, use_manual: bool = False) -> bool:
         """Placeholder. Initial Factories cannot change.
@@ -753,16 +757,16 @@ class FactorioFactoryChain():
     
     Members
     -------
-    instance : FactorioInstance
+    _instance : FactorioInstance
         Instance for this chain
-    chain :list[FactorioFactory]
+    _chain :list[FactorioFactory]
         List containing the chain elements
-    uncompiled_cost_function : CostFunction
+    _uncompiled_cost_function : CostFunction
         Cost function this chain uses
     """
-    instance: FactorioInstance
-    chain: list[FactorioFactory]
-    uncompiled_cost_function: CostFunction
+    _instance: FactorioInstance
+    _chain: list[FactorioFactory]
+    _uncompiled_cost_function: CostFunction
 
     def __init__(self, instance: FactorioInstance, uncompiled_cost_function: CostFunction) -> None:
         """
@@ -774,9 +778,9 @@ class FactorioFactoryChain():
             Cost function to use for this factory chain
         """
         assert isinstance(instance, FactorioInstance)
-        self.instance = instance
-        self.chain = []
-        self.uncompiled_cost_function = uncompiled_cost_function
+        self._instance = instance
+        self._chain = []
+        self._uncompiled_cost_function = uncompiled_cost_function
     
     def initial_pricing(self, pricing_model: CompressedVector, starting_techs: TechnologicalLimitation) -> None:
         """Initialize the first factory of the chain as an InitialFactory with a pricing model and tech level
@@ -788,7 +792,7 @@ class FactorioFactoryChain():
         starting_techs : TechnologicalLimitation
             TechnologicalLimitation of techs unlocked before building a starting factory
         """
-        self.chain.append(InitialFactory(self.instance, pricing_model, starting_techs))
+        self._chain.append(InitialFactory(self._instance, pricing_model, starting_techs))
     
     def add(self, targets: CompressedVector | str | None = None) -> bool:
         """Adds a factory to the chain. Won't add a factory if material targets are given and all materials are already priced
@@ -816,41 +820,41 @@ class FactorioFactoryChain():
         If the addition actually added a factory
         """
         factory_type: str = ""
-        previous_sciences = [fac for fac in self.chain if isinstance(fac, FactorioScienceFactory)]
-        last_material = [fac for fac in self.chain if isinstance(fac, FactorioMaterialFactory)][-1]
+        previous_sciences = [fac for fac in self._chain if isinstance(fac, FactorioScienceFactory)]
+        last_material = [fac for fac in self._chain if isinstance(fac, FactorioMaterialFactory)][-1]
         if len(previous_sciences)==0:
-            known_technologies: TechnologicalLimitation = last_material.known_technologies #first science after a startup base.
+            known_technologies: TechnologicalLimitation = last_material._known_technologies #first science after a startup base.
         else:
             known_technologies: TechnologicalLimitation = previous_sciences[-1].tech_coverage
 
         if isinstance(targets, CompressedVector):
-            if list(targets.keys())[0] in self.instance.data_raw['tool'].keys() or list(targets.keys())[0] in self.instance.data_raw['technology'].keys():
+            if list(targets.keys())[0] in self._instance._data_raw['tool'].keys() or list(targets.keys())[0] in self._instance._data_raw['technology'].keys():
                 factory_type = "science"
-            elif list(targets.keys())[0] in self.instance.data_raw['item'].keys() or list(targets.keys())[0] in self.instance.data_raw['fluid'].keys():
+            elif list(targets.keys())[0] in self._instance._data_raw['item'].keys() or list(targets.keys())[0] in self._instance._data_raw['fluid'].keys():
                 factory_type = "material"
         else:
             if targets is None:
                 targets = ""
-            targets, factory_type = _calculate_new_full_factory_targets(targets, last_material, known_technologies, self.instance)
+            targets, factory_type = _calculate_new_full_factory_targets(targets, last_material, known_technologies, self._instance)
 
         if factory_type == "science":
             for target in targets.keys():
-                assert target in self.instance.data_raw['tool'].keys() or target in self.instance.data_raw['technology'].keys(), "If a factory does science stuff is only allowed to do science stuff."
+                assert target in self._instance._data_raw['tool'].keys() or target in self._instance._data_raw['technology'].keys(), "If a factory does science stuff is only allowed to do science stuff."
             previous_science = previous_sciences[-1] if len(previous_sciences)>0 else known_technologies
-            self.chain.append(FactorioScienceFactory(self.instance, previous_science, last_material, targets))
+            self._chain.append(FactorioScienceFactory(self._instance, previous_science, last_material, targets))
         elif factory_type == "material":
-            difference: set[str] = set(targets.keys()).difference(set(last_material.targets.keys()))
+            difference: set[str] = set(targets.keys()).difference(set(last_material._targets.keys()))
             logging.info("Attempting to add the following targets to the new material factory:\n\t"+str(difference))
             last_science = previous_sciences[-1]
-            self.chain.append(FactorioMaterialFactory(self.instance, last_science, last_material, targets))
+            self._chain.append(FactorioMaterialFactory(self._instance, last_science, last_material, targets))
         else: #factory_type == "manual"
-            difference: set[str] = set(targets.keys()).difference(set(last_material.targets.keys()))
+            difference: set[str] = set(targets.keys()).difference(set(last_material._targets.keys()))
             if len(difference)==0:
                 logging.info("Adding a manual factory without any actual additional prices. This would indicate that there is no more progress to be made.")
                 return True
             logging.info("Attempting to add the following targets to the new manual factory:\n\t"+str(difference))
             last_science = previous_sciences[-1]
-            self.chain.append(FactorioManualFactory(self.instance, last_science, last_material, targets))
+            self._chain.append(FactorioManualFactory(self._instance, last_science, last_material, targets))
         return False
 
     def complete(self) -> None:
@@ -872,10 +876,10 @@ class FactorioFactoryChain():
         """
         changed = False
 
-        last_reference_model = self.chain[0].optimal_pricing_model
-        for i, factory in enumerate(self.chain[1:]):
+        last_reference_model = self._chain[0].optimal_pricing_model
+        for i, factory in enumerate(self._chain[1:]):
             logging.info("Computing factory "+str(i))
-            changed = factory.calculate_optimal_factory(last_reference_model, self.uncompiled_cost_function) or changed
+            changed = factory.calculate_optimal_factory(last_reference_model, self._uncompiled_cost_function) or changed
             if isinstance(factory, FactorioMaterialFactory):
                 last_reference_model = factory.optimal_pricing_model
 
@@ -891,16 +895,16 @@ class FactorioFactoryChain():
         """
         changed = False
 
-        last_reference_model = self.chain[0].optimal_pricing_model
-        for i, factory in enumerate(self.chain[1:]):
+        last_reference_model = self._chain[0].optimal_pricing_model
+        for i, factory in enumerate(self._chain[1:]):
             logging.info("Retargeting factory "+str(i))
             if isinstance(factory, FactorioMaterialFactory):
                 updated_targets = CompressedVector()
-                for j in range(i+1, len(self.chain)):
-                    for k, v in self.chain[j].true_cost.items():
-                        assert k in self.instance.active_list, str(k)+": "+str(v)+", "+str(j)+" t: "+str(type(self.chain[j]))
-                    updated_targets = updated_targets + self.chain[j].true_cost
-                    if isinstance(self.chain[j], FactorioMaterialFactory):
+                for j in range(i+1, len(self._chain)):
+                    for k, v in self._chain[j].true_cost.items():
+                        assert k in self._instance.active_list, str(k)+": "+str(v)+", "+str(j)+" t: "+str(type(self._chain[j]))
+                    updated_targets = updated_targets + self._chain[j].true_cost
+                    if isinstance(self._chain[j], FactorioMaterialFactory):
                         break #done with this material factories outputs
                 logging.debug(last_reference_model)
                 logging.debug(updated_targets)
@@ -909,11 +913,11 @@ class FactorioFactoryChain():
                 for k, v in updated_targets.items():
                     assert k in factory.optimal_pricing_model.keys(), k
 
-                changed = factory.calculate_optimal_factory(last_reference_model, self.uncompiled_cost_function) or changed
+                changed = factory.calculate_optimal_factory(last_reference_model, self._uncompiled_cost_function) or changed
                 last_reference_model = factory.optimal_pricing_model
 
             elif isinstance(factory, FactorioScienceFactory):
-                changed = factory.calculate_optimal_factory(last_reference_model, self.uncompiled_cost_function) or changed
+                changed = factory.calculate_optimal_factory(last_reference_model, self._uncompiled_cost_function) or changed
                 pass #we don't update science factories at the moment
         
         return changed
@@ -930,7 +934,7 @@ class FactorioFactoryChain():
         manual_factory_ident = 1
         material_factory_ident = 1
         science_factory_ident = 1
-        for factory in self.chain[1:]:
+        for factory in self._chain[1:]:
             if isinstance(factory, FactorioManualFactory):
                 if not factory.optimized:
                     logging.error("Found Manual Factory "+str(manual_factory_ident)+" unoptimized.")
@@ -978,7 +982,7 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
     str
         The factory type
     """
-    output_items = list(last_material.targets.keys())
+    output_items = list(last_material._targets.keys())
     #logging.info("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=")
     #logging.info(output_items)
 
@@ -1007,15 +1011,15 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
         else:
             material_target_names: list[str] = _new_material_factory_targets(instance, R_vector_table.valid_rows)
             #logging.info(material_target_names)
-            difference: set[str] = set(material_target_names).difference(set(last_material.targets.keys()))
+            difference: set[str] = set(material_target_names).difference(set(last_material._targets.keys()))
             #logging.info(difference)
-            if len(difference)>0 and (not isinstance(last_material, FactorioManualFactory) or len(material_target_names)>len(last_material.targets.keys())): 
+            if len(difference)>0 and (not isinstance(last_material, FactorioManualFactory) or len(material_target_names)>len(last_material._targets.keys())): 
                 #second check here is due to needing to keep using manual factories until material factories can actually take over
                 factory_type = "material"
                 target_names = material_target_names
             else:
                 factory_type = "manual"
-                manual_constructs = ManualConstruct.columns(instance.manual_constructs, known_technologies)
+                manual_constructs = ManualConstruct.columns(instance._manual_constructs, known_technologies)
                 R_vector_table = instance.compiled.columns(cost_function, 
                                                             inverse_priced_indices, 
                                                             None, known_technologies).shadow_attachment(manual_constructs).reduced
@@ -1042,7 +1046,7 @@ def _new_science_factory_targets(instance: FactorioInstance, valid_rows: np.ndar
         All possible tools in the valid_rows
     """    
     target_names: list[str] = []
-    for tool in instance.data_raw['tool'].keys():
+    for tool in instance._data_raw['tool'].keys():
         if valid_rows[instance.reference_list.index(tool)]:
             target_names.append(tool)
     return target_names
@@ -1075,7 +1079,7 @@ def _science_factory_parameters(instance: FactorioInstance, previous_science: Fa
 
     last_coverage: TechnologicalLimitation = previous_science.tech_coverage
 
-    targets = CompressedVector({instance.tech_tree.inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+    targets = CompressedVector({instance._tech_tree._inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 
     return targets, covering_to, last_coverage
 

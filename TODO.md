@@ -48,10 +48,6 @@ Combining beacon operations together?
 
 ## Lots of naming stuff
 
-Vectors vs columns
-setups vs designs
-value vs evaluation
-etc.
 Additionally private vs public class variables
 
 ## We aren't using base productivity

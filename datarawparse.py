@@ -38,10 +38,10 @@ def fuels_from_energy_source(energy_source: dict, instance: FactorioInstance) ->
     
     elif energy_source['type']=='burner': #https://lua-api.factorio.com/latest/types/BurnerEnergySource.html
         if 'fuel_categories' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance._data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category'] in energy_source['fuel_categories']]
         elif 'fuel_category' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance._data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category']==energy_source['fuel_category']]
         else:
             raise ValueError("Category-less burner energy source: "+str(energy_source))
@@ -52,9 +52,9 @@ def fuels_from_energy_source(energy_source: dict, instance: FactorioInstance) ->
     elif energy_source['type']=='fluid': #https://lua-api.factorio.com/latest/types/FluidEnergySource.html
         if 'burns_fluid' in energy_source.keys(): #https://lua-api.factorio.com/latest/types/FluidEnergySource.html#burns_fluid
             if 'filter' in energy_source['fluid_box'].keys(): #https://lua-api.factorio.com/latest/types/FluidBox.html#filter
-                return [(energy_source['fluid_box']['filter'], instance.data_raw['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
+                return [(energy_source['fluid_box']['filter'], instance._data_raw['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
             else:
-                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in instance.data_raw['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
+                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in instance._data_raw['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
         else:
             if not 'filter' in energy_source['fluid_box'].keys():
                 raise ValueError("Non-burning fluid energy source without filter: "+str(energy_source))

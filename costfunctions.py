@@ -63,7 +63,7 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
     np.ndarray
         Cost array
     """    
-    if construct.isa_mining_drill:
+    if construct._isa_mining_drill:
         return standard_cost_function(pricing_vector, construct, point_evaluations)
     else:
         #print(point_evaluations.beacon_cost.shape)
@@ -116,7 +116,7 @@ def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCons
     np.ndarray
         Cost array
     """    
-    out = point_evaluations.effective_area + construct.effective_area
+    out = point_evaluations.effective_area + construct._effective_area
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out
