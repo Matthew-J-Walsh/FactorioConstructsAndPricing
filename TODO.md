@@ -42,9 +42,9 @@ Combining beacon operations together?
 
 ## Changes in cost functions due to effective area and the like
 
-## We aren't using base productivity
-
 ## Fix stabilization
+
+Also add more logical stabilization interfacing.
 
 
 # Progression accuracy
@@ -52,6 +52,8 @@ Combining beacon operations together?
 ## Quality in science factories!
 
 How do we handle more optimal processing in science factories (which may include running items through quality for material factories)?
+
+WE CAN COMBINE A SCIENCE AT MATERIAL FACTORY INTO ONE. The material factory won't build the science factory but that allows for both to work.
 
 ## Better catalyst managment
 

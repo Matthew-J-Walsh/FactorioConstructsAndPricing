@@ -471,6 +471,58 @@ class ColumnTable:
 
         return ColumnTable(self.columns[:, sort_list], self.costs[sort_list], self.true_costs[:, sort_list], self.idents[sort_list])
 
+    def stabilize_row(self, row: int, direction: int) -> ColumnTable:
+        """Stabilizes a row in a direction
+
+        Parameters
+        ----------
+        row : int
+            Row to stabilize
+        direction : int
+            Direction to stabilize
+
+        Returns
+        -------
+        ColumnTable
+            _description_
+
+        Raises
+        ------
+        ValueError
+            _description_
+        """        
+        if self.columns.shape[0]==0:
+            return self
+
+        if direction>0:
+            violating_columns = np.where(self.columns[:, row] < 0)[0]
+            unviolating_columns = np.where(self.columns[:, row] > 0)[0]
+        elif direction<0:
+            violating_columns = np.where(self.columns[:, row] > 0)[0]
+            unviolating_columns = np.where(self.columns[:, row] < 0)[0]
+        else:
+            raise ValueError("TODO: Remove me. Error: direction? "+str(direction))
+        
+        retained_columns: ColumnTable = self.mask(unviolating_columns)
+
+        fixed_columns: list[ColumnTable] = []
+        for vcol, ucol in itertools.product(violating_columns, unviolating_columns):
+            scale_factor = self.columns[vcol, row] / self.columns[ucol, row]
+            ncolumn = self.columns[ucol] - scale_factor * self.columns[vcol]
+            ncost = self.costs[ucol] - scale_factor * self.costs[vcol]
+            ntrue_cost = self.true_costs[ucol] - scale_factor * self.true_costs[vcol]
+            nident = self.idents[ucol] + -1 * scale_factor * self.idents[vcol]
+            fixed_columns.append(ColumnTable(ncolumn.reshape(1, -1), np.array([ncost]), ntrue_cost.reshape(1, -1), np.array([nident])))
+            #TODO: remove asserts
+            assert fixed_columns[-1].columns.shape[1] == self.columns.shape[1]
+            assert fixed_columns[-1].true_costs.shape[1] == self.true_costs.shape[1]
+        
+        result = ColumnTable.sum([retained_columns]+fixed_columns)
+
+        assert (result.columns[:, row]!=0).sum()==0
+
+        return result
+
     def __add__(self, other: ColumnTable) -> ColumnTable:
         """Adds two tables together
 

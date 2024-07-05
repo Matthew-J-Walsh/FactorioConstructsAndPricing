@@ -831,8 +831,8 @@ class ComplexConstruct:
             Table of columns for this construct
         """
         assert len(self._stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        table = [sc.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self._subconstructs]
-        out = ColumnTable.sum(table, inverse_priced_indices.shape[0])
+        table: list[ColumnTable] = [sc.columns(cost_function, inverse_priced_indices, dual_vector, known_technologies) for sc in self._subconstructs]
+        out: ColumnTable = ColumnTable.sum(table, inverse_priced_indices.shape[0])
 
         assert out.columns.shape[0] == out.true_costs.shape[0]
         assert out.columns.shape[1] == out.true_costs.shape[1]
@@ -840,42 +840,14 @@ class ComplexConstruct:
         assert out.columns.shape[1] == out.idents.shape[0]
 
         assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore
-        return out
 
         for stab_row, stab_dir in self._stabilization.items():
-            raise NotImplementedError("Cost true cost issue.")
             if stab_dir >= 0:
-                violating_columns = np.where(vector[:, stab_row] < 0)[0]
-                unviolating_columns = np.where(vector[:, stab_row] > 0)[0]
-                assert len(unviolating_columns)>0, "Impossible stabilization? "+str(stab_row)
-                fixed_columns: list[np.ndarray] = [vector[unviolating_columns]]
-                fixed_costs: list[np.ndarray] = [true_cost[unviolating_columns]]
-                fixed_idents: np.ndarray[CompressedVector, Any] = ident[unviolating_columns]
-                for vcol, ucol in itertools.product(violating_columns, unviolating_columns):
-                    fixed_columns.append(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol])
-                    assert fixed_columns[-1][stab_row]==0 #todo remove me
-                    fixed_costs.append(true_cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * true_cost[vcol])
-                    fixed_idents = np.concatenate((fixed_idents, np.array([ident[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) *ident[ucol]])))
-                vector = np.concatenate(fixed_columns, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_columns))
-                true_cost = np.concatenate(fixed_costs, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_costs))
-                ident = fixed_idents
+                out = out.stabilize_row(stab_row, 1)
             if stab_dir <= 0:
-                violating_columns = np.where(vector[:, stab_row] > 0)[0]
-                unviolating_columns = np.where(vector[:, stab_row] < 0)[0]
-                assert len(unviolating_columns)>0, "Impossible stabilization? "+str(stab_row)
-                fixed_columns: list[np.ndarray] = [vector[unviolating_columns]]
-                fixed_costs: list[np.ndarray] = [true_cost[unviolating_columns]]
-                fixed_idents: np.ndarray[CompressedVector, Any] = ident[unviolating_columns]
-                for vcol, ucol in itertools.product(violating_columns, unviolating_columns):
-                    fixed_columns.append(vector[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * vector[vcol])
-                    assert fixed_columns[-1][stab_row]==0 #todo remove me
-                    fixed_costs.append(true_cost[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) * true_cost[vcol])
-                    fixed_idents = np.concatenate((fixed_idents, np.array([ident[ucol] - (vector[vcol, stab_row] / vector[ucol, stab_row]) *ident[ucol]])))
-                vector = np.concatenate(fixed_columns, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_columns))
-                true_cost = np.concatenate(fixed_costs, axis=1)#sparse.csr_matrix(sparse.hstack(fixed_costs))
-                ident = fixed_idents
+                out = out.stabilize_row(stab_row, -1)
 
-        return vector, cost, true_cost, ident
+        return out
 
     def efficiency_analysis(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, 
                             known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> float:
