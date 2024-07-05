@@ -38,13 +38,7 @@ Combining beacon operations together?
 
 ## Decorator improvements for: Overloading .add(), type checking interface inputs
 
-## Special case where there are disjoint research bonuses for productivity???
-
 ## Changes in cost functions due to effective area and the like
-
-## Add more logical stabilization interfacing
-
-## Optimize ResearchTable.value() to drop once we drop one.
 
 
 # Progression accuracy

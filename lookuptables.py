@@ -792,7 +792,7 @@ class ComplexConstruct:
         Name for this construct
     """
     _subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
-    _stabilization: dict
+    _stabilization: dict[int, str]
     ident: str
 
     def __init__(self, subconstructs: list[ComplexConstruct], ident: str) -> None:
@@ -808,19 +808,19 @@ class ComplexConstruct:
         self._stabilization = {}
         self.ident = ident
 
-    def stabilize(self, row: int, direction: int) -> None:
+    def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
         """Applies stabilization on this ComplexConstruct
 
         Parameters
         ----------
         row : int
             Which row to stabilize
-        direction : int
-            Direction of stabilization. 1: Positive, 0: Positive and Negative, -1: Negative
+        direction : str
+            Direction of stabilization. "Positive", "Positive and Negative", "Negative"
         """
         if row in self._stabilization.keys():
-            if direction==0 or self._stabilization[row]==0 or direction!=self._stabilization[row]:
-                self._stabilization[row] = 0
+            if direction=="Positive and Negative" or self._stabilization[row]=="Positive and Negative" or direction!=self._stabilization[row]:
+                self._stabilization[row] = "Positive and Negative"
         else:
             self._stabilization[row] = direction
 
@@ -855,9 +855,9 @@ class ComplexConstruct:
         assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore
 
         for stab_row, stab_dir in self._stabilization.items():
-            if stab_dir >= 0:
+            if "Positive" in stab_dir:
                 out = out.stabilize_row(stab_row, 1)
-            if stab_dir <= 0:
+            if "Negative" in stab_dir:
                 out = out.stabilize_row(stab_row, -1)
 
         return out
@@ -943,21 +943,16 @@ class SingularConstruct(ComplexConstruct):
         self._stabilization = {}
         self.ident = subconstruct._origin.ident
 
-    def stabilize(self, row: int, direction: int) -> None:
-        """Cannot stabilize a singular constuct
+    def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
+        """Applies stabilization on this ComplexConstruct
 
         Parameters
         ----------
         row : int
-            Don't use
-        direction : int
-            Don't use
-
-        Raises
-        ------
-        RuntimeError
-            Cannot stabilize a singular constuct
-        """        
+            Which row to stabilize
+        direction : str
+            Direction of stabilization. "Positive", "Positive and Negative", "Negative"
+        """
         raise RuntimeError("Cannot stabilize a singular constuct.")
 
     def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
