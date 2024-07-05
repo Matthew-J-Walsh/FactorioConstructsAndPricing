@@ -567,8 +567,6 @@ class CompiledConstruct:
     -------
     _origin : UncompiledConstruct
         Construct to compile
-    _technological_lookup_tables : ResearchTable
-        ResearchTable containing lookup tables associated with this Construct given a Tech Level
     _technological_speed_multipliers : ResearchTable
         ResearchTable containing speed multipliers associated with this Construct given a Tech Level
     effect_transform : sparse.csr_matrix
@@ -581,15 +579,18 @@ class CompiledConstruct:
         Area usage of an instance without beacons.
     _isa_mining_drill : bool
         If this construct should be priced based on size when calculating in size restricted mode
+    _instance: FractionInstance
+        Instance associated with this construct
     """
     _origin: UncompiledConstruct
-    _technological_lookup_tables: ResearchTable
+    _technological_productivity_table: ResearchTable
     _technological_speed_multipliers: ResearchTable
     effect_transform: sparse.csr_matrix
     base_cost: np.ndarray
     _required_price_indices: np.ndarray
     _effective_area: int
     _isa_mining_drill: bool
+    _instance: FactorioInstance
 
     def __init__(self, origin: UncompiledConstruct, instance: FactorioInstance):
         """
@@ -602,17 +603,23 @@ class CompiledConstruct:
         """        
         self._origin = origin
 
+        #if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
+        #    self._technological_lookup_tables = ResearchTable()
+        #    for limit, base_prod in instance.research_modifiers['laboratory-productivity']:
+        #        self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+        #elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
+        #    self._technological_lookup_tables = ResearchTable()
+        #    for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']:
+        #        self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+        #else:
+        #    self._technological_lookup_tables = ResearchTable()
+        #    self._technological_lookup_tables.add(origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity))
         if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
-            self._technological_lookup_tables = ResearchTable()
-            for limit, base_prod in instance.research_modifiers['laboratory-productivity']:
-                self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+            self._technological_productivity_table = instance.research_modifiers['laboratory-productivity']
         elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
-            self._technological_lookup_tables = ResearchTable()
-            for limit, base_prod in instance.research_modifiers['mining-drill-productivity-bonus']:
-                self._technological_lookup_tables.add(limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity+base_prod))
+            self._technological_productivity_table = instance.research_modifiers['mining-drill-productivity-bonus']
         else:
-            self._technological_lookup_tables = ResearchTable()
-            self._technological_lookup_tables.add(origin.limit, link_lookup_table(origin.internal_module_limit, (origin.building['tile_width'], origin.building['tile_height']), origin.allowed_modules, instance, origin.base_productivity))
+            self._technological_productivity_table = ResearchTable()
         if "laboratory-speed" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratorySpeedModifier.html
             self._technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
         else:
@@ -634,6 +641,8 @@ class CompiledConstruct:
         self._effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
 
         self._isa_mining_drill = origin.building['type']=="mining-drill"
+
+        self._instance = instance
             
     def lookup_table(self, known_technologies: TechnologicalLimitation) -> ModuleLookupTable:
         """Calculate the highest ModuleLookupTable that has been unlocked
@@ -648,7 +657,11 @@ class CompiledConstruct:
         ModuleLookupTable
             The highest unlocked lookup table
         """
-        return self._technological_lookup_tables.max(known_technologies)
+        #return self._technological_lookup_tables.max(known_technologies)
+        return link_lookup_table(self._origin.internal_module_limit, 
+                                 (self._origin.building['tile_width'], self._origin.building['tile_height']), 
+                                 self._origin.allowed_modules, self._instance, 
+                                 self._origin.base_productivity+self._technological_productivity_table.value(known_technologies))
     
     def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
         """Calculate the speed multiplier at a technological level
@@ -663,7 +676,7 @@ class CompiledConstruct:
         float
             Multiplier
         """
-        return self._technological_speed_multipliers.value(known_technologies)
+        return float(self._technological_speed_multipliers.value(known_technologies))
 
     def columns(self, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None, known_technologies: TechnologicalLimitation) -> ColumnTable:
         """Produces the best column possible given a pricing model

@@ -42,9 +42,9 @@ Combining beacon operations together?
 
 ## Changes in cost functions due to effective area and the like
 
-## Fix stabilization
+## Add more logical stabilization interfacing
 
-Also add more logical stabilization interfacing.
+## Optimize ResearchTable.value() to drop once we drop one.
 
 
 # Progression accuracy

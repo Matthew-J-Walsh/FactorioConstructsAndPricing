@@ -669,16 +669,14 @@ def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> di
     """
     effect_table: dict[str, ResearchTable] = {}
     for modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "laboratory-speed"]:
-        effect_table[modifier_type] = ResearchTable()
-        effect_table[modifier_type].add(TechnologicalLimitation(tech_tree), 0.0 if 'productivity' in modifier_type else 1.0)
+        effect_table[modifier_type] = ResearchTable(Fraction(0) if 'productivity' in modifier_type else Fraction(1))
         for technology in data['technology'].values():
             if 'effects' in technology.keys():
                 for modifier in technology['effects']:
                     if modifier['type'] == modifier_type:
-                        effect_table[modifier_type].add(TechnologicalLimitation(tech_tree, sets_of_researches=[[technology['name']]]), modifier['modifier'])
+                        effect_table[modifier_type].add(TechnologicalLimitation(tech_tree, sets_of_researches=[[technology['name']]]), Fraction(modifier['modifier']).limit_denominator())
 
-    effect_table["no-speed-modifier"] = ResearchTable()
-    effect_table["no-speed-modifier"].add(TechnologicalLimitation(tech_tree), 1.0)
+    effect_table["no-speed-modifier"] = ResearchTable(Fraction(1))
 
     return effect_table
 

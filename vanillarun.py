@@ -9,17 +9,18 @@ logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s",
 logger = logging.getLogger()
 from tools import *
 
-def vanilla_main(optimization_mode: dict | str = 'standard', instance_filename: str = "vanilla_instance.pickle", force_rebuild: bool = True):
+def vanilla_main(optimization_mode: dict | str = 'standard'):
     print("Starting run.")
     gamefiles_filename = 'vanilla-rawdata.json'
     output_file = "RunResultsSave.xlsx"
-    if not force_rebuild and os.path.isfile(instance_filename): #False:
-        vanilla = FactorioInstance.load(instance_filename)
-        print("Instance loaded.")
-    else:
-        vanilla = FactorioInstance(gamefiles_filename)
-        vanilla.save(instance_filename)
-        print("Instance built and saved.")
+    vanilla = FactorioInstance(gamefiles_filename)
+    #if not force_rebuild and os.path.isfile(instance_filename): #False:
+    #    vanilla = FactorioInstance.load(instance_filename)
+    #    print("Instance loaded.")
+    #else:
+    #    vanilla = FactorioInstance(gamefiles_filename)
+    #    vanilla.save(instance_filename)
+    #    print("Instance built and saved.")
 
     if isinstance(optimization_mode, dict):
         uncompiled_cost_function: CostFunction = hybrid_cost_function(optimization_mode, vanilla)

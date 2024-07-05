@@ -622,21 +622,28 @@ class ResearchTable:
     """    
     _limits: list[TechnologicalLimitation]
     _values: list[Any]
+    _base: Fraction
 
-    def __init__(self):
+    def __init__(self, base: Fraction = Fraction(0)):
         """Empty init for ordering
+
+        Parameters
+        ----------
+        base : Fraction, optional
+            Base value of the table, by default 0
         """        
         self._limits = []
         self._values = []
+        self._base = base
     
-    def add(self, limit: TechnologicalLimitation, value: Any):
+    def add(self, limit: TechnologicalLimitation, value: Fraction):
         """Adds an value to the table
 
         Parameters
         ----------
         limit : TechnologicalLimitation
             Tech level to add at
-        element : Any
+        element : Fraction
             Value to add
         """        
         if len(self._limits)!=0:
@@ -648,7 +655,7 @@ class ResearchTable:
         self._limits.append(limit)
         self._values.append(value)
 
-    def value(self, known_technologies: TechnologicalLimitation) -> Any:
+    def value(self, known_technologies: TechnologicalLimitation) -> Fraction:
         """Evalutes the sum of bonuses up to a tech level
 
         Parameters
@@ -658,10 +665,10 @@ class ResearchTable:
 
         Returns
         -------
-        Any
+        Float
             Sum of bonuses
         """        
-        return sum([value for limit, value in zip(self._limits, self._values) if known_technologies >= limit])
+        return sum([value for limit, value in zip(self._limits, self._values) if known_technologies >= limit]) + self._base
     
     def max(self, known_technologies: TechnologicalLimitation) -> Any:
         """Evaluates the maximum (ordered) value given the tech level
@@ -676,6 +683,7 @@ class ResearchTable:
         Any
             Maximum tech level's associated value
         """        
+        raise DeprecationWarning
         for i in range(len(self._limits)):
             if not known_technologies >= self._limits[i]:
                 return self._values[i-1]

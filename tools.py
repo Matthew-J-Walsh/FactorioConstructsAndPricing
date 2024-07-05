@@ -139,6 +139,7 @@ class FactorioInstance():
         filename : str
             File with FactorioInstance in it
         """
+        raise DeprecationWarning
         with open(filename, 'rb') as file:
             return pickle.load(file)
         
@@ -150,6 +151,7 @@ class FactorioInstance():
         filename : str
             File to place FactorioInstance into
         """
+        raise DeprecationWarning
         self._compiled = None
         with open(filename, 'wb') as file:
             pickle.dump(self, file)
