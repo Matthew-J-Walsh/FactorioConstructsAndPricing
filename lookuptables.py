@@ -799,16 +799,16 @@ class ComplexConstruct:
     _stabilization: dict[int, str]
     ident: str
 
-    def __init__(self, subconstructs: list[ComplexConstruct], ident: str) -> None:
+    def __init__(self, subconstructs: Sequence[ComplexConstruct], ident: str) -> None:
         """
         Parameters
         ----------
-        subconstructs : list[ComplexConstruct]
+        subconstructs : Sequence[ComplexConstruct]
             ComplexConstructs that makeup this Complex Construct
         ident : str
             Name for this construct
         """
-        self._subconstructs = subconstructs
+        self._subconstructs = list(subconstructs)
         self._stabilization = {}
         self.ident = ident
 

@@ -82,6 +82,10 @@ class FactorioInstance():
         raw_ore_pricing: dict[str, Real] | CompressedVector | None
             A particular raw ore pricing model. If None its assumed to be standard
         """
+        assert isinstance(filename, str)
+        assert isinstance(COST_MODE, str)
+        assert isinstance(nobuild, bool)
+        assert isinstance(raw_ore_pricing, dict) or isinstance(raw_ore_pricing, CompressedVector) or raw_ore_pricing is None
         with open(filename) as f:
             self._data_raw = json.load(f)
         
@@ -130,34 +134,10 @@ class FactorioInstance():
             self._compiled = None
             self.compiled
     
-    @staticmethod
-    def load(filename: str) -> FactorioInstance:
-        """Loads a FactorioInstance from memory
-
-        Parameters
-        ----------
-        filename : str
-            File with FactorioInstance in it
-        """
-        raise DeprecationWarning
-        with open(filename, 'rb') as file:
-            return pickle.load(file)
-        
-    def save(self, filename: str) -> None:
-        """Saves a FactorioInstance to memory
-
-        Parameters
-        ----------
-        filename : str
-            File to place FactorioInstance into
-        """
-        raise DeprecationWarning
-        self._compiled = None
-        with open(filename, 'wb') as file:
-            pickle.dump(self, file)
-
     @property
     def compiled(self) -> ComplexConstruct:
+        """Current compiled version of the whole instance
+        """        
         if self._compiled is None:
             self._compiled = ComplexConstruct(tuple([cc for cc in self._complex_constructs if not cc in self._disabled_constructs]), "Whole Game Construct") # type: ignore
         return self._compiled
@@ -170,6 +150,8 @@ class FactorioInstance():
         target_name : str
             Target name of complex construct to be disabled
         """
+        assert isinstance(target_name, str)
+
         self._disabled_constructs.append(self.search_complex_constructs(target_name))
         self._compiled = None
     
@@ -181,6 +163,8 @@ class FactorioInstance():
         target_name : str
             Target name of complex construct to be disabled
         """
+        assert isinstance(target_name, str)
+
         construct = self.search_complex_constructs(target_name)
         try:
             self._disabled_constructs.remove(construct)
@@ -201,6 +185,8 @@ class FactorioInstance():
         ComplexConstruct
             Closest match
         """ 
+        assert isinstance(target_name, str)
+
         best_matches: list[ComplexConstruct] = []
         match_distance = Levenshtein.distance(target_name, self._complex_constructs[0].ident)
         logging.debug("Atempting to translate: "+"\""+target_name+"\" starting distance is: "+str(match_distance)+" there "+("is" if target_name in [c.ident for c in self._complex_constructs] else "is not")+" a 0 length translation.")
@@ -217,7 +203,8 @@ class FactorioInstance():
         logging.debug("Translated: \""+target_name+"\" to mean the construct: \""+str(best_matches[0])+"\"")
         return best_matches[0]
 
-    def bind_complex_constructs(self, target_names: list[str | tuple[str, bool]], new_name: str | None = None) -> str:   
+    def bind_complex_constructs(self, target_names: list[str | tuple[str, bool]], new_name: str | None = None,
+                                prohibited_inputs: list[str] | None = None, prohibited_outputs: list[str] | None = None) -> str:   
         """Binds a list of complex constructs together, disables marked ones, and returns the new name they are under
 
         Parameters
@@ -226,12 +213,21 @@ class FactorioInstance():
             List of names and if the original construct should be disabled. If no bool is provided "True" is assumed.
         new_name : str | None, optional
             Specific name to use for the new construct, by default makes up a sensible one
+        prohibited_inputs : list[str] | None, optional
+            Items and fluids that shouldn't be inputs into the newly bound construct, default None
+        prohibited_outputs : list[str] | None, optional
+            Items and fluids that shouldn't be outputs into the newly bound construct, default None
 
         Returns
         -------
         str
             New construct name
         """
+        assert isinstance(target_names, list)
+        assert isinstance(new_name, str) or new_name is None
+        assert isinstance(prohibited_inputs, list) or prohibited_inputs is None
+        assert isinstance(prohibited_outputs, list) or prohibited_outputs is None
+
         lookup_names: list[str] = []
         disable_list: list[bool] = []
         for pp in target_names:
@@ -249,7 +245,16 @@ class FactorioInstance():
         else:
             logging.warning("new_names past to bind_complex_construct aren't checked for duplication TODO")
 
-        self._complex_constructs.append(ComplexConstruct(tuple(constructs), new_name)) # type: ignore
+        new_construct = ComplexConstruct(tuple(constructs), new_name)
+
+        if not prohibited_inputs is None:
+            for prohibited_input in prohibited_inputs:
+                new_construct.stabilize(self.reference_list.index(prohibited_input), "Negative")
+        if not prohibited_outputs is None:
+            for prohibited_output in prohibited_outputs:
+                new_construct.stabilize(self.reference_list.index(prohibited_output), "Positive")
+
+        self._complex_constructs.append(new_construct)
         for i, construct in enumerate(constructs):
             if disable_list[i]:
                 self.disable_complex_construct(construct.ident)
@@ -363,6 +368,10 @@ class FactorioInstance():
         TechnologicalLimitation
             Specified TechnologicalLimitation
         """
+        assert isinstance(fully_automated, list)
+        assert isinstance(extra_technologies, list)
+        assert isinstance(extra_recipes, list)
+
         return technological_limitation_from_specification(self, fully_automated=fully_automated, extra_technologies=extra_technologies, extra_recipes=extra_recipes)
 
     def add_post_analysis(self, target_name: str, target_outputs: dict[int, float]):
@@ -375,6 +384,9 @@ class FactorioInstance():
         target_outputs : dict[int, float]
             Output targets to optimize on for the target
         """        
+        assert isinstance(target_name, str)
+        assert isinstance(target_outputs, dict)
+
         self.post_analyses.update({target_name: target_outputs})
 
 
@@ -780,6 +792,8 @@ class FactorioFactoryChain():
             Cost function to use for this factory chain
         """
         assert isinstance(instance, FactorioInstance)
+        assert isinstance(uncompiled_cost_function, Callable)
+
         self._instance = instance
         self._chain = []
         self._uncompiled_cost_function = uncompiled_cost_function
@@ -794,6 +808,9 @@ class FactorioFactoryChain():
         starting_techs : TechnologicalLimitation
             TechnologicalLimitation of techs unlocked before building a starting factory
         """
+        assert isinstance(pricing_model, CompressedVector)
+        assert isinstance(starting_techs, TechnologicalLimitation)
+
         self._chain.append(InitialFactory(self._instance, pricing_model, starting_techs))
     
     def add(self, targets: CompressedVector | str | None = None) -> bool:
@@ -821,6 +838,8 @@ class FactorioFactoryChain():
         -------
         If the addition actually added a factory
         """
+        assert isinstance(targets, CompressedVector) or isinstance(targets, str) or targets is None
+
         factory_type: str = ""
         previous_sciences = [fac for fac in self._chain if isinstance(fac, FactorioScienceFactory)]
         last_material = [fac for fac in self._chain if isinstance(fac, FactorioMaterialFactory)][-1]
@@ -932,6 +951,8 @@ class FactorioFactoryChain():
         file_name : str
             Name of excel file to write to
         """
+        assert isinstance(file_name, str)
+
         writer = pd.ExcelWriter(file_name)
         manual_factory_ident = 1
         material_factory_ident = 1

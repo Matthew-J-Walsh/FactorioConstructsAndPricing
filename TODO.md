@@ -40,7 +40,7 @@ Combining beacon operations together?
 
 ## Add my try catches for better debugging
 
-Could do this with a decorator (or two)
+Could do this with a decorator. Nope. this destroys time checking in vscode because Microsoft, a multi TRILLION dollar company, relies on one guy's open-source project, so its an "upstream issue."
 
 
 
