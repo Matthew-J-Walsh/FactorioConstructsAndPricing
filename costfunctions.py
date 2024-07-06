@@ -42,7 +42,31 @@ def standard_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledC
     out = point_evaluations.beacon_cost @ pricing_vector + np.dot(construct.base_cost, pricing_vector)
     if not isinstance(out, np.ndarray):
         return np.array([out])
-    return out
+    return out.reshape(-1)
+
+def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+    """Cost function based on tiles taken up. Useful for space platforms
+
+    Parameters
+    ----------
+    pricing_vector : np.ndarray
+        Cost imposed for space usage
+    construct : luts.CompiledConstruct
+        Construct being priced
+    lookup_indicies : np.ndarray
+        Indicies in lookup table to calculate for
+    known_technologies : TechnologicalLimitation
+        Current tech level to calculate for 
+
+    Returns
+    -------
+    np.ndarray
+        Cost array
+    """    
+    out = point_evaluations.effective_area + construct.effective_area
+    if not isinstance(out, np.ndarray):
+        return np.array([out])
+    return out.reshape(-1)
 
 def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
     """Cost function based on ore tiles used
@@ -64,9 +88,8 @@ def spatial_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledCo
         Cost array
     """    
     if construct._isa_mining_drill:
-        return standard_cost_function(pricing_vector, construct, point_evaluations)
+        return space_cost_function(pricing_vector, construct, point_evaluations)
     else:
-        #print(point_evaluations.beacon_cost.shape)
         return np.zeros(point_evaluations.beacon_cost.shape[0])
 
 def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
@@ -93,30 +116,6 @@ def ore_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstr
     effect_transform_positive[effect_transform_positive < 0] = 0
     effect_vector = effect_transform_positive @ pricing_vector
     out = point_evaluations.multilinear_effect @ effect_vector
-    if not isinstance(out, np.ndarray):
-        return np.array([out])
-    return out
-
-def space_cost_function(pricing_vector: np.ndarray, construct: luts.CompiledConstruct, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
-    """Cost function based on tiles taken up. Useful for space platforms
-
-    Parameters
-    ----------
-    pricing_vector : np.ndarray
-        Cost imposed for space usage
-    construct : luts.CompiledConstruct
-        Construct being priced
-    lookup_indicies : np.ndarray
-        Indicies in lookup table to calculate for
-    known_technologies : TechnologicalLimitation
-        Current tech level to calculate for 
-
-    Returns
-    -------
-    np.ndarray
-        Cost array
-    """    
-    out = point_evaluations.effective_area + construct._effective_area
     if not isinstance(out, np.ndarray):
         return np.array([out])
     return out

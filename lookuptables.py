@@ -492,7 +492,7 @@ class ModuleLookupTable:
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str("UNKNOWN TODO")
 
-def get_best_point(construct: CompiledConstruct, multilinear_weighting_vector: np.ndarray, cost_function: CompiledCostFunction, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, int, PointEvaluations]:
+def get_best_point(construct: CompiledConstruct, multilinear_weighting_vector: np.ndarray, cost_function: CompiledCostFunction, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, np.intp, PointEvaluations]:
     """Calculates the best point given a set of poitns and their evaluations
 
     Parameters
@@ -518,10 +518,10 @@ def get_best_point(construct: CompiledConstruct, multilinear_weighting_vector: n
     point_values = (multilinear_weighting_vector @ point_evaluations.multilinear_effect.T).reshape(-1)
     point_costs = cost_function(construct, point_evaluations)
     if cost_mode:
-        best_point_index = int(point_values.argmax())
+        best_point_index = point_values.argmax()
         best_point_value = point_values[best_point_index]
     else:
-        best_point_index = int((point_values / point_costs).argmax())
+        best_point_index = (point_values / point_costs).argmax()
         best_point_value = point_values[best_point_index] / point_costs[best_point_index]
     #best_new_point_cost = new_point_costs[best_new_point_index]
     best_point_evaluation = PointEvaluations(point_evaluations.multilinear_effect[best_point_index].reshape(1, -1), point_evaluations.running_cost[best_point_index].reshape(1, -1), 
@@ -575,7 +575,7 @@ class CompiledConstruct:
         Cost vector associated with the module-less and beacon-less construct
     _required_price_indices : np.ndarray
         Indicies that must be priced to build this construct
-    _effective_area : int
+    effective_area : int
         Area usage of an instance without beacons.
     _isa_mining_drill : bool
         If this construct should be priced based on size when calculating in size restricted mode
@@ -588,7 +588,7 @@ class CompiledConstruct:
     effect_transform: sparse.csr_matrix
     base_cost: np.ndarray
     _required_price_indices: np.ndarray
-    _effective_area: int
+    effective_area: int
     _isa_mining_drill: bool
     _instance: FactorioInstance
 
@@ -638,7 +638,7 @@ class CompiledConstruct:
         
         self._required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
 
-        self._effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
+        self.effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
 
         self._isa_mining_drill = origin.building['type']=="mining-drill"
 
@@ -716,6 +716,10 @@ class CompiledConstruct:
             #logging.debug(cost)
             #logging.debug(sparse.csr_matrix(true_cost))
             #logging.debug(ident)
+            column = column.reshape(-1, 1)
+            cost = cost.reshape(-1)
+            true_cost = true_cost.reshape(-1, 1)
+            ident = ident.reshape(-1)
 
         assert column.shape[0] == self.base_cost.shape[0]
         assert true_cost.shape[0] == self.base_cost.shape[0]
@@ -849,7 +853,7 @@ class ComplexConstruct:
 
         assert out.columns.shape[0] == out.true_costs.shape[0]
         assert out.columns.shape[1] == out.true_costs.shape[1]
-        assert out.columns.shape[1] == out.costs.shape[0]
+        assert out.columns.shape[1] == out.costs.shape[0], str(out.columns.shape[1])+" "+str(out.costs.shape[0])
         assert out.columns.shape[1] == out.idents.shape[0]
 
         assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore

@@ -38,7 +38,10 @@ Combining beacon operations together?
 
 ## Decorator improvements for: Overloading .add(), type checking interface inputs
 
-## Changes in cost functions due to effective area and the like
+## Add my try catches for better debugging
+
+Could do this with a decorator (or two)
+
 
 
 # Progression accuracy
@@ -59,10 +62,15 @@ Doesn't work, breaks linearity
 
 # Requires expansion api
 
+## Productivity researches for recipe
+
+https://www.factorio.com/blog/post/fff-376
+
 ## Expansion Decay constructs
 
 Idea for decay: constructs with no cost that decays a decaying entity into its output.
 
 ## Fourth effect: Quality
 
+"So, recycling an iron plate will just return an iron plate, with 25% chance"
 Implement quality modules.
