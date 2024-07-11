@@ -36,7 +36,7 @@ Combining beacon operations together?
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## Decorator improvements for: Overloading .add(), type checking interface inputs
+## Decorator improvements for: Overloading .add()
 
 ## Add my try catches for better debugging
 

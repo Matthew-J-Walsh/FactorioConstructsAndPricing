@@ -101,3 +101,5 @@ RESEARCH_SPECIAL_STRING = "=research"
 #If daytime is being modified somehow it will need to be adjusted in this global (TODO: move to FactorioInstance? or FactoryChain?, Different Surfaces?)
 #For more information on this calculation see https://forums.factorio.com/viewtopic.php?f=5&t=5594
 DAYTIME_VARIABLES: dict[str, Fraction] = {"daytime": Fraction(25000,60*2), "nighttime": Fraction(25000,60*10), "dawntime/dusktime": Fraction(25000,60*5)} # type: ignore
+
+
