@@ -7,10 +7,6 @@ This file is a todo list of things with various levels of importance. List is in
 
 # Expansion Stuff
 
-## Intra/InterConstruct Transport Cost Tax
-
-Impose specific costs to all unstabilized inputs and outputs for a ComplexConstruct. This would effectively be like declaring "Everything in this construct is moved around via ___", and allow different levels of constructs to have different types of transport costs.
-
 ## Surface Restrictions
 
 Classify Constructs by surface, prohibiting specific constructs (some resources, throwing worthless items into the void) from being used depending on the factory surface. Should allow for inter-surface factories.
@@ -31,6 +27,12 @@ np.einsum vs np.kron
 Transposing stuff outside function
 Combining beacon operations together?
 
+## Reformat cost calc orders to precompute some stuff
+
+like static transport costs once we know the constuct
+
+
+
 
 # Misc improvements
 
@@ -41,6 +43,26 @@ Combining beacon operations together?
 ## Add my try catches for better debugging
 
 Could do this with a decorator. Nope. this destroys time checking in vscode because Microsoft, a multi TRILLION dollar company, relies on one guy's open-source project, so its an "upstream issue."
+
+## Inserter proper throughput
+
+Including known tech
+
+## split lookuptables file
+
+cause right now its constructs 2.0
+
+## testing factory in the middle of a chain
+
+Way for a testing factory to be made that isn't part of the chain, probably some sort of offshoot. useful for calculating the best way to make stuff.
+
+## Energy costs of transports
+
+## Space cost of transports
+
+## Ore cost takes into account productivity
+
+## Remaining transport cost pairs
 
 
 

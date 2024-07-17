@@ -7,9 +7,22 @@ if TYPE_CHECKING:
     from tools import FactorioInstance
 
 class PointEvaluations(NamedTuple):
+    """Evaluation matricies for a set of lookup table points
+
+    Members
+    -------
+    multilinear_effect : np.ndarray
+        Multilinear effect at each point
+    running_cost : np.ndarray
+        Running cost at each point
+    evaulated_cost : np.ndarray
+        Cost singular value at each point
+    effective_area : np.ndarray
+        Area used by machine at each point
+    """    
     multilinear_effect: np.ndarray
     running_cost: np.ndarray
-    beacon_cost: np.ndarray
+    evaulated_cost: np.ndarray
     effective_area: np.ndarray
 
 class UncompiledConstruct:

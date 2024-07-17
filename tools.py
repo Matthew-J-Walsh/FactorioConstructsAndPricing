@@ -11,6 +11,7 @@ from lpproblems import *
 from postprocessing import *
 from lookuptables import *
 from costfunctions import *
+from transportation import *
 
 
 class FactorioInstance():
@@ -34,6 +35,10 @@ class FactorioInstance():
         ComplexConstruct of the entire instance or None if hasn't been compiled since last change
     reference_list : tuple[str, ...]
         Every relevent item, fluid, and research identifier (sorted)
+    reference_classifications : np.ndarray
+        Classifications of the reference_list items
+    _transportation_tables : dict[str, TransportTable]
+        Tables for calculating item transporation costs
     catalyst_list : tuple[str, ...]
         All catalytic refrence_list elements
     active_list : tuple[str, ...]
@@ -60,6 +65,8 @@ class FactorioInstance():
     _disabled_constructs: list[ComplexConstruct]
     _compiled: ComplexConstruct | None
     reference_list: tuple[str, ...]
+    reference_classifications: np.ndarray
+    _transportation_tables: dict[str, TransportTable]
     catalyst_list: tuple[str, ...]
     active_list: tuple[str, ...]
     spatial_pricing: np.ndarray
@@ -96,6 +103,8 @@ class FactorioInstance():
         self.research_modifiers = generate_research_effect_tables(self._data_raw, self._tech_tree)
         self._uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self._uncompiled_constructs)
+        self.reference_classifications = classify_reference_list(self.reference_list, self._data_raw)
+        self._transportation_tables = {transport_type: table_function(self.reference_classifications, self.reference_list, self._data_raw) for transport_type, table_function in TRANSPORT_TABLE_FUNCTIONS.items()}
         self.catalyst_list = determine_catalysts(self._uncompiled_constructs, self.reference_list)
         self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self._data_raw)
         self._manual_constructs = generate_manual_constructs(self)
@@ -139,7 +148,7 @@ class FactorioInstance():
         """Current compiled version of the whole instance
         """        
         if self._compiled is None:
-            self._compiled = ComplexConstruct(tuple([cc for cc in self._complex_constructs if not cc in self._disabled_constructs]), "Whole Game Construct") # type: ignore
+            self._compiled = ComplexConstruct(tuple([cc for cc in self._complex_constructs if not cc in self._disabled_constructs]), "Whole Game Construct", BELT_TRANSPORT_STRING) # type: ignore
         return self._compiled
 
     def disable_complex_construct(self, target_name: str) -> None:
@@ -310,14 +319,16 @@ class FactorioInstance():
         for k, v in targets.items():
             u_j[self.reference_list.index(k)] = v
 
-        cost_function = lambda construct, point_evaluations: uncompiled_cost_function(p0_j, construct, point_evaluations)
+        cost_function: PricedCostFunction = uncompiled_cost_function(p0_j)
+
+        transport_costs: dict[str, TransportCostPair] = {transport_type: transport_func(p0_j, inverse_priced_indices, self.reference_classifications, transport_table) for (transport_type, transport_func), transport_table  in zip(TRANSPORT_COST_FUNCTIONS.items(), self._transportation_tables.values())}
 
         if use_manual:
             logging.info("Starting a manual program solving.")
-            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, ManualConstruct.columns(self._manual_constructs, known_technologies), recovered_run)
+            s_i, p_j, R_vector_table = solve_manual_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, transport_costs, known_technologies, ManualConstruct.columns(self._manual_constructs, known_technologies), recovered_run)
         else:
             logging.info("Starting a program solving.")
-            s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, known_technologies, recovered_run)
+            s_i, p_j, R_vector_table = solve_factory_optimization_problem(self.compiled, u_j, cost_function, inverse_priced_indices, transport_costs, known_technologies, recovered_run)
         
         logging.debug("Reconstructing factory.")
         s_i[np.where(s_i < 0)] = 0 #<0 is theoretically impossible, and indicates tiny tolerance errors, so we remove them to remove issues
@@ -334,7 +345,8 @@ class FactorioInstance():
             if positives[i]:
                 s = s + s_i[i] * R_vector_table.idents[i]
         
-        k: CompressedVector = _efficiency_analysis(self.compiled, cost_function, inverse_priced_indices, p_j, known_technologies, R_vector_table.valid_rows, self.post_analyses)
+        k: CompressedVector = _efficiency_analysis(self.compiled, ColumnSpecifier(cost_function, inverse_priced_indices, p_j, TransportCostPair.empty(len(self.reference_list)), 
+                                                                                  transport_costs, known_technologies), R_vector_table.valid_rows, self.post_analyses)
 
         fc_i = R_vector_table.true_costs @ s_i
         assert np.logical_or(fc_i >= 0, np.isclose(fc_i, 0, rtol=SOLVER_TOLERANCES['rtol'], atol=SOLVER_TOLERANCES['atol'])).all(), fc_i
@@ -343,7 +355,8 @@ class FactorioInstance():
             assert tempk in self.active_list, str(tempk)+": "+str(tempv)+", "+str(R_vector_table.idents[np.where(R_vector_table.true_costs[self.reference_list.index(tempk)]!=0)])
 
         #nmv, nmc, nmtc, nmi = self.compiled.reduce(cost_function, inverse_priced_indices, None, known_technologies)
-        nm_vector_table = self.compiled.columns(cost_function, inverse_priced_indices, None, known_technologies).reduced
+        nm_vector_table = self.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, 
+                                                                TransportCostPair.empty(len(self.reference_list)), transport_costs, known_technologies)).reduced
         nme = (nm_vector_table.columns.T @ p_j) / nm_vector_table.costs
         nmv = CompressedVector({list(k.keys())[0]: nme[i] for i, k in enumerate(nm_vector_table.idents) if len(k.keys())==1})
 
@@ -389,25 +402,46 @@ class FactorioInstance():
 
         self.post_analyses.update({target_name: target_outputs})
 
+    def repr_refed_tabled(self, arr: np.ndarray) -> str:
+        """Calculates a pretty string for multidimensional arrays where all dimensions are shaped based on the instance reference list
 
-def _efficiency_analysis(construct: ComplexConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, 
-                        known_technologies: TechnologicalLimitation, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> CompressedVector:
+        Parameters
+        ----------
+        arr : np.ndarray
+            array to create string for
+
+        Returns
+        -------
+        str
+            output string
+        """        
+        assert (np.array(arr.shape)==len(self.reference_list)).all(), "Shape mismatch: "+str(arr.shape)+" vs "+str(len(self.reference_list))
+
+        out: str = ""
+        if arr.ndim == 1:
+            for i, v in enumerate(arr):
+                if v!=0:
+                    out += self.reference_list[i]+": "+str(v)+"\n"
+            return (out[:-1] if len(out)>0 else out)
+        else:
+            for i in range(arr.shape[0]):
+                srepr = self.repr_refed_tabled(arr[i])
+                if len(srepr)!=0:
+                    out += self.reference_list[i]+'\n\t'+srepr.replace('\n', '\n\t')+'\n'
+            return (out[:-1] if len(out)>0 else out)
+
+
+def _efficiency_analysis(construct: ComplexConstruct, args: ColumnSpecifier, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> CompressedVector:
     """Constructs an efficency analysis of a ComplexConstruct recursively
 
     Parameters
     ----------
-    construct : ComplexConstruct
-        Construct to determine efficencies of
-    cost_function : Callable[[CompiledConstruct, np.ndarray]
-        A compiled cost function
-    inverse_priced_indices : np.ndarray
-        What indices of the pricing vector aren't priced
-    dual_vector : np.ndarray
-        Dual vector to calculate with, if None is given, give the module-less beacon-less design
-    known_technologies : TechnologicalLimitation
-        Current tech level to calculate for
+    args : ColumnSpecifier
+        ColumnSpecifier used to make columns for the analysis
     valid_rows : np.ndarray
         Outputing rows of the dual
+    post_analyses : dict[str, dict[int, float]]
+        All the post analyses needed for efficiency analysis
 
     Returns
     -------
@@ -417,8 +451,8 @@ def _efficiency_analysis(construct: ComplexConstruct, cost_function: CompiledCos
     efficiencies: CompressedVector = CompressedVector({})
     for sc in construct._subconstructs:
         if isinstance(sc, ComplexConstruct):
-            efficiencies.update({sc.ident: sc.efficiency_analysis(cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)})
-            efficiencies = efficiencies + _efficiency_analysis(sc, cost_function, inverse_priced_indices, dual_vector, known_technologies, valid_rows, post_analyses)
+            efficiencies.update({sc.ident: sc.efficiency_analysis(args, valid_rows, post_analyses)})
+            efficiencies = efficiencies + _efficiency_analysis(sc, args, valid_rows, post_analyses)
     return efficiencies
 
 
@@ -1009,14 +1043,13 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
     #logging.info("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=")
     #logging.info(output_items)
 
-    cost_function: CompiledCostFunction = lambda construct, point_evaluations: np.zeros(point_evaluations.beacon_cost.shape[0])
+    cost_function: PricedCostFunction = empty_cost_function(np.zeros(len(instance.reference_list)))
 
     inverse_priced_indices = np.ones(len(instance.reference_list))
     inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items], dtype=np.int32)] = 0
 
-    R_vector_table = instance.compiled.columns(cost_function, 
-                                                            inverse_priced_indices, 
-                                                            None, known_technologies).reduced
+    R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]), 
+                                                               {}, known_technologies)).reduced
     #logging.info([k for k in N_i])
 
     if target_types=="all tech":
@@ -1043,9 +1076,8 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
             else:
                 factory_type = "manual"
                 manual_constructs = ManualConstruct.columns(instance._manual_constructs, known_technologies)
-                R_vector_table = instance.compiled.columns(cost_function, 
-                                                            inverse_priced_indices, 
-                                                            None, known_technologies).shadow_attachment(manual_constructs).reduced
+                R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]), 
+                                                                           {}, known_technologies)).shadow_attachment(manual_constructs).reduced
                 target_names = _new_material_factory_targets(instance, R_vector_table.valid_rows)# + ['electric']
                 #logging.info(target_names)
 

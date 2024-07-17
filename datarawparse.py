@@ -517,6 +517,8 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
 
     Sets recipe crafting category to default if not set. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#category
 
+    Sets inserter 'throughput' value to the inserter item throughput, currently doesn't account for upgrades.
+
     Parameters
     ----------
     data : dict
@@ -647,6 +649,10 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
     for recipe in data['recipe'].values():
         if not 'category' in recipe.keys():
             recipe['category'] = "crafting"
+
+    logging.debug("Setting throughput for inserters.")
+    for inserter in data['inserter'].values():
+        inserter['throughput'] = 2 
 
 def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, ResearchTable]:
     """Generates research effect tables.

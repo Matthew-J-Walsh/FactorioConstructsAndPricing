@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from globalsandimports import *
 
+
 SOLID_REFERENCE_VALUE: int = 0
 FLUID_REFERENCE_VALUE: int = 1
 ELECTRIC_REFERENCE_VALUE: int = 2
-HEAT_REFERENCE_VALUE: int = 2
-RESEARCH_REFERENCE_VALUE: int = 3
+HEAT_REFERENCE_VALUE: int = 3
+RESEARCH_REFERENCE_VALUE: int = 4
 UNKNOWN_REFERENCE_VALUE: int = -1
 
 class TransportPair(NamedTuple):
@@ -23,12 +24,26 @@ class TransportCostPair(NamedTuple):
     static: np.ndarray
     scaling: np.ndarray
 
-class TransportCostTable(NamedTuple):
-    solid: TransportCostPair
-    liquid: TransportCostPair
-    electric: TransportCostPair
-    heat: TransportCostPair
+    @staticmethod
+    def empty(size: int) -> TransportCostPair:
+        return TransportCostPair(np.zeros((size, size)), np.zeros((size, size)))
 
+class TransportationTableMethod(Protocol):
+    """Transporation methods cost function typing
+
+    Parameters
+    ----------
+    pricing_vector : np.ndarray
+        The pricing vector in use
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ref_list vector that adds into the cost vector to calculate an additional cost
+        ref_list by ref_list matrix that multiplies into the effect vector to calculate an additional cost
+    """    
+    def __call__(self, classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportTable:     
+        raise NotImplementedError
 
 class TransportationMethod(Protocol):
     """Transporation methods cost function typing
@@ -44,7 +59,7 @@ class TransportationMethod(Protocol):
         ref_list vector that adds into the cost vector to calculate an additional cost
         ref_list by ref_list matrix that multiplies into the effect vector to calculate an additional cost
     """    
-    def __call__(self, pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, transportation_table: TransportTable) -> TransportCostTable:     
+    def __call__(self, pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, classification_array: np.ndarray, transportation_table: TransportTable) -> TransportCostPair:     
         raise NotImplementedError
 
 def classify_reference_list(reference_list: Sequence[str], data: dict) -> np.ndarray:
@@ -67,7 +82,10 @@ def classify_reference_list(reference_list: Sequence[str], data: dict) -> np.nda
         for cata in ITEM_SUB_PROTOTYPES:
             if reference_list[i] in data[cata].keys():
                 classification_array[i] = SOLID_REFERENCE_VALUE
-        if reference_list[i] in data["Fluid"].keys():
+        if reference_list[i] in data['fluid'].keys():
+            classification_array[i] = FLUID_REFERENCE_VALUE
+        if '@' in reference_list[i]:
+            assert reference_list[i].split('@')[0] in data['fluid'].keys()
             classification_array[i] = FLUID_REFERENCE_VALUE
         if reference_list[i] == 'electric':
             classification_array[i] = ELECTRIC_REFERENCE_VALUE
@@ -119,69 +137,90 @@ def get_belt_transport_table(classification_array: np.ndarray, reference_list: S
                           TransportPair(electric_densities, electric_options), 
                           TransportPair(heat_densities, heat_options))
 
-def get_rail_transport_table(classification_array: np.ndarray, stack_sizes: np.ndarray) -> TransportTable:
+def get_rail_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportTable:
     """numpy arrays for rail-teir density
     """
-    raise NotImplementedError
+    return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)))
 
-def get_logistics_transport_table(classification_array: np.ndarray, barrel_sizes: np.ndarray) -> TransportTable:
+def get_logistic_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportTable:
     """numpy arrays for rail-teir density
     """
-    raise NotImplementedError
+    return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)))
 
-def get_space_platform_transport_table(classification_array: np.ndarray, barrel_sizes: np.ndarray) -> TransportTable:
+def get_space_platform_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportTable:
     """numpy arrays for rail-teir density
     """
-    raise NotImplementedError
+    return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)),
+                          TransportPair(np.zeros(0), np.zeros(0)))
 
-def belt_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, belt_transport_table: TransportTable) -> TransportCostTable:
+BELT_TRANSPORT_STRING = "belt"
+def belt_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, classification_array: np.ndarray, belt_transport_table: TransportTable) -> TransportCostPair:
     """One side: 1 inserter, and prolly like 1 belt/item/sec
     Fluids: 1+1 normal pipe, 4+1 underground pipe
     """    
+    pricing_vector = pricing_vector.reshape(-1, 1)
+    inverse_priced_indices = inverse_priced_indices.reshape(-1, 1)
     (solid_densities, solid_options), (liquid_densities, liquid_options), (electric_densities, electric_options), (heat_densities, heat_options) = belt_transport_table
 
     valid_solid, valid_liquid, valid_electric, valid_heat = map(lambda options: options * (1 - inverse_priced_indices),
                                                                 (solid_options, liquid_options, electric_options, heat_options))
     
-    best_solid, best_liquid, best_electric, best_heat = map(lambda density, valid: (density * valid / pricing_vector).argmax(axis=0),
-                                                            (solid_densities, liquid_densities, electric_densities, heat_densities),
+    #Wait why aren't density and valid the same array?
+    best_solid, best_liquid, best_electric, best_heat = map(lambda valid: np.nanargmax(valid / pricing_vector, axis=0),
+                                                            #(solid_densities, liquid_densities, electric_densities, heat_densities),
                                                             (valid_solid, valid_liquid, valid_electric, valid_heat))
     
-    solid_scaling = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
-    solid_scaling[:, best_solid[0]] = 1.0 / solid_densities
-    solid_scaling[:, best_solid[1]] = 1.0 / solid_densities
+    static = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
+    scaling = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
 
-    liquid_static = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
-    liquid_static[:, best_liquid[0]] = 2
-    liquid_static[:, best_liquid[1]] = 5
+    scaling[classification_array==SOLID_REFERENCE_VALUE, best_solid[0]] = solid_densities[classification_array==SOLID_REFERENCE_VALUE] / solid_options[best_solid[0], 0]
+    scaling[classification_array==SOLID_REFERENCE_VALUE, best_solid[1]] = solid_densities[classification_array==SOLID_REFERENCE_VALUE] / solid_options[best_solid[1], 1]
 
-    electric_static = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
-    electric_static[:, best_electric] = 10 / electric_densities #is 10 appropriate?
+    static[classification_array==FLUID_REFERENCE_VALUE, best_liquid[0]] = 2
+    static[classification_array==FLUID_REFERENCE_VALUE, best_liquid[1]] = 5
 
-    heat_static = np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))
-    heat_static[:, best_heat] = 3
+    static[classification_array==ELECTRIC_REFERENCE_VALUE, best_electric] = 1
 
-    return TransportCostTable(TransportCostPair(np.zeros_like(pricing_vector), solid_scaling),
-                              TransportCostPair(liquid_static, np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))),
-                              TransportCostPair(electric_static, np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))),
-                              TransportCostPair(heat_static, np.zeros((pricing_vector.shape[0], pricing_vector.shape[0]))))
-    
+    static[classification_array==HEAT_REFERENCE_VALUE, best_heat] = 3
 
-def rail_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, rail_transport_table: TransportTable) -> TransportCostTable:
+    return TransportCostPair(static.T, scaling)
+
+RAIL_TRANSPORT_STRING = "rail"
+def rail_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, classification_array: np.ndarray, rail_transport_table: TransportTable) -> TransportCostPair:
     """One side: 2 inserters, a the highest level storage container, and prolly like 1 belt/item/sec
     Fluids: a couple of pipes and a pump.
     """
-    raise NotImplementedError
+    return TransportCostPair.empty(pricing_vector.shape[0])
 
-def logistics_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, logistics_transport_table: TransportTable) -> TransportCostTable:
+LOGISTIC_TRANSPORT_STRING = "logistic"
+def logistic_transportation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, classification_array: np.ndarray, logistics_transport_table: TransportTable) -> TransportCostPair:
     """One side: prolly like .25 bots/item/sec
     Fluids: Barreling?
     """
-    raise NotImplementedError
+    return TransportCostPair.empty(pricing_vector.shape[0])
 
-def space_platform_transporation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, space_platform_transport_table: TransportTable) -> TransportCostTable:
+SPACE_TRANSPORT_STRING = "space"
+def space_platform_transporation_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, classification_array: np.ndarray, space_platform_transport_table: TransportTable) -> TransportCostPair:
     """Not even guessable right now.
     """
-    raise NotImplementedError
+    return TransportCostPair.empty(pricing_vector.shape[0])
 
-BASE_TRANSPORT_COST_FUNCTION: TransportationMethod = belt_transportation_cost # type: ignore
+
+TRANSPORT_TABLE_FUNCTIONS: dict[str, TransportationTableMethod] = {BELT_TRANSPORT_STRING: get_belt_transport_table,
+                                                                   RAIL_TRANSPORT_STRING: get_rail_transport_table,
+                                                                   LOGISTIC_TRANSPORT_STRING: get_logistic_transport_table,
+                                                                   SPACE_TRANSPORT_STRING: get_space_platform_transport_table} # type: ignore
+
+TRANSPORT_COST_FUNCTIONS: dict[str, TransportationMethod] = {BELT_TRANSPORT_STRING: belt_transportation_cost,
+                                                             RAIL_TRANSPORT_STRING: rail_transportation_cost,
+                                                             LOGISTIC_TRANSPORT_STRING: logistic_transportation_cost,
+                                                             SPACE_TRANSPORT_STRING: space_platform_transporation_cost} # type: ignore
+

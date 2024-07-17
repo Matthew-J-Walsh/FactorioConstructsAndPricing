@@ -27,11 +27,11 @@ def vanilla_main(optimization_mode: dict | str = 'standard'):
     elif optimization_mode in ['standard', 'basic', 'simple', 'baseline', 'dual']:
         uncompiled_cost_function: CostFunction = standard_cost_function
     elif optimization_mode in ['spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space']:
-        uncompiled_cost_function: CostFunction = lambda pricing_vector, construct, point_evaluations: spatial_cost_function(vanilla.spatial_pricing, construct, point_evaluations)
+        uncompiled_cost_function: CostFunction = spatial_cost_function
     elif optimization_mode in ['ore', 'ore count', 'raw', 'raw resource', 'resources', 'resource count']:
-        uncompiled_cost_function: CostFunction = lambda pricing_vector, construct, point_evaluations: ore_cost_function(vanilla.raw_ore_pricing, construct, point_evaluations)
+        uncompiled_cost_function: CostFunction = ore_cost_function
     elif optimization_mode in ['space', 'space platform']:
-        uncompiled_cost_function: CostFunction = lambda pricing_vector, construct, point_evaluations: space_cost_function(vanilla.raw_ore_pricing, construct, point_evaluations)
+        uncompiled_cost_function: CostFunction = space_cost_function
     else:
         raise ValueError(optimization_mode)
     

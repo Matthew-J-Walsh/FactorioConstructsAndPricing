@@ -3,9 +3,10 @@ from globalsandimports import *
 from lookuptables import *
 from utils import *
 from lpsolvers import *
+from transportation import *
 
-def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
-                                       starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
+def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: PricedCostFunction, inverse_priced_indices: np.ndarray, transport_cost_table: dict[str, TransportCostPair], 
+                                       known_technologies: TechnologicalLimitation, starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector
 
     Parameters
@@ -14,10 +15,12 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         Construct being optimized, usually a ComplexConstruct of the entire factory
     u_j : np.ndarray
         Target output vector
-    cost_function : CompiledCostFunction
+    cost_function : PricedCostFunction
         Cost function to use
     inverse_priced_indices : np.ndarray
         What indices of the pricing vector aren't priced
+    transport_cost_table : dict[str, TransportCostPair]
+        Table of transportation cost matricies applied based on complex construct transport types
     known_technologies : TechnologicalLimitation
         Current tech level
     starting_columns : ColumnTable | None, optional
@@ -36,7 +39,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         Unable to form a factory for whatever reason
     """
     if starting_columns is None:
-        column_table = construct.columns(cost_function, inverse_priced_indices, None, known_technologies).reduced.sorted
+        column_table = construct.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]),
+                                                         transport_cost_table, known_technologies)).reduced.sorted
     else:
         column_table = starting_columns
 
@@ -62,7 +66,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
         assert not np.isclose(np.dot(column_table.costs, primal), 0)
         assert not np.isclose(dual, 0).all()
         
-        new_column_table = construct.columns(cost_function, inverse_priced_indices, dual, known_technologies).reduced.sorted
+        new_column_table = construct.columns(ColumnSpecifier(cost_function, inverse_priced_indices, dual, TransportCostPair.empty(inverse_priced_indices.shape[0]),
+                                                             transport_cost_table, known_technologies)).reduced.sorted
         new_column_table.mask(linear_transform_is_gt(new_column_table.columns.T, dual, .99 * new_column_table.costs))
         
         true_news = true_new_column_mask(column_table.columns, column_table.costs, new_column_table.columns, new_column_table.costs)
@@ -77,8 +82,8 @@ def solve_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndar
 
     return primal, dual, column_table
 
-def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation, 
-                                              manual_constructs: ColumnTable, starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
+def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: np.ndarray, cost_function: PricedCostFunction, inverse_priced_indices: np.ndarray, transport_cost_table: dict[str, TransportCostPair],
+                                              known_technologies: TechnologicalLimitation, manual_constructs: ColumnTable, starting_columns: ColumnTable | None = None) -> tuple[np.ndarray, np.ndarray, ColumnTable]:
     """Solve an optimization problem given a ComplexConstruct, a target output vector, and a cost vector.
     With extra columns that shouldn't be filtered and have max priority cost
 
@@ -88,10 +93,12 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         Construct being optimized, usually a ComplexConstruct of the entire factory
     u_j : np.ndarray
         Target output vector
-    cost_function : CompiledCostFunction
+    cost_function : PricedCostFunction
         Cost function to use
     inverse_priced_indices : np.ndarray
         What indices of the pricing vector aren't priced
+    transport_cost_table : dict[str, TransportCostPair]
+        Table of transportation cost matricies applied based on complex construct transport types
     known_technologies : TechnologicalLimitation
         Current tech level
     manual_constructs : ColumnTable
@@ -112,7 +119,8 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         Unable to form a factory for whatever reason
     """
     if starting_columns is None:
-        column_table = construct.columns(cost_function, inverse_priced_indices, None, known_technologies).shadow_attachment(manual_constructs).reduced.sorted
+        column_table = construct.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]),
+                                                         transport_cost_table, known_technologies)).shadow_attachment(manual_constructs).reduced.sorted
     else:
         column_table = starting_columns
 
@@ -139,7 +147,8 @@ def solve_manual_factory_optimization_problem(construct: ComplexConstruct, u_j: 
         old_valid_rows = valid_rows
         dual = dual[:-1]
         
-        new_column_table = construct.columns(cost_function, inverse_priced_indices, dual, known_technologies).shadow_attachment(manual_constructs).reduced.sorted
+        new_column_table = construct.columns(ColumnSpecifier(cost_function, inverse_priced_indices, dual, TransportCostPair.empty(inverse_priced_indices.shape[0]),
+                                                             transport_cost_table, known_technologies)).shadow_attachment(manual_constructs).reduced.sorted
         new_column_table = new_column_table.mask(linear_transform_is_gt(new_column_table.columns.T, dual, .99 * new_column_table.costs))
 
         true_news = true_new_column_mask(column_table.columns, column_table.costs, new_column_table.columns, new_column_table.costs)
