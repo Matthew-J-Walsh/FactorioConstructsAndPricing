@@ -5,22 +5,22 @@ from utils import *
 from transportation import *
 
 if TYPE_CHECKING:
-    import lookuptables as luts
-    import constructs as cstcts
-    import tools as tools
+    from lookuptables import CompiledConstruct
+    from constructs import PointEvaluations
+    from tools import FactorioInstance
 
 # have classes the compile into other classes to do this more efficiently
     
 class CompiledCostFunction(Protocol):
     """Class for typing of all cost functions after getting a pricing vector, construct, and transport costs.
     """    
-    def __call__(self, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+    def __call__(self, point_evaluations: PointEvaluations) -> np.ndarray:
         raise NotImplementedError
     
 class PricedCostFunction(Protocol):
     """Class for typing of all cost functions after getting a pricing vector.
     """    
-    def __call__(self, construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def __call__(self, construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         raise NotImplementedError
 
 class CostFunction(Protocol):
@@ -42,12 +42,12 @@ def empty_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     PricedCostFunction
         Zero priced cost function
     """    
-    def empty_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def empty_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         """Priced cost function that always returns a correctly shaped zero array
 
         Parameters
         ----------
-        construct : luts.CompiledConstruct
+        construct : CompiledConstruct
             Construct being priced (ignored here)
         transport_cost_pair : TransportCostPair
             Transport costs to use (ignored here)
@@ -57,12 +57,12 @@ def empty_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         CompiledCostFunction
             Zero compiled cost function
         """        
-        def empty_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        def empty_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
             """Compiled cost function that always returns a correctly shaped zero array
 
             Parameters
             ----------
-            point_evaluations : cstcts.PointEvaluations
+            point_evaluations : PointEvaluations
                 PointEvaluations for the points to price (used to determine proper zero array shape)
 
             Returns
@@ -74,17 +74,17 @@ def empty_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         return empty_compiled_function
     return empty_priced_function
 
-def true_cost_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair, point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+def true_cost_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair, point_evaluations: PointEvaluations) -> np.ndarray:
     """Calcualtes the true item cost of a setup. Eventually used to decide what previous factories must build.
     Only accepts 1 point at the moment. TODO
 
     Parameters
     ----------
-    construct : luts.CompiledConstruct
+    construct : CompiledConstruct
         Construct being priced
     transport_cost_pair : TransportCostPair
         Transport costs to use
-    point_evaluations : cstcts.PointEvaluations
+    point_evaluations : PointEvaluations
         PointEvaluations for the points to price
 
     Returns
@@ -108,12 +108,12 @@ def standard_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     PricedCostFunction
         The half compiled cost function
     """    
-    def standard_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def standard_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         """Priced cost function using the previous factories pricing model
 
         Parameters
         ----------
-        construct : luts.CompiledConstruct
+        construct : CompiledConstruct
             Construct being priced
         transport_cost_pair : TransportCostPair
             Transport costs to use
@@ -125,12 +125,12 @@ def standard_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         """        
         static_cost = np.dot(transport_cost_pair.static @ construct.flow_characterization, pricing_vector) + np.dot(construct.base_cost, pricing_vector)
         scaling_cost = construct.flow_transform @ transport_cost_pair.scaling @ pricing_vector
-        def standard_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        def standard_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
             """Compiled cost function using the previous factories pricing model
 
             Parameters
             ----------
-            point_evaluations : cstcts.PointEvaluations
+            point_evaluations : PointEvaluations
                 PointEvaluations for the points to price
 
             Returns
@@ -158,12 +158,12 @@ def space_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     PricedCostFunction
         The half compiled cost function
     """    
-    def space_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def space_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         """Priced cost function using the space the factory takes
 
         Parameters
         ----------
-        construct : luts.CompiledConstruct
+        construct : CompiledConstruct
             Construct being priced
         transport_cost_pair : TransportCostPair
             Transport costs to use (not used yet TODO)
@@ -173,12 +173,12 @@ def space_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         CompiledCostFunction
             The fully compiled cost function
         """        
-        def space_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        def space_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
             """Compiled cost function using the space the factory takes
 
             Parameters
             ----------
-            point_evaluations : cstcts.PointEvaluations
+            point_evaluations : PointEvaluations
                 PointEvaluations for the points to price
 
             Returns
@@ -207,12 +207,12 @@ def spatial_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         The half compiled cost function
     """    
     space_func: PricedCostFunction = space_cost_function(pricing_vector)
-    def spatial_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def spatial_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         """Priced cost function using the space the factory takes on ore patches
 
         Parameters
         ----------
-        construct : luts.CompiledConstruct
+        construct : CompiledConstruct
             Construct being priced
         transport_cost_pair : TransportCostPair
             Transport costs to use (not used yet TODO)
@@ -225,12 +225,12 @@ def spatial_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         if construct._isa_mining_drill:
             return space_func(construct, transport_cost_pair)
         else:
-            def spatial_empty_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+            def spatial_empty_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
                 """Compiled cost function using the space the factory takes on ore patches for constructs that don't need a ore patch
 
                 Parameters
                 ----------
-                point_evaluations : cstcts.PointEvaluations
+                point_evaluations : PointEvaluations
                     PointEvaluations for the points to price
 
                 Returns
@@ -255,12 +255,12 @@ def ore_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     PricedCostFunction
         The half compiled cost function
     """    
-    def ore_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+    def ore_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         """Priced cost function using the ore mined from the ground
 
         Parameters
         ----------
-        construct : luts.CompiledConstruct
+        construct : CompiledConstruct
             Construct being priced
         transport_cost_pair : TransportCostPair
             Transport costs to use (not used yet TODO)
@@ -273,12 +273,12 @@ def ore_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         effect_transform_positive = construct.effect_transform.copy()
         effect_transform_positive[effect_transform_positive < 0] = 0
         effect_vector = effect_transform_positive @ construct._instance.raw_ore_pricing
-        def ore_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+        def ore_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
             """Compiled cost function using the ore mined from the ground
 
             Parameters
             ----------
-            point_evaluations : cstcts.PointEvaluations
+            point_evaluations : PointEvaluations
                 PointEvaluations for the points to price
 
             Returns
@@ -310,9 +310,9 @@ def multiply_cost_function(func: CostFunction, multiplier: Real) -> CostFunction
     """    
     def multiplied_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         func_priced: PricedCostFunction = func(pricing_vector)
-        def multiplied_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+        def multiplied_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
             func_compiled: CompiledCostFunction = func_priced(construct, transport_cost_pair)
-            def multiplied_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+            def multiplied_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
                 return func_compiled(point_evaluations) * multiplier
             return multiplied_compiled_function
         return multiplied_priced_function
@@ -336,16 +336,16 @@ def add_cost_functions(funcA: CostFunction, funcB: CostFunction) -> CostFunction
     def added_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         pricedA: PricedCostFunction = funcA(pricing_vector)
         pricedB: PricedCostFunction = funcB(pricing_vector)
-        def added_priced_function(construct: luts.CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
+        def added_priced_function(construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
             compiledA: CompiledCostFunction = pricedA(construct, transport_cost_pair)
             compiledB: CompiledCostFunction = pricedB(construct, transport_cost_pair)
-            def added_compiled_function(point_evaluations: cstcts.PointEvaluations) -> np.ndarray:
+            def added_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
                 return compiledA(point_evaluations) + compiledB(point_evaluations)
             return added_compiled_function
         return added_priced_function
     return added_cost_function
 
-def hybrid_cost_function(input: dict[str, Real], instance: tools.FactorioInstance) -> CostFunction:
+def hybrid_cost_function(input: dict[str, Real], instance: FactorioInstance) -> CostFunction:
     """Creates a combination cost function based on input weightings.
     'standard', 'basic', 'simple', 'baseline', 'dual' specify the standard cost method (last factory)
     'spatial', 'ore space', 'tiles', 'mining', 'mining tiles', 'resource space' specify the spatial cost method
@@ -360,7 +360,7 @@ def hybrid_cost_function(input: dict[str, Real], instance: tools.FactorioInstanc
 
     Returns
     -------
-    Callable[[np.ndarray, luts.CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
+    Callable[[np.ndarray, CompiledConstruct, np.ndarray, TechnologicalLimitation], np.ndarray]
         Uncompiled cost function
     """    
     func: CostFunction = empty_cost_function

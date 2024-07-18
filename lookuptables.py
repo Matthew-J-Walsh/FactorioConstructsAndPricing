@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from constructs import *
 from globalsandimports import *
 from lpsolvers import *
 from utils import *
@@ -9,6 +8,7 @@ from transportation import *
 
 if TYPE_CHECKING:
     from tools import FactorioInstance
+    from constructs import CompiledConstruct
 
 class ColumnSpecifier(NamedTuple):
     """All the information needed for a construct to decide what the best column is to generate
@@ -35,7 +35,6 @@ class ColumnSpecifier(NamedTuple):
     transport_cost_table: dict[str, TransportCostPair]
     known_technologies: TechnologicalLimitation
 
-
 def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: Sequence[str]) -> sparse.csr_matrix:
     """Calculates the multilinear effect form of deltas
 
@@ -61,7 +60,6 @@ def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects
                 multilinear[i, reference_list.index(k)] = v #pretty slow for csr_matrix, should we speed up with lil and convert back?
                 break
     return sparse.csr_matrix(multilinear)
-
 
 class ModuleLookupTable:
     """A lookup table for many CompiledConstructs, used to determine the optimal module setups
@@ -584,434 +582,74 @@ def link_lookup_table(module_count: int, building_size: tuple[int, int], avaiabl
     _LOOKUP_TABLES.append(new_table)
     return new_table
             
+def beacon_designs(building_size: tuple[int, int], beacon: dict) -> list[tuple[str, tuple[Fraction, Fraction]]]:
+    """Determines the possible optimal beacon designs for a building and beacon
 
-class CompiledConstruct:
-    """A compiled UncompiledConstruct for high speed and low memory column generation.
+    Parameters
+    ----------
+    building_size : tuple[int, int]
+        Size of building's tile
+    beacon : dict
+        Beacon buffing the building
 
-    Members
+    Returns
     -------
-    _origin : UncompiledConstruct
-        Construct to compile
-     _technological_productivity_table : ResearchTable
-        ResearchTable containing the added productivity associated with this Construct given a Tech Level
-    _technological_speed_multipliers : ResearchTable
-        ResearchTable containing speed multipliers associated with this Construct given a Tech Level
-    effect_transform : sparse.csr_matrix
-        Effect this construct has in multilinear form
-    flow_transform : sparse.csr_matrix
-        Absolute value of effect_transform. Used to calculate scaled transport costs
-    flow_characterization : np.ndarray
-        What reference values are changed by this construct. Used to calculate static transport costs
-    base_cost : np.ndarray
-        Cost vector associated with the module-less and beacon-less construct
-    _required_price_indices : np.ndarray
-        Indicies that must be priced to build this construct
-    effective_area : int
-        Area usage of an instance without beacons.
-    _isa_mining_drill : bool
-        If this construct should be priced based on size when calculating in size restricted mode
-    _instance: FractionInstance
-        Instance associated with this construct
-    """
-    _origin: UncompiledConstruct
-    _technological_productivity_table: ResearchTable
-    _technological_speed_multipliers: ResearchTable
-    effect_transform: sparse.csr_matrix
-    flow_transform: sparse.csr_matrix
-    flow_characterization: np.ndarray
-    base_cost: np.ndarray
-    _required_price_indices: np.ndarray
-    effective_area: int
-    _isa_mining_drill: bool
-    _instance: FactorioInstance
+    list[tuple[int, Fraction]]
+        List of tuples with beacons hitting each building and beacons/building in the tesselation
 
-    def __init__(self, origin: UncompiledConstruct, instance: FactorioInstance):
-        """
-        Parameters
-        ----------
-        origin : UncompiledConstruct
-            Construct to compile
-        instance : FactorioInstance
-            Origin FactorioInstance
-        """        
-        self._origin = origin
+    Raises
+    ------
+    ValueError
+        When cannot calculate the building size properly
+    """    
+    try:
+        M_plus = max(building_size)
+        M_minus = min(building_size)
+    except:
+        raise ValueError(building_size)
+    B_plus = int(max(beacon['tile_width'], beacon['tile_height']))
+    B_minus = int(min(beacon['tile_width'], beacon['tile_height']))
+    E_plus = int(beacon['supply_area_distance'])*2+B_plus
+    E_minus = int(beacon['supply_area_distance'])*2+B_minus
 
-        if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
-            self._technological_productivity_table = instance.research_modifiers['laboratory-productivity']
-        elif "mining-drill-productivity-bonus" in origin.research_effected: #https://lua-api.factorio.com/latest/types/MiningDrillProductivityBonusModifier.html
-            self._technological_productivity_table = instance.research_modifiers['mining-drill-productivity-bonus']
-        else:
-            self._technological_productivity_table = ResearchTable()
-        if "laboratory-speed" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratorySpeedModifier.html
-            self._technological_speed_multipliers = instance.research_modifiers['laboratory-speed']
-        else:
-            self._technological_speed_multipliers = instance.research_modifiers['no-speed-modifier']
-
-        self.effect_transform = encode_effect_deltas_to_multilinear(origin.deltas, origin.effect_effects, instance.reference_list)
-        self.flow_transform = abs(self.effect_transform)
-        self.flow_characterization = ((np.asarray(self.effect_transform.todense())!=0).sum(axis=0)!=0).astype(float).flatten()
-        assert self.flow_characterization.shape[0]==len(instance.reference_list), str(self.flow_characterization.shape[0])+", "+str(len(instance.reference_list))
-        
-        true_cost: CompressedVector = copy.deepcopy(origin.cost)
-        for item in instance.catalyst_list:
-            if item in origin.base_inputs.keys():
-                true_cost = true_cost + CompressedVector({item: -1 * origin.base_inputs[item]})
-        
-        self.base_cost = np.zeros(len(instance.reference_list))
-        for k, v in true_cost.items():
-            self.base_cost[instance.reference_list.index(k)] = v
-        
-        self._required_price_indices = np.array([instance.reference_list.index(k) for k in true_cost.keys()])
-
-        self.effective_area = origin.building['tile_width'] * origin.building['tile_height'] + min(origin.building['tile_width'], origin.building['tile_height'])
-
-        self._isa_mining_drill = origin.building['type']=="mining-drill"
-
-        self._instance = instance
+    designs = []
+    #surrounded buildings: same direction
+    surrounded_buildings_same_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_plus - 1)/B_minus)
+    surrounded_buildings_same_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_minus - 1)/B_minus)
+    designs.append(("surrounded-beacons same-direction",
+                    (4+2*surrounded_buildings_same_direction_side_A+2*surrounded_buildings_same_direction_side_B,
+                     2+surrounded_buildings_same_direction_side_A+surrounded_buildings_same_direction_side_B)))
+    #surrounded buildings: opposite direction
+    surrounded_buildings_opp_direction_side_A = math.floor(float(np.ceil(E_plus/2) - np.ceil(B_plus/2) + M_minus - 1)/B_minus)
+    surrounded_buildings_opp_direction_side_B = math.floor(float(np.ceil(E_minus/2) - np.ceil(B_minus/2) + M_plus - 1)/B_minus)
+    designs.append(("surrounded-beacons opposite-direction",
+                    (4+2*surrounded_buildings_opp_direction_side_A+2*surrounded_buildings_opp_direction_side_B,
+                     1*2+surrounded_buildings_opp_direction_side_A+surrounded_buildings_opp_direction_side_B)))
+    #efficient rows: beacons long way
+    efficient_rows_long_way_D = int(M_minus * np.ceil(B_plus / M_minus) - B_plus)
+    efficient_rows_long_way_LCM = int(np.lcm(M_minus, B_plus + efficient_rows_long_way_D))
+    efficient_rows_long_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_plus-2)/(B_plus + efficient_rows_long_way_D))-np.ceil(i*M_minus/(B_plus + efficient_rows_long_way_D))+1 for i in np.arange(efficient_rows_long_way_LCM)]).sum()/float(efficient_rows_long_way_LCM)).limit_denominator()
+    designs.append(("efficient-rows long-way",
+                    (efficient_rows_long_way_sum,
+                     float(efficient_rows_long_way_LCM)/(B_plus + efficient_rows_long_way_D))))
+    #efficient rows: beacons short way
+    efficient_rows_short_way_D = int(M_minus * np.ceil(B_minus / M_minus) - B_minus)
+    efficient_rows_short_way_LCM = int(np.lcm(M_minus, B_minus + efficient_rows_short_way_D))
+    efficient_rows_short_way_sum = Fraction(np.array([np.floor((i*M_minus+M_minus+E_minus-2)/(B_minus + efficient_rows_short_way_D))-np.ceil(i*M_minus/(B_minus + efficient_rows_short_way_D))+1 for i in np.arange(efficient_rows_short_way_LCM)]).sum()/float(efficient_rows_short_way_LCM)).limit_denominator()
+    designs.append(("efficient-rows short-way",
+                    (efficient_rows_short_way_sum,
+                     float(efficient_rows_short_way_LCM)/(B_minus + efficient_rows_short_way_D))))
     
-    def lookup_table(self, known_technologies: TechnologicalLimitation) -> ModuleLookupTable:
-        """Calculate the highest ModuleLookupTable that has been unlocked
+    mask = [True]*4
+    for i in range(4): #ew
+        for j in range(4):
+            if i!=j:
+                if (designs[i][0][0] >= designs[j][0][0] and designs[i][0][1] < designs[j][0][1]) or (designs[i][0][0] < designs[j][0][0] and designs[i][0][1] >= designs[j][0][1]):
+                    mask[j] = False
+    filtered_designs = []
+    for i in range(4):
+        if mask[i]:
+            filtered_designs.append(designs[i])
 
-        Parameters
-        ----------
-        known_technologies : TechnologicalLimitation
-            Current tech level to calculate for 
-
-        Returns
-        -------
-        ModuleLookupTable
-            The highest unlocked lookup table
-        """
-        #return self._technological_lookup_tables.max(known_technologies)
-        return link_lookup_table(self._origin.internal_module_limit, 
-                                 (self._origin.building['tile_width'], self._origin.building['tile_height']), 
-                                 self._origin.allowed_modules, self._instance, 
-                                 self._origin.base_productivity+self._technological_productivity_table.value(known_technologies))
-    
-    def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
-        """Calculate the speed multiplier at a technological level
-
-        Parameters
-        ----------
-        known_technologies : TechnologicalLimitation
-            Current tech level to calculate for
-
-        Returns
-        -------
-        float
-            Multiplier
-        """
-        return float(self._technological_speed_multipliers.value(known_technologies))
-
-    def columns(self, args: ColumnSpecifier) -> ColumnTable:
-        """Produces the best column possible given a pricing model
-
-        Parameters
-        ----------
-        args : ColumnSpecifier
-            ColumnSpecifier to make a column for
-
-        Returns
-        -------
-        ColumnTable
-            Table of column for this construct
-        """
-        if not (args.known_technologies >= self._origin.limit) or args.inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
-            column, cost, true_cost, ident = np.zeros((self.base_cost.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
-        else:
-            cost_function = args.cost_function(self, args.transport_residual_pair)
-            lookup_table = self.lookup_table(args.known_technologies)
-            speed_multi = self.speed_multiplier(args.known_technologies)
-
-            evaluation, module_string = lookup_table.best_point(self, cost_function, args.inverse_priced_indices, args.dual_vector)
-
-            column = (evaluation.multilinear_effect @ self.effect_transform + evaluation.running_cost.flatten()).reshape(-1, 1) * speed_multi
-            cost = cost_function(evaluation)
-            true_cost = true_cost_function(self, args.transport_residual_pair, evaluation)
-            ident = np.array([CompressedVector({self._origin.ident + module_string: 1})])
-
-            assert np.dot(true_cost.flatten(), args.inverse_priced_indices)==0, self._origin.ident+"'s true cost contains unpriced items: " + \
-                    " & ".join([self._instance.reference_list[i] for i in range(len(self._instance.reference_list)) if args.inverse_priced_indices[i]!=0 and true_cost[i, 0]!=0])
-
-            column = column.reshape(-1, 1)
-            cost = cost.reshape(-1)
-            true_cost = true_cost.reshape(-1, 1)
-            ident = ident.reshape(-1)
-
-        assert column.shape[0] == self.base_cost.shape[0]
-        assert true_cost.shape[0] == self.base_cost.shape[0]
-        assert column.shape[1] == true_cost.shape[1]
-        assert column.shape[1] == cost.shape[0]
-        assert column.shape[1] == ident.shape[0]
-
-        return ColumnTable(column, cost, true_cost, ident)
-
-    def efficency_dump(self, cost_function: CostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray, known_technologies: TechnologicalLimitation) -> CompressedVector:
-        """Dumps the efficiency of all possible constructs
-
-        Parameters
-        ----------
-        cost_function : CostFunction
-            A cost function
-        inverse_priced_indices : np.ndarray
-            What indices of the pricing vector aren't priced
-        dual_vector : np.ndarray | None
-            Dual vector to calculate with, if None is given, give the module-less beacon-less design
-        known_technologies : TechnologicalLimitation
-            Current tech level to calculate for
-
-        Returns
-        -------
-        CompressedVector
-            Efficiency Table
-
-        Raises
-        ------
-        ValueError
-            Debugging issues
-        """
-        raise NotImplementedError("Hasn't been reimplemented since change to lookup tables. Likely needs to change to only look at some points.")
-        lookup_table = self.lookup_table(known_technologies)
-        speed_multi = self.speed_multiplier(known_technologies)
-        if not (known_technologies >= self._origin.limit) or inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
-            return CompressedVector()
-        else:
-            e, c = self._evaluate(cost_function, inverse_priced_indices, dual_vector, lookup_table, speed_multi)
-            
-            output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
-            if np.isclose(c, 0).any():
-                assert np.isclose(c, 0).all(), self._origin.ident
-                evaluation = e
-            else:
-                evaluation = (e / c)
-            try:
-                assert not np.isnan(evaluation).any()
-            except:
-                logging.debug(self.effect_transform @ dual_vector)
-                logging.debug(np.isclose(c, 0))
-                logging.debug(e)
-                logging.debug(c)
-                raise ValueError(self._origin.ident)
-            for i in range(evaluation.shape[0]):
-                output.update({self._generate_vector(i, lookup_table, speed_multi)[2]: evaluation[i]})
-
-            return output
-
-    def __repr__(self) -> str:
-        return self._origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
-
-class ComplexConstruct:
-    """A true construct. A formation of subconstructs with stabilization values.
-
-    Members
-    -------
-    subconstructs : list[ComplexConstruct] | list[CompiledConstruct]
-        ComplexConstructs that makeup this Complex Construct
-    stabilization : dict
-        What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct
-    ident : str
-        Name for this construct
-    _instance : FactorioInstance
-        FactorioInstance associated with this construct
-    _transport_type : tuple[str, ...]
-        What transport cost table to use when avaiable, uses first avaiable
-    """
-    _subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
-    _stabilization: dict[int, str]
-    ident: str
-    _instance: FactorioInstance
-    _transport_types: tuple[str, ...]
-
-    def __init__(self, subconstructs: Sequence[ComplexConstruct], ident: str, transport_types: tuple[str, ...] | str | None = None) -> None:
-        """
-        Parameters
-        ----------
-        subconstructs : Sequence[ComplexConstruct]
-            ComplexConstructs that makeup this Complex Construct
-        ident : str
-            Name for this construct
-        transport_types : tuple[str, ...] | str | None
-            Which transport type(s) should be added to costs and potentially their priority ordering
-        """
-        self._subconstructs = list(subconstructs)
-        self._stabilization = {}
-        self.ident = ident
-        self._instance = subconstructs[0]._instance
-        if isinstance(transport_types, str):
-            self._transport_types = (transport_types, )
-        elif transport_types is None:
-            self._transport_types = tuple()
-        else:
-            self._transport_types = transport_types
-
-    def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
-        """Applies stabilization on this ComplexConstruct
-
-        Parameters
-        ----------
-        row : int
-            Which row to stabilize
-        direction : str
-            Direction of stabilization. "Positive", "Positive and Negative", "Negative"
-        """
-        if row in self._stabilization.keys():
-            if direction=="Positive and Negative" or self._stabilization[row]=="Positive and Negative" or direction!=self._stabilization[row]:
-                self._stabilization[row] = "Positive and Negative"
-        else:
-            self._stabilization[row] = direction
-
-    def columns(self, args: ColumnSpecifier) -> ColumnTable:
-        """Produces the best columns possible given a pricing model
-
-        Parameters
-        ----------
-        args : ColumnSpecifier
-            ColumnSpecifier to make columns for
-
-        Returns
-        -------
-        ColumnTable
-            Table of columns for this construct
-        """
-        assert len(self._stabilization)==0, "Stabilization not implemented yet." #linear combinations
-        table: list[ColumnTable] = []
-
-        best_transport_type = None
-        for transport_type in self._transport_types:
-            if transport_type in args.transport_cost_table.keys():
-                best_transport_type = transport_type
-                break
-        if best_transport_type:
-            transport_residual_pair_static = args.transport_residual_pair.static.copy() + args.transport_cost_table[best_transport_type].static
-            transport_residual_pair_scaling = args.transport_residual_pair.scaling.copy() + args.transport_cost_table[best_transport_type].scaling
-            transport_residual_pair = TransportCostPair(transport_residual_pair_static, transport_residual_pair_scaling)
-        else:
-            transport_residual_pair = args.transport_residual_pair
-
-        nargs = ColumnSpecifier(args.cost_function, args.inverse_priced_indices, args.dual_vector, transport_residual_pair, args.transport_cost_table, args.known_technologies)
-        for sc in self._subconstructs:
-            assert isinstance(sc, ComplexConstruct)
-            table.append(sc.columns(nargs))
-        out: ColumnTable = ColumnTable.sum(table, args.inverse_priced_indices.shape[0])
-
-        assert out.columns.shape[0] == out.true_costs.shape[0]
-        assert out.columns.shape[1] == out.true_costs.shape[1]
-        assert out.columns.shape[1] == out.costs.shape[0], str(out.columns.shape[1])+" "+str(out.costs.shape[0])
-        assert out.columns.shape[1] == out.idents.shape[0]
-
-        assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore
-
-        for stab_row, stab_dir in self._stabilization.items():
-            if "Positive" in stab_dir:
-                out = out.stabilize_row(stab_row, 1)
-            if "Negative" in stab_dir:
-                out = out.stabilize_row(stab_row, -1)
-
-        return out
-
-    def efficiency_analysis(self, args: ColumnSpecifier, valid_rows: np.ndarray, post_analyses: dict[str, dict[int, float]]) -> float:
-        """Determines the best possible realizable efficiency of the construct
-
-        Parameters
-        ----------
-        args : ColumnSpecifier
-            ColumnSpecifier used to make columns for the analysis
-        valid_rows : np.ndarray
-            Outputing rows of the dual
-        post_analyses : dict[str, dict[int, float]]
-            All the post analyses needed for efficiency analysis
-
-        Returns
-        -------
-        float
-            Efficiency decimal, 1 should mean as efficient as optimal factory elements
-
-        Raises
-        ------
-        RuntimeError
-            Error with optimization that shouldn't happen
-        """
-        vector_table = self.columns(args)
-
-        vector_table.mask(np.logical_not(np.asarray((vector_table.columns[np.where(~valid_rows)[0], :] < 0).sum(axis=0)).flatten()))
-
-        if vector_table.columns.shape[1]==0:
-            return np.nan
-        
-        if not self.ident in post_analyses.keys(): #if this flag is set we don't maximize stability before calculating the efficiency.
-            return np.max(np.divide(vector_table.columns.T @ args.dual_vector, vector_table.costs)) # type: ignore
-        else:
-            logging.debug("Doing special post analysis calculating for: "+self.ident)
-            stabilizable_rows = np.where(np.logical_and(np.asarray((vector_table.columns > 0).sum(axis=1)), np.asarray((vector_table.columns < 0).sum(axis=1))))[0]
-            stabilizable_rows = np.delete(stabilizable_rows, np.where(np.in1d(stabilizable_rows, np.array(post_analyses[self.ident].keys())))[0])
-
-            R = vector_table.columns[np.concatenate([np.array([k for k in post_analyses[self.ident].keys()]), stabilizable_rows]), :]
-            u = np.concatenate([np.array([v for v in post_analyses[self.ident].values()]), np.zeros_like(stabilizable_rows)])
-            c = vector_table.costs - (vector_table.columns.T @ args.dual_vector)
-
-            primal_diluted, dual = BEST_LP_SOLVER(R, u, c)
-            if primal_diluted is None or dual is None:
-                logging.debug("Efficiency analysis for "+self.ident+" was unable to solve initial problem, returning nan.")
-                return np.nan
-
-            Rp = np.concatenate([c.reshape((1, -1)), R], axis=0)
-            up = np.concatenate([np.array([np.dot(c, primal_diluted) * (1 + SOLVER_TOLERANCES['rtol']) - SOLVER_TOLERANCES['atol']]), u])
-
-            primal, dual = BEST_LP_SOLVER(Rp, up, np.ones(c.shape[0]), g=primal_diluted)
-            if primal is None or dual is None:
-                assert linear_transform_is_gt(R, primal_diluted, u).all()
-                assert linear_transform_is_gt(Rp, primal_diluted, up).all()
-                raise RuntimeError("Alegedly no primal found but we have one.")
-
-            return np.dot(vector_table.columns.T @ args.dual_vector, primal) / np.dot(c, primal)
-
-    def __repr__(self) -> str:
-        return self.ident + " with " + str(len(self._subconstructs)) + " subconstructs." + \
-               ("\n\tWith Stabilization: "+str(self._stabilization) if len(self._stabilization.keys()) > 0 else "")
-
-class SingularConstruct(ComplexConstruct):
-    """Base case ComplexConstruct, only a single UncompiledConstruct is used to create.
-    """
-
-    def __init__(self, subconstruct: CompiledConstruct) -> None:
-        """_summary_
-
-        Parameters
-        ----------
-        subconstruct : CompiledConstruct
-            The singular element of this construct.
-        """        
-        self._subconstructs = [subconstruct]
-        self._stabilization = {}
-        self.ident = subconstruct._origin.ident
-        self._instance = subconstruct._instance
-        self._transport_types = tuple()
-
-    def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
-        """Applies stabilization on this ComplexConstruct
-
-        Parameters
-        ----------
-        row : int
-            Which row to stabilize
-        direction : str
-            Direction of stabilization. "Positive", "Positive and Negative", "Negative"
-        """
-        raise RuntimeError("Cannot stabilize a singular constuct.")
-
-    def columns(self, args: ColumnSpecifier) -> ColumnTable:
-        """Produces the best column possible given a pricing model
-
-        Parameters
-        ----------
-        args : ColumnSpecifier
-            ColumnSpecifier to make columns for
-
-        Returns
-        -------
-        ColumnTable
-            Table of columns for this construct
-        """
-        assert isinstance(self._subconstructs[0], CompiledConstruct)
-        return self._subconstructs[0].columns(args)
+    return list(set(filtered_designs))
 

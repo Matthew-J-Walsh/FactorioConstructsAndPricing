@@ -27,10 +27,6 @@ np.einsum vs np.kron
 Transposing stuff outside function
 Combining beacon operations together?
 
-## Reformat cost calc orders to precompute some stuff
-
-like static transport costs once we know the constuct
-
 
 
 
@@ -47,10 +43,6 @@ Could do this with a decorator. Nope. this destroys time checking in vscode beca
 ## Inserter proper throughput
 
 Including known tech
-
-## split lookuptables file
-
-cause right now its constructs 2.0
 
 ## testing factory in the middle of a chain
 
