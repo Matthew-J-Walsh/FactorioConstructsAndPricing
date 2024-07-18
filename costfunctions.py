@@ -242,6 +242,30 @@ def spatial_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
             return spatial_empty_compiled_function
     return spatial_priced_function
 
+def deproductivity_effect_transform(effect_transform: sparse.csr_matrix) -> sparse.csr_matrix:
+    """Removes the productivity multiplier from a effect transform.
+    Used for calculating ore taken from the ground
+
+    Parameters
+    ----------
+    effect_transform : sparse.csr_matrix
+        Effect transform to remove productivity from
+
+    Returns
+    -------
+    sparse.csr_matrix
+        De-productivitied effect transform
+    """    
+    prod_index = ACTIVE_MODULE_EFFECTS.index('productivity')
+    new_effect_transform = sparse.lil_matrix((len(MODULE_EFFECT_ORDERING), effect_transform.shape[1]))
+    for i, j in zip(*new_effect_transform.nonzero()):
+        neffects = {e for e in MODULE_EFFECT_ORDERING[i] if e != prod_index}
+        for ni in range(len(MODULE_EFFECT_ORDERING)):
+            if MODULE_EFFECT_ORDERING[ni]==neffects:
+                new_effect_transform[ni, j] = effect_transform[i, j]
+                break
+    return sparse.csr_matrix(new_effect_transform)
+
 def ore_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     """Cost function using the ore mined from the ground
 
@@ -270,27 +294,45 @@ def ore_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
         CompiledCostFunction
             The fully compiled cost function
         """        
-        effect_transform_positive = construct.effect_transform.copy()
-        effect_transform_positive[effect_transform_positive < 0] = 0
-        effect_vector = effect_transform_positive @ construct._instance.raw_ore_pricing
-        def ore_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
-            """Compiled cost function using the ore mined from the ground
+        if construct._isa_mining_drill:
+            effect_transform_positive = construct.effect_transform.copy()
+            effect_transform_positive[effect_transform_positive < 0] = 0
+            effect_transform_positive = deproductivity_effect_transform(effect_transform_positive)
+            effect_vector = effect_transform_positive @ construct._instance.raw_ore_pricing
+            def ore_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
+                """Compiled cost function using the ore mined from the ground
 
-            Parameters
-            ----------
-            point_evaluations : PointEvaluations
-                PointEvaluations for the points to price
+                Parameters
+                ----------
+                point_evaluations : PointEvaluations
+                    PointEvaluations for the points to price
 
-            Returns
-            -------
-            np.ndarray
-                Point costs
-            """            
-            out = point_evaluations.multilinear_effect @ effect_vector
-            if not isinstance(out, np.ndarray):
-                return np.array([out])
-            return out
-        return ore_compiled_function
+                Returns
+                -------
+                np.ndarray
+                    Point costs
+                """            
+                out = point_evaluations.multilinear_effect @ effect_vector
+                if not isinstance(out, np.ndarray):
+                    return np.array([out])
+                return out
+            return ore_compiled_function
+        else:
+            def ore_empty_compiled_function(point_evaluations: PointEvaluations) -> np.ndarray:
+                """Compiled cost function using the ore mined from the ground for constructs that don't need a ore patch
+
+                Parameters
+                ----------
+                point_evaluations : PointEvaluations
+                    PointEvaluations for the points to price
+
+                Returns
+                -------
+                np.ndarray
+                    Properly shaped zero array
+                """            
+                return np.zeros(point_evaluations.evaulated_cost.shape[0])
+            return ore_empty_compiled_function
     return ore_priced_function
 
 def multiply_cost_function(func: CostFunction, multiplier: Real) -> CostFunction:

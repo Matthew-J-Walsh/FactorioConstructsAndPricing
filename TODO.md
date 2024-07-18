@@ -52,8 +52,6 @@ Way for a testing factory to be made that isn't part of the chain, probably some
 
 ## Space cost of transports
 
-## Ore cost takes into account productivity
-
 ## Remaining transport cost pairs
 
 
@@ -72,6 +70,8 @@ Find a way of handling containers and catalysts properly. Also improve catalyst 
 Idea: Catalysts are only catalysts when doing their catalytic process, for example: iron is only catalytic when being used in nuclear fuel. Best method to do this would be to split the catalyst cost off individual constructs, instead detect all catalytic loops and price each for the minimal amount of that each that exists. Catalysts only matter for priced indicies (which effect factory chain addition) and pricing in standard model (not space based models).
 Only issue with this is deciding what construct NEEDS the catalytic element made to be allowed (otherwise unpriced costs could end up in our model) (idea: give each item an number, all energy sources have value of 0, otherwise an item has a value equal to 1+ the minimum value of the maximums of making it. The process with the maximum value is the 'final' process)
 Doesn't work, breaks linearity
+
+
 
 
 # Requires expansion api
