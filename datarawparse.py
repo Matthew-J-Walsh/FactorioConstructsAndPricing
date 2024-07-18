@@ -652,7 +652,9 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
 
     logging.debug("Setting throughput for inserters.")
     for inserter in data['inserter'].values():
-        inserter['throughput'] = 2 
+        #https://lua-api.factorio.com/latest/prototypes/InserterPrototype.html#rotation_speed
+        #(inserter['stack_size_bonus'] if 'stack_size_bonus' in inserter.keys() else 0) #https://lua-api.factorio.com/latest/prototypes/InserterPrototype.html#stack_size_bonus
+        inserter['throughput'] = .8 / inserter['rotation_speed'] 
 
 def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, ResearchTable]:
     """Generates research effect tables.
@@ -674,8 +676,11 @@ def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> di
         Research effect tables
     """
     effect_table: dict[str, ResearchTable] = {}
-    for modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "laboratory-speed"]:
-        effect_table[modifier_type] = ResearchTable(Fraction(0) if 'productivity' in modifier_type else Fraction(1))
+    for modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "laboratory-speed", "inserter-stack-size-bonus", "stack-inserter-capacity-bonus"]:
+        if modifier_type in ["laboratory-productivity", "mining-drill-productivity-bonus", "inserter-stack-size-bonus", "stack-inserter-capacity-bonus"]:
+            effect_table[modifier_type] = ResearchTable(Fraction(0))
+        else:
+            effect_table[modifier_type] = ResearchTable(Fraction(1))
         for technology in data['technology'].values():
             if 'effects' in technology.keys():
                 for modifier in technology['effects']:
