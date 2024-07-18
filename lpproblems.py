@@ -1,6 +1,7 @@
 from globalsandimports import *
 
 from lookuptables import *
+from constructs import *
 from utils import *
 from lpsolvers import *
 from transportation import *

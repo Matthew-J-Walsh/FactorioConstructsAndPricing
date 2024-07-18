@@ -36,6 +36,25 @@ class CallableDenseSolver(Protocol):
     def __call__(self, A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
+class PointEvaluations(NamedTuple):
+    """Evaluation matricies for a set of lookup table points
+
+    Members
+    -------
+    multilinear_effect : np.ndarray
+        Multilinear effect at each point
+    running_cost : np.ndarray
+        Running cost at each point
+    evaulated_cost : np.ndarray
+        Cost singular value at each point
+    effective_area : np.ndarray
+        Area used by machine at each point
+    """    
+    multilinear_effect: np.ndarray
+    running_cost: np.ndarray
+    evaulated_cost: np.ndarray
+    effective_area: np.ndarray
+
 BEST_LP_SOLVER: CallableDenseSolver
 
 ALL_MODULE_EFFECTS = ['consumption', 'speed', 'productivity', 'pollution'] 
