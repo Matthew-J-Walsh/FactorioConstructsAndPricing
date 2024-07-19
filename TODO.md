@@ -7,13 +7,10 @@ This file is a todo list of things with various levels of importance. List is in
 
 # Expansion Stuff
 
-## Surface Restrictions
-
-Classify Constructs by surface, prohibiting specific constructs (some resources, throwing worthless items into the void) from being used depending on the factory surface. Should allow for inter-surface factories.
-
 ## Expansion Beacon setups
 
 What updates have to be done to handle diminishing beacons?
+
 
 
 # Speedups
@@ -34,25 +31,28 @@ Combining beacon operations together?
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## Decorator improvements for: Overloading .add()
+## testing factory in the middle of a chain
 
-## Add my try catches for better debugging
+Way for a testing factory to be made that isn't part of the chain, probably some sort of offshoot. useful for calculating the best way to make stuff.
 
-Could do this with a decorator. Nope. this destroys time checking in vscode because Microsoft, a multi TRILLION dollar company, relies on one guy's open-source project, so its an "upstream issue."
+## non-tree-like constructs
+
+Should they be handled like they are?
+
+
+
+# Transport refactoring 2.0
 
 ## Inserter proper throughput
 
 Including known tech
-
-## testing factory in the middle of a chain
-
-Way for a testing factory to be made that isn't part of the chain, probably some sort of offshoot. useful for calculating the best way to make stuff.
 
 ## Energy costs of transports
 
 ## Space cost of transports
 
 ## Remaining transport cost pairs
+
 
 
 
@@ -75,6 +75,10 @@ Doesn't work, breaks linearity
 
 
 # Requires expansion api
+
+## Surface Restrictions
+
+Properly assign the surface attribute on uncompiledconstructs.
 
 ## Productivity researches for recipe
 

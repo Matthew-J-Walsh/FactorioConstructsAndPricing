@@ -270,6 +270,49 @@ class FactorioInstance():
         
         return new_name
 
+    def bind_surface_construct(self, surface: str, disable: bool = True) -> str:
+        """Creates a complex construct for an entire surface. 
+        Will only contain complex constructs that are not made by this function and all elements can be made on the given surface
+
+        Parameters
+        ----------
+        surface : str
+            Surface to make complex construct for
+        disable: bool, optional
+            If all constructs placed into the surface be disable
+
+        Returns
+        -------
+        str
+            Surface construct name
+        """        
+        assert isinstance(surface, str)
+
+        for construct in self._complex_constructs:
+            if 'surface' in construct.attributes.keys() and construct.attributes['surface'] == surface:
+                self._complex_constructs.remove(construct)
+                break
+
+        name: str = surface+" restricted construct"
+
+        def _on_surface(c: ComplexConstruct | CompiledConstruct) -> bool:
+            if isinstance(c, ComplexConstruct):
+                return all([_on_surface(sc) for sc in c.subconstructs])
+            else:
+                return surface in c.origin.surfaces
+
+        surface_constructs = [construct for construct in self._complex_constructs if _on_surface(construct)]
+
+        new_construct = ComplexConstruct(tuple(surface_constructs), name)
+
+        self._complex_constructs.append(new_construct)
+
+        if disable:
+            for construct in surface_constructs:
+                self.disable_complex_construct(construct.ident)
+
+        return name
+
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: CostFunction, 
                          recovered_run: ColumnTable | None = None, use_manual: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, CompressedVector, ColumnTable]:
         """Solves for a target factory given a tech level and reference pricing model
@@ -449,7 +492,7 @@ def _efficiency_analysis(construct: ComplexConstruct, args: ColumnSpecifier, val
         The efficiency analysis
     """        
     efficiencies: CompressedVector = CompressedVector({})
-    for sc in construct._subconstructs:
+    for sc in construct.subconstructs:
         if isinstance(sc, ComplexConstruct):
             efficiencies.update({sc.ident: sc.efficiency_analysis(args, valid_rows, post_analyses)})
             efficiencies = efficiencies + _efficiency_analysis(sc, args, valid_rows, post_analyses)

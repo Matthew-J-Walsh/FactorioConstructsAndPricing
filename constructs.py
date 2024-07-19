@@ -53,10 +53,12 @@ class UncompiledConstruct:
     limit: TechnologicalLimitation
     building: dict
     research_effected: list[str]
+    surfaces: list[str]
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, bool, bool]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
-                 limit: TechnologicalLimitation, building: dict, base_productivity: Fraction = Fraction(0), research_effected: list[str] | None = None) -> None:
+                 limit: TechnologicalLimitation, building: dict, base_productivity: Fraction = Fraction(0), research_effected: list[str] | None = None,
+                 surfaces: list[str] | str = "Nauvis") -> None:
         """
         Parameters
         ----------
@@ -89,6 +91,8 @@ class UncompiledConstruct:
             , by default Fraction(0)
         research_effected : list[str], optional
             What research modifiers effect this construct
+        surfaces : list[str] | str, optional
+            What surfaces this constructs can run on. Default "Nauvis"
         """
         self.ident = ident
         self.drain = drain
@@ -105,6 +109,10 @@ class UncompiledConstruct:
             self.research_effected = research_effected
         else:
             self.research_effected = []
+        if isinstance(surfaces, list):
+            self.surfaces = surfaces
+        else:
+            self.surfaces = [surfaces]
         
     def __repr__(self) -> str:
         return str(self.ident)+\
@@ -124,9 +132,9 @@ class CompiledConstruct:
 
     Members
     -------
-    _origin : UncompiledConstruct
+    origin : UncompiledConstruct
         Construct to compile
-     _technological_productivity_table : ResearchTable
+    _technological_productivity_table : ResearchTable
         ResearchTable containing the added productivity associated with this Construct given a Tech Level
     _technological_speed_multipliers : ResearchTable
         ResearchTable containing speed multipliers associated with this Construct given a Tech Level
@@ -147,7 +155,7 @@ class CompiledConstruct:
     _instance: FractionInstance
         Instance associated with this construct
     """
-    _origin: UncompiledConstruct
+    origin: UncompiledConstruct
     _technological_productivity_table: ResearchTable
     _technological_speed_multipliers: ResearchTable
     effect_transform: sparse.csr_matrix
@@ -168,7 +176,7 @@ class CompiledConstruct:
         instance : FactorioInstance
             Origin FactorioInstance
         """        
-        self._origin = origin
+        self.origin = origin
 
         if "laboratory-productivity" in origin.research_effected: #https://lua-api.factorio.com/latest/types/LaboratoryProductivityModifier.html
             self._technological_productivity_table = instance.research_modifiers['laboratory-productivity']
@@ -217,10 +225,10 @@ class CompiledConstruct:
             The highest unlocked lookup table
         """
         #return self._technological_lookup_tables.max(known_technologies)
-        return link_lookup_table(self._origin.internal_module_limit, 
-                                 (self._origin.building['tile_width'], self._origin.building['tile_height']), 
-                                 self._origin.allowed_modules, self._instance, 
-                                 self._origin.base_productivity+self._technological_productivity_table.value(known_technologies))
+        return link_lookup_table(self.origin.internal_module_limit, 
+                                 (self.origin.building['tile_width'], self.origin.building['tile_height']), 
+                                 self.origin.allowed_modules, self._instance, 
+                                 self.origin.base_productivity+self._technological_productivity_table.value(known_technologies))
     
     def speed_multiplier(self, known_technologies: TechnologicalLimitation) -> float:
         """Calculate the speed multiplier at a technological level
@@ -250,7 +258,7 @@ class CompiledConstruct:
         ColumnTable
             Table of column for this construct
         """
-        if not (args.known_technologies >= self._origin.limit) or args.inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
+        if not (args.known_technologies >= self.origin.limit) or args.inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
         else:
             cost_function = args.cost_function(self, args.transport_residual_pair)
@@ -262,9 +270,9 @@ class CompiledConstruct:
             column = (evaluation.multilinear_effect @ self.effect_transform + evaluation.running_cost.flatten()).reshape(-1, 1) * speed_multi
             cost = cost_function(evaluation)
             true_cost = true_cost_function(self, args.transport_residual_pair, evaluation)
-            ident = np.array([CompressedVector({self._origin.ident + module_string: 1})])
+            ident = np.array([CompressedVector({self.origin.ident + module_string: 1})])
 
-            assert np.dot(true_cost.flatten(), args.inverse_priced_indices)==0, self._origin.ident+"'s true cost contains unpriced items: " + \
+            assert np.dot(true_cost.flatten(), args.inverse_priced_indices)==0, self.origin.ident+"'s true cost contains unpriced items: " + \
                     " & ".join([self._instance.reference_list[i] for i in range(len(self._instance.reference_list)) if args.inverse_priced_indices[i]!=0 and true_cost[i, 0]!=0])
 
             column = column.reshape(-1, 1)
@@ -307,14 +315,14 @@ class CompiledConstruct:
         raise NotImplementedError("Hasn't been reimplemented since change to lookup tables. Likely needs to change to only look at some points.")
         lookup_table = self.lookup_table(known_technologies)
         speed_multi = self.speed_multiplier(known_technologies)
-        if not (known_technologies >= self._origin.limit) or inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
+        if not (known_technologies >= self.origin.limit) or inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
             return CompressedVector()
         else:
             e, c = self._evaluate(cost_function, inverse_priced_indices, dual_vector, lookup_table, speed_multi)
             
             output = CompressedVector({'base_vector': self.effect_transform @ dual_vector})
             if np.isclose(c, 0).any():
-                assert np.isclose(c, 0).all(), self._origin.ident
+                assert np.isclose(c, 0).all(), self.origin.ident
                 evaluation = e
             else:
                 evaluation = (e / c)
@@ -325,14 +333,14 @@ class CompiledConstruct:
                 logging.debug(np.isclose(c, 0))
                 logging.debug(e)
                 logging.debug(c)
-                raise ValueError(self._origin.ident)
+                raise ValueError(self.origin.ident)
             for i in range(evaluation.shape[0]):
                 output.update({self._generate_vector(i, lookup_table, speed_multi)[2]: evaluation[i]})
 
             return output
 
     def __repr__(self) -> str:
-        return self._origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
+        return self.origin.ident + " CompiledConstruct with "+repr(self.lookup_table)+" as its table."
 
 class ComplexConstruct:
     """A true construct. A formation of subconstructs with stabilization values.
@@ -341,7 +349,7 @@ class ComplexConstruct:
     -------
     subconstructs : list[ComplexConstruct] | list[CompiledConstruct]
         ComplexConstructs that makeup this Complex Construct
-    stabilization : dict
+    _stabilization : dict[int, str]
         What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct
     ident : str
         Name for this construct
@@ -350,13 +358,15 @@ class ComplexConstruct:
     _transport_type : tuple[str, ...]
         What transport cost table to use when avaiable, uses first avaiable
     """
-    _subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
+    subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
     _stabilization: dict[int, str]
     ident: str
     _instance: FactorioInstance
     _transport_types: tuple[str, ...]
+    attributes: dict[str, str]
 
-    def __init__(self, subconstructs: Sequence[ComplexConstruct], ident: str, transport_types: tuple[str, ...] | str | None = None) -> None:
+    def __init__(self, subconstructs: Sequence[ComplexConstruct], ident: str, transport_types: tuple[str, ...] | str | None = None, 
+                 attributes: dict[str, str] | None = None) -> None:
         """
         Parameters
         ----------
@@ -366,8 +376,10 @@ class ComplexConstruct:
             Name for this construct
         transport_types : tuple[str, ...] | str | None
             Which transport type(s) should be added to costs and potentially their priority ordering
+        attributes : dict[str, str] | None
+            Special attributes to hold onto
         """
-        self._subconstructs = list(subconstructs)
+        self.subconstructs = list(subconstructs)
         self._stabilization = {}
         self.ident = ident
         self._instance = subconstructs[0]._instance
@@ -377,6 +389,10 @@ class ComplexConstruct:
             self._transport_types = tuple()
         else:
             self._transport_types = transport_types
+        if attributes:
+            self.attributes = attributes
+        else:
+            self.attributes = {}
 
     def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
         """Applies stabilization on this ComplexConstruct
@@ -423,7 +439,7 @@ class ComplexConstruct:
             transport_residual_pair = args.transport_residual_pair
 
         nargs = ColumnSpecifier(args.cost_function, args.inverse_priced_indices, args.dual_vector, transport_residual_pair, args.transport_cost_table, args.known_technologies)
-        for sc in self._subconstructs:
+        for sc in self.subconstructs:
             assert isinstance(sc, ComplexConstruct)
             table.append(sc.columns(nargs))
         out: ColumnTable = ColumnTable.sum(table, args.inverse_priced_indices.shape[0])
@@ -432,8 +448,6 @@ class ComplexConstruct:
         assert out.columns.shape[1] == out.true_costs.shape[1]
         assert out.columns.shape[1] == out.costs.shape[0], str(out.columns.shape[1])+" "+str(out.costs.shape[0])
         assert out.columns.shape[1] == out.idents.shape[0]
-
-        assert out.columns.shape[0]==self._subconstructs[0]._subconstructs[0].base_cost.shape[0] # type: ignore
 
         for stab_row, stab_dir in self._stabilization.items():
             if "Positive" in stab_dir:
@@ -500,7 +514,7 @@ class ComplexConstruct:
             return np.dot(vector_table.columns.T @ args.dual_vector, primal) / np.dot(c, primal)
 
     def __repr__(self) -> str:
-        return self.ident + " with " + str(len(self._subconstructs)) + " subconstructs." + \
+        return self.ident + " with " + str(len(self.subconstructs)) + " subconstructs." + \
                ("\n\tWith Stabilization: "+str(self._stabilization) if len(self._stabilization.keys()) > 0 else "")
 
 class SingularConstruct(ComplexConstruct):
@@ -515,11 +529,12 @@ class SingularConstruct(ComplexConstruct):
         subconstruct : CompiledConstruct
             The singular element of this construct.
         """        
-        self._subconstructs = [subconstruct]
+        self.subconstructs = [subconstruct]
         self._stabilization = {}
-        self.ident = subconstruct._origin.ident
+        self.ident = subconstruct.origin.ident
         self._instance = subconstruct._instance
         self._transport_types = tuple()
+        self.attributes = {}
 
     def stabilize(self, row: int, direction: Literal["Positive"] | Literal["Positive and Negative"] | Literal["Negative"]) -> None:
         """Applies stabilization on this ComplexConstruct
@@ -546,8 +561,8 @@ class SingularConstruct(ComplexConstruct):
         ColumnTable
             Table of columns for this construct
         """
-        assert isinstance(self._subconstructs[0], CompiledConstruct)
-        return self._subconstructs[0].columns(args)
+        assert isinstance(self.subconstructs[0], CompiledConstruct)
+        return self.subconstructs[0].columns(args)
 
 class ManualConstruct:
     """Manual Constructs are hand crafted constructs. This should only be used when there is no other way to progress

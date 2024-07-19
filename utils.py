@@ -460,7 +460,7 @@ class ColumnTable:
         """        
         if self._valid_rows is None:
             self._valid_rows = (self.columns > 0).sum(axis=1) > 0
-        return self._valid_rows
+        return self._valid_rows # type: ignore
     
     @property
     def sorted(self) -> ColumnTable:
@@ -975,6 +975,9 @@ def pareto_frontier(l: list[sparse.coo_array]) -> np.ndarray:
             mask[i] = True #mask[i] will compute to false in last line because its not strictly greater than every point in self.
     
     return np.where(mask)[0]
+
+
+
 
 
 

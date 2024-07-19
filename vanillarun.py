@@ -53,6 +53,7 @@ def vanilla_main(optimization_mode: dict | str = 'standard'):
     vanilla.add_post_analysis(nuclear_construct, {vanilla.reference_list.index("electric"): 1e10})
     vanilla.add_post_analysis("solar-panel", {vanilla.reference_list.index("electric"): 1e10})
     vanilla.add_post_analysis("electric from steam-engine via steam@165", {vanilla.reference_list.index("electric"): 1e10})
+    vanilla.bind_surface_construct("Nauvis")
 
     logging.info("=============================================")
     logging.info(str(list(enumerate(vanilla.reference_list))))
