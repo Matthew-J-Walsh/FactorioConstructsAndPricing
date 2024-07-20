@@ -31,13 +31,22 @@ Combining beacon operations together?
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## testing factory in the middle of a chain
-
-Way for a testing factory to be made that isn't part of the chain, probably some sort of offshoot. useful for calculating the best way to make stuff.
-
 ## non-tree-like constructs
 
 Should they be handled like they are?
+
+## tech_tree public vs private from instance
+
+and _inverse_map is used in tools
+
+## Properly comment class attributes
+
+## Make a class for solve_for_target returns?
+
+## Do we really need parent?
+
+## Asserting CostFunctions and stuff
+
 
 
 

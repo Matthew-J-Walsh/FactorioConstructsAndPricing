@@ -108,94 +108,44 @@ def vanilla_main(optimization_mode: dict | str = 'standard'):
     starting_pricing['lab'] = 2 + 10 * starting_pricing['electronic-circuit'] + 10 * starting_pricing['iron-gear-wheel'] + 4 * starting_pricing['transport-belt']
 
     starting_pricing = CompressedVector({k: Fraction(v).limit_denominator() for k, v in starting_pricing.items()})
-    
-
-    
 
     def curated():
         vanilla_chain.initial_pricing(starting_pricing, tech_level)
         print("Starting factories.")
 
-        logging.info("=============================================")
         logger.setLevel(logging.DEBUG)
-        vanilla_chain.add("all tech")
-        logging.info(set(vanilla_chain._chain[-1]._targets.keys()).difference(set(starting_pricing.keys())))
-
-        logging.info("=============================================")
-        vanilla_chain.add("all materials")
-        logging.info(set(vanilla_chain._chain[-1]._targets.keys()).difference(set(starting_pricing.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
         logging.info("=============================================")
         vanilla_chain.add("all tech")
-        logging.info(len(vanilla_chain._chain)-1)
-
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[4]._targets.keys()).difference(set(vanilla_chain._chain[2]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[4].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[2].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
-        logging.info("=============================================")
-        vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[5]._targets.keys()).difference(set(vanilla_chain._chain[4]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[5].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[4].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
-        logging.info("=============================================")
-        vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[6]._targets.keys()).difference(set(vanilla_chain._chain[5]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[6].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[5].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
-        logging.info("=============================================")
-        vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[7]._targets.keys()).difference(set(vanilla_chain._chain[6]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[7].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[6].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-        
         logging.info("=============================================")
         vanilla_chain.add("all tech")
-        logging.info(len(vanilla_chain._chain)-1)
-
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[9]._targets.keys()).difference(set(vanilla_chain._chain[7]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[9].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[7].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info(set(vanilla_chain._chain[10]._targets.keys()).difference(set(vanilla_chain._chain[9]._targets.keys())))
-        logging.info(set(vanilla_chain._chain[10].optimal_pricing_model.keys()).difference(set(vanilla_chain._chain[9].optimal_pricing_model.keys())))
-        logging.info(vanilla_chain._chain[-1].optimal_pricing_model)
-
+        logging.info("=============================================")
+        vanilla_chain.add("all materials")
+        logging.info("=============================================")
+        vanilla_chain.add("all materials")
         logging.info("=============================================")
         vanilla_chain.add("all tech")
-        logging.info(len(vanilla_chain._chain)-1)
-
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-        logging.info("=============================================")
-        vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
-
         logging.info("=============================================")
         vanilla_chain.add("all tech")
-        logging.info(len(vanilla_chain._chain)-1)
         logging.info("=============================================")
         vanilla_chain.add("all materials")
-        logging.info(len(vanilla_chain._chain)-1)
+        logging.info("=============================================")
+        vanilla_chain.add("all materials")
+        logging.info("=============================================")
+        vanilla_chain.add("all materials")
+        logging.info("=============================================")
+        vanilla_chain.add("all tech")
+        logging.info("=============================================")
+        vanilla_chain.add("all materials")
     
     def uncurated():
         vanilla_chain.initial_pricing(starting_pricing, tech_level)
