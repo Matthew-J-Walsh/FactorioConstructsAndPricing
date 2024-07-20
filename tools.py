@@ -14,6 +14,17 @@ from costfunctions import *
 from transportation import *
 
 
+class OptimizedFactoryResult(NamedTuple):
+    optimal_factory: CompressedVector
+    pricing_model: CompressedVector
+    full_pricing_model: CompressedVector
+    efficiency_analysis: CompressedVector
+    zero_throughputs: list[int]
+    scaling_factor: float
+    true_cost: CompressedVector
+    residual_column_table: ColumnTable
+
+
 class FactorioInstance():
     """Holds the information in an instance (specific game mod setup) after completing premanagment steps.
 
@@ -314,7 +325,7 @@ class FactorioInstance():
         return name
 
     def solve_for_target(self, targets: CompressedVector, known_technologies: TechnologicalLimitation, reference_model: CompressedVector, uncompiled_cost_function: CostFunction, 
-                         recovered_run: ColumnTable | None = None, use_manual: bool = False) -> tuple[CompressedVector, CompressedVector, CompressedVector, CompressedVector, list[int], float, CompressedVector, ColumnTable]:
+                         recovered_run: ColumnTable | None = None, use_manual: bool = False) -> OptimizedFactoryResult:
         """Solves for a target factory given a tech level and reference pricing model
 
         Parameters
@@ -405,8 +416,8 @@ class FactorioInstance():
 
         zs = R_vector_table.find_zeros(s_i)
 
-        return s, p, p_full, k, zs, scale, full_material_cost, R_vector_table
-    
+        return OptimizedFactoryResult(s, p, p_full, k, zs, scale, full_material_cost, R_vector_table)
+
     def technological_limitation_from_specification(self, fully_automated: list[str] = [], extra_technologies: list[str] = [], extra_recipes: list[str] = []) -> TechnologicalLimitation:
         """Generates a TechnologicalLimitation from a specification. Works as a more user friendly way of getting useful TechnologicalLimitations.
 
@@ -541,11 +552,11 @@ class FactorioFactory():
     true_cost: CompressedVector
     _last_run_columns: ColumnTable | None
     _optimal_factory: CompressedVector
-    optimal_pricing_model: CompressedVector
-    _full_optimal_pricing_model: CompressedVector
-    _construct_efficiencies: CompressedVector
+    pricing_model: CompressedVector
+    _full_pricing_model: CompressedVector
+    _efficiency_analysis: CompressedVector
     _zero_throughputs: list[int]
-    _intermediate_scale_factor: float
+    _internal_scaling_factor: float
 
     def __init__(self, instance: FactorioInstance, targets: CompressedVector, previous_material: FactorioMaterialFactory, 
                  previous_science: FactorioScienceFactory) -> None:
@@ -576,11 +587,11 @@ class FactorioFactory():
         self.true_cost = CompressedVector()
         self._last_run_columns = None
         self._optimal_factory = CompressedVector()
-        self.optimal_pricing_model = CompressedVector()
-        self._full_optimal_pricing_model = CompressedVector()
-        self._construct_efficiencies = CompressedVector()
+        self.pricing_model = CompressedVector()
+        self._full_pricing_model = CompressedVector()
+        self._efficiency_analysis = CompressedVector()
         self._zero_throughputs = []
-        self._intermediate_scale_factor = 0
+        self._internal_scaling_factor = 0
     
     @property
     def tech_coverage(self) -> TechnologicalLimitation:
@@ -606,9 +617,9 @@ class FactorioFactory():
         """Pricing model that this uses if it's not a material factory, otherwise this factory's pricing model
         """        
         if isinstance(self, FactorioMaterialFactory):
-            return self.optimal_pricing_model
+            return self.pricing_model
         else:
-            return self._previous_material.optimal_pricing_model
+            return self._previous_material.pricing_model
 
     def calculate_optimal_factory(self, reference_model: CompressedVector, uncompiled_cost_function: CostFunction, use_manual: bool = False) -> bool:
         """Calculates a optimal factory with the the reference model
@@ -627,11 +638,17 @@ class FactorioFactory():
         bool
             If pricing model has changed since this factory was last optimized
         """
-        s, p, pf, k, zs, scale, tc, recovery = self._instance.solve_for_target(self._targets, self.tech_coverage, reference_model, uncompiled_cost_function, self._last_run_columns, use_manual=use_manual)
-        same = p==self.optimal_pricing_model
-        self._optimal_factory, self.optimal_pricing_model, self._full_optimal_pricing_model, self._construct_efficiencies, self._intermediate_scale_factor, self.true_cost = s, p, pf, k, scale, tc
-        self._last_run_columns = recovery
-        self._zero_throughputs = zs
+        #s, p, pf, k, zs, scale, tc, recovery
+        results: OptimizedFactoryResult = self._instance.solve_for_target(self._targets, self.tech_coverage, reference_model, uncompiled_cost_function, self._last_run_columns, use_manual=use_manual)
+        same: bool = results.pricing_model==self.pricing_model
+        self._optimal_factory = results.optimal_factory
+        self.pricing_model = results.pricing_model
+        self._full_pricing_model = results.full_pricing_model
+        self._efficiency_analysis = results.efficiency_analysis
+        self._zero_throughputs = results.zero_throughputs
+        self._internal_scaling_factor = results.scaling_factor
+        self.true_cost = results.true_cost
+        self._last_run_columns = results.residual_column_table
         self.optimized = True
 
         for k, v in self.true_cost.items():
@@ -713,6 +730,9 @@ class FactorioFactory():
             With 0 retainment this factory may start mispricing those targets. 
             By default global RETAINMENT_VALUE
         """
+        assert isinstance(targets, CompressedVector)
+        assert isinstance(retainment, float)
+
         for k in self._targets.keys():
             if not k in targets.keys():
                 targets[k] = retainment
@@ -735,7 +755,7 @@ class FactorioFactory():
         """
         changed: bool = False
         if not isinstance(self, FactorioInitialFactory):
-            changed = self.calculate_optimal_factory(self._previous_material.optimal_pricing_model, uncompiled_cost_function)
+            changed = self.calculate_optimal_factory(self._previous_material.pricing_model, uncompiled_cost_function)
         return any([fac.compute_all(uncompiled_cost_function) for fac in self.descendants]) or changed
     
     def retarget_all(self, uncompiled_cost_function: CostFunction) -> bool:
@@ -766,11 +786,11 @@ class FactorioFactory():
                     break
 
             for k, v in updated_targets.items():
-                assert k in self.optimal_pricing_model.keys(), k
+                assert k in self.pricing_model.keys(), k
             self.retarget(updated_targets)
 
         if not isinstance(self, FactorioInitialFactory):
-            changed = self.calculate_optimal_factory(self._previous_material.optimal_pricing_model, uncompiled_cost_function)
+            changed = self.calculate_optimal_factory(self._previous_material.pricing_model, uncompiled_cost_function)
         
         return any([fac.retarget_all(uncompiled_cost_function) for fac in self.descendants]) or changed
 
@@ -793,9 +813,9 @@ class FactorioFactory():
             raise RuntimeError("Dump asked but factory isn't nessisarily correct.")
         targets_df = pd.DataFrame(list(self._targets.items()), columns=['target', 'count'])
         optimal_factory_df = pd.DataFrame(list(self._optimal_factory.items()), columns=['construct', 'count'])
-        optimal_pricing_model_df = pd.DataFrame(list(self.optimal_pricing_model.items()), columns=['item', 'value'])
-        inefficient_constructs_df = pd.DataFrame(list(self._construct_efficiencies.items()), columns=['construct', 'relative value'])
-        transport_df = pd.DataFrame(list(compute_transportation_densities(self._full_optimal_pricing_model, self._instance._data_raw)), columns=['item', 'via', 'relative density'])
+        optimal_pricing_model_df = pd.DataFrame(list(self.pricing_model.items()), columns=['item', 'value'])
+        inefficient_constructs_df = pd.DataFrame(list(self._efficiency_analysis.items()), columns=['construct', 'relative value'])
+        transport_df = pd.DataFrame(list(compute_transportation_densities(self._full_pricing_model, self._instance._data_raw)), columns=['item', 'via', 'relative density'])
         merged_df = pd.concat([targets_df, pd.DataFrame({}, columns=['']), 
                             optimal_factory_df, pd.DataFrame({}, columns=['']),
                             optimal_pricing_model_df, pd.DataFrame({}, columns=['']),
@@ -941,11 +961,11 @@ class FactorioInitialFactory(FactorioMaterialFactory, FactorioScienceFactory):
         self.true_cost = CompressedVector()
         self._last_run_columns = None
         self._optimal_factory = CompressedVector()
-        self.optimal_pricing_model = pricing_model
-        self._full_optimal_pricing_model = CompressedVector()
-        self._construct_efficiencies = CompressedVector()
+        self.pricing_model = pricing_model
+        self._full_pricing_model = CompressedVector()
+        self._efficiency_analysis = CompressedVector()
         self._zero_throughputs = []
-        self._intermediate_scale_factor = 0
+        self._internal_scaling_factor = 0
     
     @property
     def tech_coverage(self) -> TechnologicalLimitation:

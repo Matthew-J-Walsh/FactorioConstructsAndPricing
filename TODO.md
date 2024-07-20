@@ -5,14 +5,6 @@ This file is a todo list of things with various levels of importance. List is in
 
 
 
-# Expansion Stuff
-
-## Expansion Beacon setups
-
-What updates have to be done to handle diminishing beacons?
-
-
-
 # Speedups
 
 ## Different solvers?
@@ -43,8 +35,6 @@ and _inverse_map is used in tools
 
 ## Make a class for solve_for_target returns?
 
-## Asserting CostFunctions and stuff
-
 
 
 
@@ -60,6 +50,15 @@ Including known tech
 
 ## Remaining transport cost pairs
 
+
+
+
+
+# Expansion Stuff
+
+## Expansion Beacon setups
+
+What updates have to be done to handle diminishing beacons?
 
 
 
