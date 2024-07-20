@@ -10,25 +10,29 @@ if TYPE_CHECKING:
     from tools import FactorioInstance
 
 # have classes the compile into other classes to do this more efficiently
-    
+
+@runtime_checkable
 class CompiledCostFunction(Protocol):
     """Class for typing of all cost functions after getting a pricing vector, construct, and transport costs.
     """    
     def __call__(self, point_evaluations: PointEvaluations) -> np.ndarray:
         raise NotImplementedError
     
+@runtime_checkable
 class PricedCostFunction(Protocol):
     """Class for typing of all cost functions after getting a pricing vector.
     """    
     def __call__(self, construct: CompiledConstruct, transport_cost_pair: TransportCostPair) -> CompiledCostFunction:
         raise NotImplementedError
 
+@runtime_checkable
 class CostFunction(Protocol):
     """Class for typing of all cost functions before getting anything.
     """    
     def __call__(self, pricing_vector: np.ndarray) -> PricedCostFunction:
         raise NotImplementedError
     
+
 def empty_cost_function(pricing_vector: np.ndarray) -> PricedCostFunction:
     """Cost function that always returns a correctly shaped zero array
 

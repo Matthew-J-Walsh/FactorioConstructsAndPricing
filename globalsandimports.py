@@ -22,19 +22,24 @@ import pulp as pl
 
 import typing
 from numbers import Real, Number
-from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Sequence, Any, Optional, Generator, Protocol, Literal, TYPE_CHECKING, Type, Iterator, NewType, NamedTuple
+from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Sequence, Any, Optional, Generator, Protocol, Literal, TYPE_CHECKING, Type, Iterator, NewType, NamedTuple, runtime_checkable
 
+
+@runtime_checkable
 class CallableSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         return None
 
+@runtime_checkable
 class CallableSparseSolver(Protocol):
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
+@runtime_checkable
 class CallableDenseSolver(Protocol):
     def __call__(self, A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
+
 
 class PointEvaluations(NamedTuple):
     """Evaluation matricies for a set of lookup table points

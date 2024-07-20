@@ -43,8 +43,6 @@ and _inverse_map is used in tools
 
 ## Make a class for solve_for_target returns?
 
-## Do we really need parent?
-
 ## Asserting CostFunctions and stuff
 
 
