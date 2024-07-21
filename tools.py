@@ -15,77 +15,65 @@ from transportation import *
 
 
 class OptimizedFactoryResult(NamedTuple):
+    """Results from optimizing a factory"""
     optimal_factory: CompressedVector
+    """The optimal factory"""
     pricing_model: CompressedVector
+    """The pricing model of the optimal factory"""
     full_pricing_model: CompressedVector
+    """The full pricing model of the optimal factory"""
     efficiency_analysis: CompressedVector
+    """Efficiency analysis of the possible constructs"""
     zero_throughputs: list[int]
+    """Reference indicies with no throughput"""
     scaling_factor: float
+    """Scaling factor"""
     true_cost: CompressedVector
+    """Resource cost of the factory"""
     residual_column_table: ColumnTable
+    """Ending ColumnTable for faster retargted calcs"""
 
 
 class FactorioInstance():
     """Holds the information in an instance (specific game mod setup) after completing premanagment steps.
-
-    Members
-    -------
-    _data_raw : dict
-        Whole data.raw dictonary post-premanagment
-    _tech_tree : TechnologyTree
-        Technology Tree of this instance
-    _uncompiled_constructs : tuple[UncompiledConstruct, ...]
-        All UncompiledConstructs for the game instance
-    _manual_constructs : tuple[ManualConstruct, ...]
-        ManualConstructs in the instance
-    _complex_constructs : list[ComplexConstruct]
-        ComplexConstructs in the instance
-    _disabled_constructs : list[ComplexConstruct]
-        ComplexConstructs that have been disabled
-    _compiled : ComplexConstruct | None
-        ComplexConstruct of the entire instance or None if hasn't been compiled since last change
-    reference_list : tuple[str, ...]
-        Every relevent item, fluid, and research identifier (sorted)
-    reference_classifications : np.ndarray
-        Classifications of the reference_list items
-    _transportation_tables : dict[str, TransportTable]
-        Tables for calculating item transporation costs
-    catalyst_list : tuple[str, ...]
-        All catalytic refrence_list elements
-    active_list : tuple[str, ...]
-        All items that can be used in building a factory
-    spatial_pricing : np.ndarray
-        Pricing model for ore space consumption
-    raw_ore_pricing : np.ndarray
-        Pricing model for raw ore usage
-    COST_MODE : str
-        What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings
-    RELEVENT_FLUID_TEMPERATURES : dict
-        Dict with keys of fluid names and values of a dict mapping temperatures to energy densities
-    research_modifiers : dict[str, ResearchTable]
-        Research modifier technology tables
-        Currently ModuleLookupTables use "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed"
-    post_analyses : dict[str, dict[int, float]]
-        Post analysis calculations to run, construct name and target outputs
     """
     _data_raw: dict
+    """Whole data.raw dictonary post-premanagment"""
     _tech_tree: TechnologyTree
+    """Technology Tree of this instance"""
     _uncompiled_constructs: tuple[UncompiledConstruct, ...]
+    """All UncompiledConstructs for the game instance"""
     _manual_constructs: tuple[ManualConstruct, ...]
+    """ManualConstructs in the instance"""
     _complex_constructs: list[ComplexConstruct]
+    """ComplexConstructs in the instance"""
     _disabled_constructs: list[ComplexConstruct]
+    """ComplexConstructs that have been disabled"""
     _compiled: ComplexConstruct | None
+    """ComplexConstruct of the entire instance or None if hasn't been compiled since last change"""
     reference_list: tuple[str, ...]
+    """Every relevent item, fluid, and research identifier (sorted)"""
     reference_classifications: np.ndarray
+    """Classifications of the reference_list items"""
     _transportation_tables: dict[str, TransportTable]
+    """Tables for calculating item transporation costs"""
     catalyst_list: tuple[str, ...]
+    """All catalytic refrence_list elements"""
     active_list: tuple[str, ...]
+    """All items that can be used in building a factory"""
     spatial_pricing: np.ndarray
+    """Pricing model for ore space consumption"""
     raw_ore_pricing: np.ndarray
+    """Pricing model for raw ore usage"""
     COST_MODE: str
+    """What cost mode is being used. https://lua-api.factorio.com/latest/concepts.html#DifficultySettings"""
     RELEVENT_FLUID_TEMPERATURES: dict
+    """Dict with keys of fluid names and values of a dict mapping temperatures to energy densities"""
     research_modifiers: dict[str, ResearchTable]
+    """Research modifier technology tables
+        Currently ModuleLookupTables use "laboratory-productivity", "mining-drill-productivity-bonus", and "laboratory-speed"""
     post_analyses: dict[str, dict[int, float]]
+    """Post analysis calculations to run, construct name and target outputs"""
 
     def __init__(self, filename: str, COST_MODE: str = 'normal', nobuild: bool = False, raw_ore_pricing: dict[str, Real] | CompressedVector | None = None) -> None:
         """
@@ -511,52 +499,38 @@ def _efficiency_analysis(construct: ComplexConstruct, args: ColumnSpecifier, val
 
 
 class FactorioFactory():
-    """Abstract Class. A factory in Factorio.
-
-    Members
-    -------
-    _instance : FactorioInstance
-        Instance associated with this factory
-    _known_technologies : TechnologicalLimitation
-        Tech level for this factory
-    _targets : CompressedVector
-        Target outputs and amounts
-    optimal_factory : CompressedVector
-        Calculated optimal factory from last calculate_optimal_factory run
-    optimal_pricing_model : CompressedVector
-        Calculated pricing model of self.optimal_factory
-    full_optimal_pricing_model : CompressedVector
-        Calculated full pricing model of self.optimal_factory
-    _construct_efficiencies : CompressedVector
-        Calculated efficiencies of available constructs
-    _zero_throughputs : list[int]
-        List of indicies of items and fluids of which none were produced in optimal factory
-    optimized : bool
-        If an optimal factory has been calculated since targets were last updated
-    _intermediate_scale_factor : float
-        Scaling factor difference between input and output pricing model
-    true_cost : CompressedVector
-        Full item/fluid cost of the optimal factory
-    _no_module_value : CompressedVector
-        Evaluations of unmodded constructs
-    last_run_columns : ColumnTable | None
-        Columns used in the last run to pass to solver when retargeting is done
+    """Abstract Class. A factory in Factorio
     """
     _instance: FactorioInstance
+    """Instance associated with this factory"""
     _targets: CompressedVector
+    """Target outputs and amounts"""
     _previous_material: FactorioMaterialFactory
+    """Parent material factory"""
     _previous_science: FactorioScienceFactory | TechnologicalLimitation
-    descendants: list[FactorioFactory] #0th index is the retargeting target
+    """Parent science factory"""
+    descendants: list[FactorioFactory]
+    """Descendant factories
+        0th index is the retargeting target"""
     optimized: bool
+    """If an optimal factory has been calculated since targets were last updated"""
 
     true_cost: CompressedVector
+    """Full item/fluid cost of the optimal factory"""
     _last_run_columns: ColumnTable | None
+    """Columns used in the last run to pass to solver when retargeting is done"""
     _optimal_factory: CompressedVector
+    """Calculated optimal factory from last calculate_optimal_factory run"""
     pricing_model: CompressedVector
+    """Calculated pricing model of self.optimal_factory"""
     _full_pricing_model: CompressedVector
+    """Calculated full pricing model of self.optimal_factory"""
     _efficiency_analysis: CompressedVector
+    """Calculated efficiencies of available constructs"""
     _zero_throughputs: list[int]
+    """List of indicies of items and fluids of which none were produced in optimal factory"""
     _internal_scaling_factor: float
+    """Scaling factor difference between input and output pricing model"""
 
     def __init__(self, instance: FactorioInstance, targets: CompressedVector, previous_material: FactorioMaterialFactory, 
                  previous_science: FactorioScienceFactory) -> None:
@@ -572,6 +546,7 @@ class FactorioFactory():
         previous_science : FactorioMaterialFactory
             Science factory to reference for known technologies
         """
+
         assert isinstance(instance, FactorioInstance)
         assert isinstance(targets, CompressedVector)
         assert isinstance(previous_material, FactorioMaterialFactory)
@@ -592,6 +567,8 @@ class FactorioFactory():
         self._efficiency_analysis = CompressedVector()
         self._zero_throughputs = []
         self._internal_scaling_factor = 0
+
+        #assert not isinstance(self, FactorioFactory), "FactorioFactory is an abstract class. Cannot be initilized"
     
     @property
     def tech_coverage(self) -> TechnologicalLimitation:
@@ -858,18 +835,13 @@ class FactorioManualFactory(FactorioMaterialFactory):
 
 class FactorioScienceFactory(FactorioFactory):
     """A factory in factorio that completes research.
-
-    Added Members
-    -------------
-    _clear : list[str]
-        Set of tools that define which must be produced to clear all researches possible with just those tools.
-        Example: If this was a set of red and green science pack that would indicate all research that only red and
-                 green science packs are needed for MUST be completed within this factory, regardless of other calculations
-    _extra : list[str]
-        Set of extra technologies to research
     """
     _clear: list[str]
+    """Set of tools that define which must be produced to clear all researches possible with just those tools.
+        Example: If this was a set of red and green science pack that would indicate all research that only red and
+                 green science packs are needed for MUST be completed within this factory, regardless of other calculations"""
     _extra: list[str]
+    """Set of extra technologies to research"""
 
     def __init__(self, instance: FactorioInstance, science_targets: CompressedVector, previous_material: FactorioMaterialFactory, 
                  previous_science: FactorioScienceFactory) -> None:
@@ -1001,22 +973,15 @@ class FactorioFactoryChain():
         A science factory that produces a set of science packs. Having one of these will permit any recipe that is unlockable with those sciences to be used in factories after it.
         
         A material factory that produces a set of buildings and catalyst materials. Having one of these will set the pricing model for every factory in the chain up until the next component factory.
-    
-    Members
-    -------
-    _instance : FactorioInstance
-        Instance for this chain
-    _chain :list[FactorioFactory]
-        List containing the chain elements
-    _offshoots : dict[int, list[FactorioFactoryChain]]
-        Offshoot chains. Primary chain is computed first, then offshoot chains are computed
-    _uncompiled_cost_function : CostFunction
-        Cost function this chain uses
     """
     _instance: FactorioInstance
+    """Instance for this chain"""
     _origin: FactorioFactory | None
+    """List containing the chain elements"""
     _offshoots: dict[int, list[FactorioFactoryChain]]
+    """Offshoot chains. Primary chain is computed first, then offshoot chains are computed"""
     _uncompiled_cost_function: CostFunction
+    """Cost function this chain uses"""
 
     def __init__(self, instance: FactorioInstance, uncompiled_cost_function: CostFunction, 
                  starting_factory: FactorioInitialFactory | None = None) -> None:

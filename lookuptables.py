@@ -12,28 +12,19 @@ if TYPE_CHECKING:
 
 class ColumnSpecifier(NamedTuple):
     """All the information needed for a construct to decide what the best column is to generate
-
-    Members
-    -------
-    cost_function : PricedCostFunction
-        Cost function being used
-    inverse_priced_indices : np.ndarray
-        Array indicating what elements of the reference list are unpriced
-    dual_vector : np.ndarray | None
-        Dual vector to optimize with
-    transport_residual_pair : TransportCostPair
-        Transportation costs that have reached this far
-    transport_cost_table : dict[str, TransportCostPair]
-        Transportation cost tables for adding more transport costs to the residual pair
-    known_technologies : TechnologicalLimitation
-        Research state to generate for
     """    
     cost_function: PricedCostFunction
+    """Cost function being used, pricing already set"""
     inverse_priced_indices: np.ndarray
+    """Array indicating what elements of the reference list are unpriced"""
     dual_vector: np.ndarray | None
+    """Dual vector to optimize with"""
     transport_residual_pair: TransportCostPair
+    """Transportation costs that have reached this far"""
     transport_cost_table: dict[str, TransportCostPair]
+    """Transportation cost tables for adding more transport costs to the residual pair"""
     known_technologies: TechnologicalLimitation
+    """Research state to generate for"""
 
 def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects: dict[str, list[str]], reference_list: Sequence[str]) -> sparse.csr_matrix:
     """Calculates the multilinear effect form of deltas
@@ -63,86 +54,58 @@ def encode_effect_deltas_to_multilinear(deltas: CompressedVector, effect_effects
 
 class ModuleLookupTable:
     """A lookup table for many CompiledConstructs, used to determine the optimal module setups
-
-    Members
-    -------
-    module_count : int
-        Number of modules in this lookup table
-    building_width : int
-        Smaller side of building
-    building_height : int
-        Larger side of building
-    avaiable_modules : list[tuple[str, bool, bool]]
-        Modules that can be used for this lookup table
-    base_productivity : Fraction
-        Base productivity for this lookup table
-    _ref_length : int
-        Length of the reference list
-    _point_length : int
-        Length of points of this lookup table
-    _point_restrictions_transform : sparse.csr_matrix
-        Transformation on inverse_pricing_indicies to calculate what indicies of the points are allowed to be nonzero
-    _string_table : list[str]
-        Table of strings for point indicies
-    _allowed_internal_module_count : int
-        Number of interal modules
-    _allowed_external_module_count : int
-        Number of exteral modules
-    _beacon_design_sizes : np.ndarray
-        Array with cardinality of beacon frequency designs for different beacon designs
-    _beacon_module_slots : np.ndarray
-        Number of slots for each beacon design
-    _beacon_design_one_form : np.ndarray
-        Transformation to calculate what beacon design is being used
-    _beacon_design_effect_multi : np.ndarray
-        Effect multi from a beacon design onto the external modules
-    _beacon_design_cost_multi : np.ndarray
-        Cost multi from a beacon design onto the beacon cost and external module costs
-    _beacon_design_beacon_cost_index : np.ndarray
-        Index of a beacon design's building cost
-    _beacon_design_electric_cost : np.ndarray
-        Electricity cost of the beacon
-    _electric_index : int
-        Index of electricity in the reference list
-    _base_effect_vector : np.ndarray
-        Effect vector
-    _internal_effect_matrix : np.ndarray
-        Matrix to calculate the internal module effects given a point
-    _internal_cost_matrix : np.ndarray
-        Matrix to calculate the internal module costs given a point
-    _external_effect_matrix : np.ndarray
-        Matrix to calculate the external module effects given a point
-    _external_cost_matrix : np.ndarray
-        Matrix to calculate the external module costs given a point
-    _beacon_areas : np.ndarray
-        Area of each beacon design
     """
     module_count: int
+    """Number of modules in this lookup table"""
     building_width: int
+    """Smaller side of building"""
     building_height: int
+    """Larger side of building"""
     avaiable_modules: list[tuple[str, bool, bool]]
+    """Modules that can be used for this lookup table"""
     base_productivity: Fraction
+    """Base productivity for this lookup table"""
 
     _ref_length: int
+    """Length of the reference list"""
     _point_length: int
+    """Length of points of this lookup table"""
     _point_restrictions_transform: sparse.csr_matrix
+    """Transformation on inverse_pricing_indicies to calculate what indicies of the points are allowed to be nonzero"""
     _string_table: list[str]
+    """Table of strings for point indicies"""
     _allowed_internal_module_count: int
+    """Number of interal modules"""
     _allowed_external_module_count: int
+    """Number of exteral modules"""
     _beacon_design_sizes: np.ndarray
+    """Array with cardinality of beacon frequency designs for different beacon designs"""
     _beacon_module_slots: np.ndarray
+    """Number of slots for each beacon design"""
     _beacon_design_one_form: np.ndarray
+    """Transformation to calculate what beacon design is being used"""
     _beacon_design_effect_multi: np.ndarray
+    """Effect multi from a beacon design onto the external modules"""
     _beacon_design_cost_multi: np.ndarray
+    """Cost multi from a beacon design onto the beacon cost and external module costs"""
     _beacon_design_beacon_cost_index: np.ndarray
+    """Index of a beacon design's building cost"""
     _beacon_design_electric_cost: np.ndarray
+    """Electricity cost of the beacon"""
     _electric_index: int
+    """Index of electricity in the reference list"""
     _base_effect_vector: np.ndarray
+    """Effect vector"""
     _internal_effect_matrix: np.ndarray
+    """Matrix to calculate the internal module effects given a point"""
     _internal_cost_matrix: np.ndarray
+    """Matrix to calculate the internal module costs given a point"""
     _external_effect_matrix: np.ndarray
+    """Matrix to calculate the external module effects given a point"""
     _external_cost_matrix: np.ndarray
+    """Matrix to calculate the external module costs given a point"""
     _beacon_areas: np.ndarray
+    """Area of each beacon design"""
 
     def __init__(self, module_count: int, building_size: tuple[int, int], avaiable_modules: list[tuple[str, bool, bool]], instance: FactorioInstance, base_productivity: Fraction) -> None:
         """

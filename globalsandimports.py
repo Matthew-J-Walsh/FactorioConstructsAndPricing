@@ -27,44 +27,43 @@ from typing import Tuple, TypeVar, Callable, Hashable, Iterable, Collection, Seq
 
 @runtime_checkable
 class CallableSolver(Protocol):
+    """Linear program solver for minimize cx, Ax<=b
+    """    
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray | None = None, g: np.ndarray | None = None) -> np.ndarray | None:
         return None
 
 @runtime_checkable
 class CallableSparseSolver(Protocol):
+    """Linear sparse program solver for minimize cx, Ax<=b. Retruns both primal and dual
+    """    
     def __call__(self, A: sparse.csr_matrix, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
 @runtime_checkable
 class CallableDenseSolver(Protocol):
+    """Linear program solver for minimize cx, Ax<=b. Retruns both primal and dual
+    """    
     def __call__(self, A: np.ndarray, b: np.ndarray, c: np.ndarray, g: np.ndarray | None = None, ginv: np.ndarray | None = None) -> Tuple[np.ndarray | None, np.ndarray | None]:
         return None, None
 
 
 class PointEvaluations(NamedTuple):
     """Evaluation matricies for a set of lookup table points
-
-    Members
-    -------
-    multilinear_effect : np.ndarray
-        Multilinear effect at each point
-    running_cost : np.ndarray
-        Running cost at each point
-    evaulated_cost : np.ndarray
-        Cost singular value at each point
-    effective_area : np.ndarray
-        Area used by machine at each point
     """    
     multilinear_effect: np.ndarray
+    """Multilinear effect at each point"""
     running_cost: np.ndarray
+    """Running cost at each point"""
     evaulated_cost: np.ndarray
+    """Cost singular value at each point"""
     effective_area: np.ndarray
+    """Area used by machine at each point"""
 
 BEST_LP_SOLVER: CallableDenseSolver
 
-ALL_MODULE_EFFECTS = ['consumption', 'speed', 'productivity', 'pollution'] 
-ACTIVE_MODULE_EFFECTS = ['consumption', 'speed', 'productivity'] 
-MODULE_EFFECT_MINIMUMS = {'consumption': Fraction(4, 5), 'speed': Fraction(4, 5), 'productivity': Fraction(1)} 
+ALL_MODULE_EFFECTS: list[str] = ['consumption', 'speed', 'productivity', 'pollution'] 
+ACTIVE_MODULE_EFFECTS: list[str] = ['consumption', 'speed', 'productivity'] 
+MODULE_EFFECT_MINIMUMS: dict[str, Fraction] = {'consumption': Fraction(4, 5), 'speed': Fraction(4, 5), 'productivity': Fraction(1)} 
 def multilienar_effect_ordering():
     """
     Creates an effect ordering, list of tuples, for the standard effect multilinear form.

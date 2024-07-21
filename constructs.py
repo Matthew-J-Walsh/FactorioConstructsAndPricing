@@ -9,51 +9,38 @@ if TYPE_CHECKING:
 
 class UncompiledConstruct:
     """An uncompiled construct, contains all the information needed to compile a single construct.
-
-    Members
-    -------
-    ident : str
-        Unique identifier
-    drain : CompressedVector
-        Passive drain to the product space
-    deltas : CompressedVector
-        Changes to product space from running the construct
-    effect_effects : dict[str, list[str]]
-        Specifies how this construct is affected by module effects
-    allowed_modules : list[tuple[str, bool, bool]]
-        Each tuple represents a module, if it can be used inside the building, and if it can be used in beacons for the building
-    internal_module_limit : int
-        Number of module slots inside the building
-    base_inputs : CompressedVector
-        The inputs required to start the machine, used for future catalyst calculations
-    cost : CompressedVector
-        The cost of a single instance (without any modules)
-    limit : TechnologicalLimitation
-        Required technological level to make this construct (without any modules)
-    building : dict
-        Link the the building entity for tile size values
-        https://lua-api.factorio.com/latest/prototypes/EntityPrototype.html#tile_width
-        https://lua-api.factorio.com/latest/prototypes/EntityPrototype.html#tile_height
-    base_productivity : Fraction
-        Baseline productivity effect of the building
-        https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
-        https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity
-    research_effected : list[str]
-        What research modifiers effect this construct
     """
+
     ident: str
+    """Unique identifier"""
     drain: CompressedVector
+    """Passive drain to the product space"""
     deltas: CompressedVector
+    """Changes to product space from running the construct"""
     effect_effects: dict[str, list[str]]
+    """Specifies how this construct is affected by module effects"""
     allowed_modules: list[tuple[str, bool, bool]]
+    """Each tuple represents a module, if it can be used inside the building, and if it can be used in beacons for the building"""
     internal_module_limit: int
+    """Number of module slots inside the building"""
     base_productivity: Fraction
+    """Baseline productivity effect of the building
+        https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html#base_productivity
+        https://lua-api.factorio.com/latest/prototypes/MiningDrillPrototype.html#base_productivity"""
     base_inputs: CompressedVector
+    """The inputs required to start the machine, used for future catalyst calculations"""
     cost: CompressedVector
+    """The cost of a single instance (without any modules)"""
     limit: TechnologicalLimitation
+    """Required technological level to make this construct (without any modules)"""
     building: dict
+    """Link the the building entity for tile size values
+        https://lua-api.factorio.com/latest/prototypes/EntityPrototype.html#tile_width
+        https://lua-api.factorio.com/latest/prototypes/EntityPrototype.html#tile_height"""
     research_effected: list[str]
+    """What research modifiers effect this construct"""
     surfaces: list[str]
+    """What surfaces this construct can be executed on"""
 
     def __init__(self, ident: str, drain: CompressedVector, deltas: CompressedVector, effect_effects: dict[str, list[str]], 
                  allowed_modules: list[tuple[str, bool, bool]], internal_module_limit: int, base_inputs: CompressedVector, cost: CompressedVector, 
@@ -129,43 +116,29 @@ class UncompiledConstruct:
 
 class CompiledConstruct:
     """A compiled UncompiledConstruct for high speed and low memory column generation.
-
-    Members
-    -------
-    origin : UncompiledConstruct
-        Construct to compile
-    _technological_productivity_table : ResearchTable
-        ResearchTable containing the added productivity associated with this Construct given a Tech Level
-    _technological_speed_multipliers : ResearchTable
-        ResearchTable containing speed multipliers associated with this Construct given a Tech Level
-    effect_transform : sparse.csr_matrix
-        Effect this construct has in multilinear form
-    flow_transform : sparse.csr_matrix
-        Absolute value of effect_transform. Used to calculate scaled transport costs
-    flow_characterization : np.ndarray
-        What reference values are changed by this construct. Used to calculate static transport costs
-    base_cost : np.ndarray
-        Cost vector associated with the module-less and beacon-less construct
-    _required_price_indices : np.ndarray
-        Indicies that must be priced to build this construct
-    effective_area : int
-        Area usage of an instance without beacons.
-    _isa_mining_drill : bool
-        If this construct should be priced based on size when calculating in size restricted mode
-    _instance: FractionInstance
-        Instance associated with this construct
     """
     origin: UncompiledConstruct
+    """Construct compiled from"""
     _technological_productivity_table: ResearchTable
+    """ResearchTable containing the added productivity associated with this Construct given a Tech Level"""
     _technological_speed_multipliers: ResearchTable
+    """ResearchTable containing speed multipliers associated with this Construct given a Tech Level"""
     effect_transform: sparse.csr_matrix
+    """Effect this construct has in multilinear form"""
     flow_transform: sparse.csr_matrix
+    """Absolute value of effect_transform. Used to calculate scaled transport costs"""
     flow_characterization: np.ndarray
+    """What reference values are changed by this construct. Used to calculate static transport costs"""
     base_cost: np.ndarray
+    """Cost vector associated with the module-less and beacon-less construct"""
     _required_price_indices: np.ndarray
+    """Indicies that must be priced to build this construct"""
     effective_area: int
+    """Area usage of an instance without beacons"""
     _isa_mining_drill: bool
+    """If this construct should be priced based on size when calculating in size restricted mode"""
     _instance: FactorioInstance
+    """Instance associated with this construct"""
 
     def __init__(self, origin: UncompiledConstruct, instance: FactorioInstance):
         """
@@ -344,29 +317,22 @@ class CompiledConstruct:
 
 class ComplexConstruct:
     """A true construct. A formation of subconstructs with stabilization values.
-
-    Members
-    -------
-    subconstructs : list[ComplexConstruct] | list[CompiledConstruct]
-        ComplexConstructs that makeup this Complex Construct
-    _stabilization : dict[int, str]
-        What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct
-    ident : str
-        Name for this construct
-    _instance : FactorioInstance
-        FactorioInstance associated with this construct
-    _transport_type : tuple[str, ...]
-        What transport cost table to use when avaiable, uses first avaiable
     """
     subconstructs: list[ComplexConstruct] | list[CompiledConstruct]
+    """ComplexConstructs that makeup this Complex Construct"""
     _stabilization: dict[int, str]
+    """What inputs and outputs are stabilized (total input, output, or both must be zero) in this construct"""
     ident: str
+    """Name for this construct"""
     _instance: FactorioInstance
+    """FactorioInstance associated with this construct"""
     _transport_types: tuple[str, ...]
-    attributes: dict[str, str]
+    """What transport cost table to use when avaiable, uses first avaiable"""
+    attributes: dict[Any, Any]
+    """Misc attributes"""
 
     def __init__(self, subconstructs: Sequence[ComplexConstruct], ident: str, transport_types: tuple[str, ...] | str | None = None, 
-                 attributes: dict[str, str] | None = None) -> None:
+                 attributes: dict[Any, Any] | None = None) -> None:
         """
         Parameters
         ----------
@@ -376,7 +342,7 @@ class ComplexConstruct:
             Name for this construct
         transport_types : tuple[str, ...] | str | None
             Which transport type(s) should be added to costs and potentially their priority ordering
-        attributes : dict[str, str] | None
+        attributes : dict[Any, Any] | None
             Special attributes to hold onto
         """
         self.subconstructs = list(subconstructs)
@@ -566,20 +532,15 @@ class SingularConstruct(ComplexConstruct):
 
 class ManualConstruct:
     """Manual Constructs are hand crafted constructs. This should only be used when there is no other way to progress
-
-    Members
-    -------
-    ident : str
-        Unique identifier
-    effect_vector : np.ndarray
-        Column vector of this manual action
-    limit : TechnologicalLimitation
-        Tech level required to complete this manual action
     """
     ident: str
+    """Unique identifier"""
     deltas: CompressedVector
+    """Delta vector of this construct"""
     _column: np.ndarray
+    """Column vector of this manual action"""
     limit: TechnologicalLimitation
+    """Tech level required to complete this manual action"""
 
     def __init__(self, ident: str, deltas: CompressedVector, limit: TechnologicalLimitation, instance: FactorioInstance):
         """

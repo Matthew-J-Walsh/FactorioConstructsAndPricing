@@ -33,7 +33,9 @@ and _inverse_map is used in tools
 
 ## Properly comment class attributes
 
-## Make a class for solve_for_target returns?
+## _base_effect_vector in lookup table
+
+what does it mean?
 
 
 

@@ -12,6 +12,7 @@ class CompressedVector(dict):
     They also have hashes for easier search through collections
     """
     _hash_value: int | None
+    """Stored hash value"""
 
     def __init__(self, input = None) -> None: # type: ignore
         if input is None:
@@ -119,8 +120,11 @@ class TechnologyTree:
     A X B (X = 'skew') iff None of the above 3 apply.
     """
     _reference_map: dict[str, int]
+    """Map from research name to ident number"""
     _inverse_map: dict[int, str]
+    """Map from ident number to research name"""
     _comparison_table: np.ndarray
+    """Table to quickly compare tech limits"""
 
     def __init__(self, technology_data: Collection[dict]) -> None:
         """
@@ -258,16 +262,11 @@ class TechnologyTree:
 class TechnologicalLimitation:
     """Shortened to a 'limit' elsewhere in the program. Represents the technologies that must be researched in order
     to unlock the specific object (recipe, machine, module, etc.).
-
-    Members
-    -------
-    _tree : TechnologyTree
-        Tree that this limit is a part of
-    canonical_form : frozenset[frozenset[int]]
-        Canonical form of the research
     """
     _tree: TechnologyTree
+    """Tree that this limit is a part of"""
     canonical_form: frozenset[frozenset[int]]
+    """Canonical form of the research"""
 
     def __init__(self, tree: TechnologyTree, sets_of_researches: Collection[Collection[str]] = [], sets_of_references: Collection[Collection[int]] = []) -> None:
         """
@@ -368,23 +367,17 @@ class TechnologicalLimitation:
 
 class ColumnTable:
     """Container for columns of a LP problem
-
-    Members
-    -------
-    column : np.ndarray
-        Columns of the problem
-    costs : np.ndarray
-        Costs of the problem
-    true_costs : np.ndarray
-        True costs of the columns
-    ident : np.ndarray
-        Identifiers of the columns
     """
     columns: np.ndarray
+    """Columns of the problem"""
     costs: np.ndarray
+    """Costs of the problem"""
     true_costs: np.ndarray
+    """True costs of the columns"""
     idents: np.ndarray[CompressedVector, Any]
+    """Identifiers of the columns"""
     _valid_rows: np.ndarray | None
+    """Saved valid_rows value"""
 
     def __init__(self, columns: np.ndarray, costs: np.ndarray, true_costs: np.ndarray, idents: np.ndarray[CompressedVector, Any]):
         """
@@ -612,19 +605,15 @@ class ColumnTable:
     
 class ResearchTable:
     """Table of research depenedent values
-
-    Members
-    -------
-    _limits : list[TechnologicalLimitation]
-        Technological Levels
-    _values : list[Any]
-        Research dependent values
     """    
     _limits: list[TechnologicalLimitation]
+    """Technological Levels"""
     _values: list[Any]
+    """Research dependent values"""
     _base: Fraction
+    """Base value"""
 
-    def __init__(self, base: Fraction = Fraction(0)):
+    def __init__(self, base: Fraction = Fraction(0)) -> None:
         """Empty init for ordering
 
         Parameters
@@ -636,7 +625,7 @@ class ResearchTable:
         self._values = []
         self._base = base
     
-    def add(self, limit: TechnologicalLimitation, value: Fraction):
+    def add(self, limit: TechnologicalLimitation, value: Fraction) -> None:
         """Adds an value to the table
 
         Parameters
@@ -670,32 +659,12 @@ class ResearchTable:
         """        
         return sum([value for limit, value in zip(self._limits, self._values) if known_technologies >= limit]) + self._base
     
-    def max(self, known_technologies: TechnologicalLimitation) -> Any:
-        """Evaluates the maximum (ordered) value given the tech level
-
-        Parameters
-        ----------
-        known_technologies : TechnologicalLimitation
-            Tech level to use
-
-        Returns
-        -------
-        Any
-            Maximum tech level's associated value
-        """        
-        raise DeprecationWarning
-        for i in range(len(self._limits)):
-            if not known_technologies >= self._limits[i]:
-                return self._values[i-1]
-        return self._values[-1]
-    
     def __iter__(self) -> Iterator[tuple[TechnologicalLimitation, Any]]:
         for limit in self._limits:
             yield limit, self.value(limit)
 
     def __repr__(self) -> str:
         return repr(self._limits)+"\n"+repr(self._values)
-
 
 
 T = TypeVar('T')
