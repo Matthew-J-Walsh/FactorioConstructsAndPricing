@@ -39,7 +39,7 @@ class FactorioInstance():
     """
     _data_raw: dict
     """Whole data.raw dictonary post-premanagment"""
-    _tech_tree: TechnologyTree
+    tech_tree: TechnologyTree
     """Technology Tree of this instance"""
     _uncompiled_constructs: tuple[UncompiledConstruct, ...]
     """All UncompiledConstructs for the game instance"""
@@ -98,8 +98,8 @@ class FactorioInstance():
         self.COST_MODE = COST_MODE
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
-        self._tech_tree = complete_premanagement(self._data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
-        self.research_modifiers = generate_research_effect_tables(self._data_raw, self._tech_tree)
+        self.tech_tree = complete_premanagement(self._data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.research_modifiers = generate_research_effect_tables(self._data_raw, self.tech_tree)
         self._uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self._uncompiled_constructs)
         self.reference_classifications = classify_reference_list(self.reference_list, self._data_raw)
@@ -876,7 +876,7 @@ class FactorioScienceFactory(FactorioFactory):
         TechnologicalLimitation
             Tech level that will be unlocked when this factory is done
         """
-        return self._previous_science.tech_coverage + TechnologicalLimitation(self._instance._tech_tree, [set([targ[:targ.rfind("=")] for targ in self._targets.keys()])]) #TODO: don't call that second private variable _tech_tree
+        return self._previous_science.tech_coverage + TechnologicalLimitation(self._instance.tech_tree, [set([targ[:targ.rfind("=")] for targ in self._targets.keys()])]) #TODO: don't call that second private variable _tech_tree
 
     def retarget(self, targets: CompressedVector, retainment: float = BASELINE_RETAINMENT_VALUE) -> None:
         """Rebuilds targets. This is useful if iteratively optimizing a built chain.
@@ -895,7 +895,7 @@ class FactorioScienceFactory(FactorioFactory):
         #assert not any([target in self.instance.data_raw['tool'].keys() for target in targets.keys()]), "retarget should NEVER be given a tool. Only researches."
         assert all([t in self._targets.keys() for t in targets]), "retarget should never add new targets... yet."
         covering_to: TechnologicalLimitation = self._instance.technological_limitation_from_specification(fully_automated=self._clear) + \
-                      TechnologicalLimitation(self._instance._tech_tree, [set([target for target in targets.keys()])])
+                      TechnologicalLimitation(self._instance.tech_tree, [set([target for target in targets.keys()])])
         last_coverage: TechnologicalLimitation = self.tech_coverage
 
         raise NotImplementedError("actually fix this line this time.")
@@ -1257,7 +1257,7 @@ def _science_factory_parameters(instance: FactorioInstance, previous_science: Fa
 
     last_coverage: TechnologicalLimitation = previous_science.tech_coverage
 
-    targets = CompressedVector({instance._tech_tree._inverse_map[k]+RESEARCH_SPECIAL_STRING: 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
+    targets = CompressedVector({instance.tech_tree.generate_string(k): 1 for k in next(iter(covering_to.canonical_form)) if k not in next(iter(last_coverage.canonical_form))}) #next(iter()) gives us the first (and theoretically only) set of nodes making up the tech limit
 
     return targets, covering_to, last_coverage
 

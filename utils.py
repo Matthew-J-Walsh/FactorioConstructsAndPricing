@@ -152,7 +152,7 @@ class TechnologyTree:
         assert not (self._comparison_table==13).any()
 
     def compare(self, rA: int, rB: int) -> int:
-        """Compares two technologies.
+        """Compares two technologies
 
         Parameters
         ----------
@@ -228,7 +228,7 @@ class TechnologyTree:
         return self.simplify(sets_of_references)
     
     def techlimit_ge(self, A: TechnologicalLimitation, B: TechnologicalLimitation) -> bool:
-        """Determines if B will always have a research subset if A has a researched subset.
+        """Determines if B will always have a research subset if A has a researched subset
 
         Parameters
         ----------
@@ -258,6 +258,21 @@ class TechnologyTree:
                         return False
 
         return True
+    
+    def generate_string(self, r: int) -> str:
+        """Generates the research string for a technology
+
+        Parameters
+        ----------
+        r : int
+            Technology id to create the string for
+
+        Returns
+        -------
+        str
+            The string for that tech
+        """        
+        return self._inverse_map[r]+RESEARCH_SPECIAL_STRING
 
 class TechnologicalLimitation:
     """Shortened to a 'limit' elsewhere in the program. Represents the technologies that must be researched in order
@@ -761,7 +776,7 @@ def technological_limitation_from_specification(instance: FactorioInstance, full
     for recipe in extra_recipes:
         tech_obj = tech_obj.union(instance._data_raw['recipe'][recipe]['limit'])
     
-    return TechnologicalLimitation(instance._tech_tree, [tech_obj])
+    return TechnologicalLimitation(instance.tech_tree, [tech_obj])
 
 def evaluate_formulaic_count(expression: str, level: int) -> int:
     """Evaluates the count for a formulaic expression at a level

@@ -95,7 +95,7 @@ class ModuleLookupTable:
     _electric_index: int
     """Index of electricity in the reference list"""
     _base_effect_vector: np.ndarray
-    """Effect vector"""
+    """The effect vector of this ModuleLookupTable without any modules in use"""
     _internal_effect_matrix: np.ndarray
     """Matrix to calculate the internal module effects given a point"""
     _internal_cost_matrix: np.ndarray

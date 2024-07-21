@@ -23,16 +23,6 @@ Combining beacon operations together?
 
 ## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
 
-## non-tree-like constructs
-
-Should they be handled like they are?
-
-## tech_tree public vs private from instance
-
-and _inverse_map is used in tools
-
-## Properly comment class attributes
-
 ## _base_effect_vector in lookup table
 
 what does it mean?
