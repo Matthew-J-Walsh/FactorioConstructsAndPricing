@@ -234,15 +234,15 @@ class CompiledConstruct:
         if not (args.known_technologies >= self.origin.limit) or args.inverse_priced_indices[self._required_price_indices].sum()>0: #rough line, ordered?
             column, cost, true_cost, ident = np.zeros((self.base_cost.shape[0], 0)), np.zeros(0), np.zeros((self.base_cost.shape[0], 0)), np.zeros(0, dtype=CompressedVector)
         else:
-            cost_function = args.cost_function(self, args.transport_residual_pair)
+            cost_function = args.cost_function(self, args.transport_costs)
             lookup_table = self.lookup_table(args.known_technologies)
             speed_multi = self.speed_multiplier(args.known_technologies)
 
-            evaluation, module_string = lookup_table.best_point(self, cost_function, args.inverse_priced_indices, args.dual_vector)
+            evaluation, module_string = lookup_table.best_point(self, cost_function, args.transport_costs, args.inverse_priced_indices, args.dual_vector)
 
             column = (evaluation.multilinear_effect @ self.effect_transform + evaluation.running_cost.flatten()).reshape(-1, 1) * speed_multi
             cost = cost_function(evaluation)
-            true_cost = true_cost_function(self, args.transport_residual_pair, evaluation)
+            true_cost = true_cost_function(self, args.transport_costs, evaluation)
             ident = np.array([CompressedVector({self.origin.ident + module_string: 1})])
 
             assert np.dot(true_cost.flatten(), args.inverse_priced_indices)==0, self.origin.ident+"'s true cost contains unpriced items: " + \
@@ -394,17 +394,15 @@ class ComplexConstruct:
 
         best_transport_type = None
         for transport_type in self._transport_types:
-            if transport_type in args.transport_cost_table.keys():
+            if transport_type in args.transport_cost_functions.keys():
                 best_transport_type = transport_type
                 break
         if best_transport_type:
-            transport_residual_pair_static = args.transport_residual_pair.static.copy() + args.transport_cost_table[best_transport_type].static
-            transport_residual_pair_scaling = args.transport_residual_pair.scaling.copy() + args.transport_cost_table[best_transport_type].scaling
-            transport_residual_pair = TransportCostPair(transport_residual_pair_static, transport_residual_pair_scaling)
+            transport_residual_pair = args.transport_costs + args.transport_cost_functions[best_transport_type](args.dual_vector)
         else:
-            transport_residual_pair = args.transport_residual_pair
+            transport_residual_pair = args.transport_costs
 
-        nargs = ColumnSpecifier(args.cost_function, args.inverse_priced_indices, args.dual_vector, transport_residual_pair, args.transport_cost_table, args.known_technologies)
+        nargs = ColumnSpecifier(args.cost_function, args.inverse_priced_indices, args.dual_vector, transport_residual_pair, args.transport_cost_functions, args.known_technologies)
         for sc in self.subconstructs:
             assert isinstance(sc, ComplexConstruct)
             table.append(sc.columns(nargs))

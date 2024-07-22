@@ -21,13 +21,7 @@ Combining beacon operations together?
 
 # Misc improvements
 
-## Check and report missing non-optional tag in lua-api: https://lua-api.factorio.com/latest/prototypes/CharacterPrototype.html#mining_speed
-
-## _base_effect_vector in lookup table
-
-what does it mean?
-
-
+None atm
 
 
 # Transport refactoring 2.0

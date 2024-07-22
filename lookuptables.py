@@ -19,10 +19,10 @@ class ColumnSpecifier(NamedTuple):
     """Array indicating what elements of the reference list are unpriced"""
     dual_vector: np.ndarray | None
     """Dual vector to optimize with"""
-    transport_residual_pair: TransportCostPair
+    transport_costs: TransportCost
     """Transportation costs that have reached this far"""
-    transport_cost_table: dict[str, TransportCostPair]
-    """Transportation cost tables for adding more transport costs to the residual pair"""
+    transport_cost_functions: dict[str, TransportationCompiler]
+    """Transportation cost functions for adding more transport costs to the residual pair"""
     known_technologies: TechnologicalLimitation
     """Research state to generate for"""
 
@@ -220,7 +220,7 @@ class ModuleLookupTable:
         assert self._beacon_design_one_form.shape[0] == len(beacon_module_designs), str(self._beacon_design_one_form.shape[0])+","+str(len(beacon_module_designs))
         assert self._beacon_areas.shape[0]==self._beacon_design_count, str(self._beacon_areas.shape[0])+","+str(self._beacon_design_count)+"\n"+str(self._beacon_design_sizes)
 
-    def best_point(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None) -> tuple[PointEvaluations, str]:
+    def best_point(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, transport_cost: TransportCost, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray | None) -> tuple[PointEvaluations, str]:
         """Calculates the best possible valued column, its associated evaluations, and string
 
         Parameters
@@ -248,13 +248,13 @@ class ModuleLookupTable:
             evaluation = self.get_point_evaluations(point)
             #print("B")
         else:
-            point, evaluation = self.search(construct, cost_function, inverse_priced_indices, dual_vector)
+            point, evaluation = self.search(construct, cost_function, transport_cost, inverse_priced_indices, dual_vector)
             #print("C")
         module_string = (" with module setup: " + " & ".join([self._string_table[i]+" x"+str(v) for i, v in enumerate(point[:self._allowed_internal_module_count+self._allowed_external_module_count]) if v>0]) + " " + \
                                                        " & ".join([self._string_table[i+self._allowed_internal_module_count+self._allowed_external_module_count]+" density-"+str(v) for i, v in enumerate(point[self._allowed_internal_module_count+self._allowed_external_module_count:]) if v>0]) if np.sum(point)>0 else "")
         return evaluation, module_string
     
-    def search(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, PointEvaluations]:
+    def search(self, construct: CompiledConstruct, cost_function: CompiledCostFunction, transport_cost: TransportCost, inverse_priced_indices: np.ndarray, dual_vector: np.ndarray) -> tuple[np.ndarray, PointEvaluations]:
         """Searches for the best point
 
         Parameters
@@ -282,6 +282,8 @@ class ModuleLookupTable:
         point_inverse_restrictions = self._point_restrictions_transform @ inverse_priced_indices
 
         multilinear_weighting_vector = construct.effect_transform @ dual_vector
+        multilinear_transport_scaling_effect_vector = (construct.effect_transform @ transport_cost.scaling_effect).T
+        static_transport_effect = np.dot(construct.flow_characterization, transport_cost.static_effect)
 
         current_point = np.zeros(self._point_length)
         current_point_evaluation = self.get_point_evaluations(current_point)
@@ -296,7 +298,8 @@ class ModuleLookupTable:
         while True:
             new_points = self.get_neighbors(current_point, point_inverse_restrictions)
             new_point_evaluation = self.get_point_evaluations(new_points)
-            best_new_point_value, best_new_point_index, best_point_evaluation = get_best_point(multilinear_weighting_vector, cost_function, new_point_evaluation, cost_mode)
+            best_new_point_value, best_new_point_index, best_point_evaluation = get_best_point(multilinear_weighting_vector, multilinear_transport_scaling_effect_vector, static_transport_effect, 
+                                                                                               cost_function, transport_cost, new_point_evaluation, cost_mode)
             best_new_point = new_points[best_new_point_index]
             if best_new_point_value < current_point_value or (best_new_point==current_point).all():
                 break
@@ -478,7 +481,8 @@ class ModuleLookupTable:
     def __repr__(self) -> str:
         return "Lookup table with parameters: "+str([self.module_count, self.building_width, self.building_height, self.avaiable_modules, self.base_productivity])+" totalling "+str("UNKNOWN TODO")
 
-def get_best_point(multilinear_weighting_vector: np.ndarray, cost_function: CompiledCostFunction, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, np.intp, PointEvaluations]:
+def get_best_point(multilinear_weighting_vector: np.ndarray, multilinear_transport_scaling_effect_vector: np.ndarray, static_transport_effect: float, 
+                   cost_function: CompiledCostFunction, transport_cost: TransportCost, point_evaluations: PointEvaluations, cost_mode: bool) -> tuple[float, np.intp, PointEvaluations]:
     """Calculates the best point given a set of poitns and their evaluations
 
     Parameters
@@ -501,7 +505,7 @@ def get_best_point(multilinear_weighting_vector: np.ndarray, cost_function: Comp
         Index of best point
         PointEvaluations of best point
     """    
-    point_values = (multilinear_weighting_vector @ point_evaluations.multilinear_effect.T).reshape(-1)
+    point_values = ((point_evaluations.multilinear_effect + multilinear_transport_scaling_effect_vector) @ multilinear_weighting_vector).reshape(-1) + static_transport_effect
     point_costs = cost_function(point_evaluations)
     if cost_mode:
         best_point_index = point_values.argmax()

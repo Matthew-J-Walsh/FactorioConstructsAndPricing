@@ -55,7 +55,7 @@ class FactorioInstance():
     """Every relevent item, fluid, and research identifier (sorted)"""
     reference_classifications: np.ndarray
     """Classifications of the reference_list items"""
-    _transportation_tables: dict[str, TransportTable]
+    _transportation_functions: dict[str, TransportationPrecompiler]
     """Tables for calculating item transporation costs"""
     catalyst_list: tuple[str, ...]
     """All catalytic refrence_list elements"""
@@ -103,7 +103,7 @@ class FactorioInstance():
         self._uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self._uncompiled_constructs)
         self.reference_classifications = classify_reference_list(self.reference_list, self._data_raw)
-        self._transportation_tables = {transport_type: table_function(self.reference_classifications, self.reference_list, self._data_raw) for transport_type, table_function in TRANSPORT_TABLE_FUNCTIONS.items()}
+        self._transportation_functions = {transport_type: table_function(self.reference_classifications, self.reference_list, self._data_raw) for transport_type, table_function in TRANSPORT_COST_FUNCTIONS.items()}
         self.catalyst_list = determine_catalysts(self._uncompiled_constructs, self.reference_list)
         self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self._data_raw)
         self._manual_constructs = generate_manual_constructs(self)
@@ -363,7 +363,8 @@ class FactorioInstance():
 
         cost_function: PricedCostFunction = uncompiled_cost_function(p0_j)
 
-        transport_costs: dict[str, TransportCostPair] = {transport_type: transport_func(p0_j, inverse_priced_indices, self.reference_classifications, transport_table) for (transport_type, transport_func), transport_table  in zip(TRANSPORT_COST_FUNCTIONS.items(), self._transportation_tables.values())}
+        transport_costs: dict[str, TransportationCompiler] = {transport_type: transport_func(p0_j, inverse_priced_indices) for 
+                                                              transport_type, transport_func in self._transportation_functions.items()}
 
         if use_manual:
             logging.info("Starting a manual program solving.")
@@ -387,7 +388,7 @@ class FactorioInstance():
             if positives[i]:
                 s = s + s_i[i] * R_vector_table.idents[i]
         
-        k: CompressedVector = _efficiency_analysis(self.compiled, ColumnSpecifier(cost_function, inverse_priced_indices, p_j, TransportCostPair.empty(len(self.reference_list)), 
+        k: CompressedVector = _efficiency_analysis(self.compiled, ColumnSpecifier(cost_function, inverse_priced_indices, p_j, TransportCost.empty(len(self.reference_list)), 
                                                                                   transport_costs, known_technologies), R_vector_table.valid_rows, self.post_analyses)
 
         fc_i = R_vector_table.true_costs @ s_i
@@ -733,7 +734,10 @@ class FactorioFactory():
         changed: bool = False
         if not isinstance(self, FactorioInitialFactory):
             changed = self.calculate_optimal_factory(self._previous_material.pricing_model, uncompiled_cost_function)
-        return any([fac.compute_all(uncompiled_cost_function) for fac in self.descendants]) or changed
+        
+        for fac in self.descendants:
+            changed = fac.compute_all(uncompiled_cost_function) or changed 
+        return changed
     
     def retarget_all(self, uncompiled_cost_function: CostFunction) -> bool:
         """Retargets and recomputes all pricing models for chain iteratively and returns if the pricing models changed.
@@ -769,7 +773,9 @@ class FactorioFactory():
         if not isinstance(self, FactorioInitialFactory):
             changed = self.calculate_optimal_factory(self._previous_material.pricing_model, uncompiled_cost_function)
         
-        return any([fac.retarget_all(uncompiled_cost_function) for fac in self.descendants]) or changed
+        for fac in self.descendants:
+            changed = fac.retarget_all(uncompiled_cost_function) or changed
+        return changed
 
     def dump_to_excel(self, writer: pd.ExcelWriter, sheet_name: str) -> None:
         """Dumps the target, optimal factory, optimal pricing model, and inefficient constructs into an excel spreadsheet sheet
@@ -1171,7 +1177,7 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
     inverse_priced_indices = np.ones(len(instance.reference_list))
     inverse_priced_indices[np.array([instance.reference_list.index(k) for k in output_items], dtype=np.int32)] = 0
 
-    R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]), 
+    R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCost.empty(inverse_priced_indices.shape[0]), 
                                                                {}, known_technologies)).reduced
     #logging.info([k for k in N_i])
 
@@ -1199,7 +1205,7 @@ def _calculate_new_full_factory_targets(target_types: str, last_material: Factor
             else:
                 factory_type = "manual"
                 manual_constructs = ManualConstruct.columns(instance._manual_constructs, known_technologies)
-                R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCostPair.empty(inverse_priced_indices.shape[0]), 
+                R_vector_table = instance.compiled.columns(ColumnSpecifier(cost_function, inverse_priced_indices, None, TransportCost.empty(inverse_priced_indices.shape[0]), 
                                                                            {}, known_technologies)).shadow_attachment(manual_constructs).reduced
                 target_names = _new_material_factory_targets(instance, R_vector_table.valid_rows)# + ['electric']
                 #logging.info(target_names)
