@@ -755,13 +755,13 @@ def technological_limitation_from_specification(instance: FactorioInstance, full
     
     #assert len(fully_automated)+len(extra_technologies)+len(extra_recipes) > 0, "Trying to find an empty tech limit. Likely some error."
     for pack in fully_automated:
-        assert pack in instance._data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
+        assert pack in instance.data_raw['tool'].keys() #https://lua-api.factorio.com/latest/prototypes/ToolPrototype.html
     for tech in extra_technologies:
-        assert tech in instance._data_raw['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+        assert tech in instance.data_raw['technology'].keys() #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
     for recipe in extra_recipes:
-        assert recipe in instance._data_raw['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
+        assert recipe in instance.data_raw['recipe'].keys() #https://lua-api.factorio.com/latest/prototypes/RecipeCategory.html
 
-    for tech in instance._data_raw['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
+    for tech in instance.data_raw['technology'].values(): #https://lua-api.factorio.com/latest/prototypes/TechnologyPrototype.html
         if instance.COST_MODE in tech.keys():
             unit = tech[instance.COST_MODE]['unit']
         else:
@@ -770,11 +770,11 @@ def technological_limitation_from_specification(instance: FactorioInstance, full
             tech_obj.add(tech['name'])
     
     for tech in extra_technologies:
-        tech_obj = tech_obj.union(next(iter(instance._data_raw['technology'][tech]['limit'].canonical_form)))
+        tech_obj = tech_obj.union(next(iter(instance.data_raw['technology'][tech]['limit'].canonical_form)))
         tech_obj.add(tech)
     
     for recipe in extra_recipes:
-        tech_obj = tech_obj.union(instance._data_raw['recipe'][recipe]['limit'])
+        tech_obj = tech_obj.union(instance.data_raw['recipe'][recipe]['limit'])
     
     return TechnologicalLimitation(instance.tech_tree, [tech_obj])
 

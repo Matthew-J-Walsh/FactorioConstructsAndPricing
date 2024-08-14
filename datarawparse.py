@@ -38,10 +38,10 @@ def fuels_from_energy_source(energy_source: dict, instance: FactorioInstance) ->
     
     elif energy_source['type']=='burner': #https://lua-api.factorio.com/latest/types/BurnerEnergySource.html
         if 'fuel_categories' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance._data_raw['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category'] in energy_source['fuel_categories']]
         elif 'fuel_category' in energy_source.keys():
-            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance._data_raw['item'].values() 
+            return [(item['name'], item['fuel_value_raw'] * effectivity, item['burnt_result'] if 'burnt_result' in item.keys() else None) for item in instance.data_raw['item'].values() 
                     if 'fuel_category' in item.keys() and item['fuel_category']==energy_source['fuel_category']]
         else:
             raise ValueError("Category-less burner energy source: "+str(energy_source))
@@ -52,9 +52,9 @@ def fuels_from_energy_source(energy_source: dict, instance: FactorioInstance) ->
     elif energy_source['type']=='fluid': #https://lua-api.factorio.com/latest/types/FluidEnergySource.html
         if 'burns_fluid' in energy_source.keys(): #https://lua-api.factorio.com/latest/types/FluidEnergySource.html#burns_fluid
             if 'filter' in energy_source['fluid_box'].keys(): #https://lua-api.factorio.com/latest/types/FluidBox.html#filter
-                return [(energy_source['fluid_box']['filter'], instance._data_raw['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
+                return [(energy_source['fluid_box']['filter'], instance.data_raw['fluid'][energy_source['fluid_box']['filter']]['fuel_value_raw'] * effectivity, None)]
             else:
-                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in instance._data_raw['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
+                return [(fluid['name'], fluid['fuel_value_raw'] * effectivity, None) for fluid in instance.data_raw['fluid'].values() if 'fuel_value_raw' in fluid.keys()]
         else:
             if not 'filter' in energy_source['fluid_box'].keys():
                 raise ValueError("Non-burning fluid energy source without filter: "+str(energy_source))
@@ -282,6 +282,9 @@ def standardize_power(data: dict) -> None:
 
     for beacon in data['beacon'].values():
         beacon['energy_usage_raw'] = convert_value_to_base_units(beacon['energy_usage'])
+
+    for inserter in data['inserter'].values():
+        inserter['energy_usage_raw'] = (convert_value_to_base_units(inserter['energy_per_movement'])+convert_value_to_base_units(inserter['energy_per_rotation'])) / 2
 
 def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """Adds a base_inputs and vector component to each recipe. 
@@ -650,11 +653,21 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
         if not 'category' in recipe.keys():
             recipe['category'] = "crafting"
 
-    logging.debug("Setting throughput for inserters.")
+    logging.debug("Setting throughput for some transports.")
     for inserter in data['inserter'].values():
         #https://lua-api.factorio.com/latest/prototypes/InserterPrototype.html#rotation_speed
         #(inserter['stack_size_bonus'] if 'stack_size_bonus' in inserter.keys() else 0) #https://lua-api.factorio.com/latest/prototypes/InserterPrototype.html#stack_size_bonus
         inserter['throughput'] = .8 / inserter['rotation_speed'] 
+    for belt in data['transport-belt'].values():
+        belt['throughput'] = 480 * belt['speed'] #https://lua-api.factorio.com/latest/prototypes/TransportBeltConnectablePrototype.html#speed
+    for pipe in data['pipe'].values():
+        pipe['throughput'] = 1200
+    for pipe_to_ground in data['pipe-to-ground'].values():
+        pipe_to_ground['throughput'] = 1200
+    for power_pole in data['electric-pole'].values():
+        power_pole['throughput'] = (2 * power_pole['supply_area_distance']) ** 2 #https://lua-api.factorio.com/latest/prototypes/ElectricPolePrototype.html#supply_area_distance
+    for heat_pipe in data['heat-pipe'].values():
+        heat_pipe['throughput'] = 1
 
 def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, ResearchTable]:
     """Generates research effect tables.

@@ -264,9 +264,9 @@ def generate_boiler_machine_constructs(machine: dict, instance: FactorioInstance
     output_fluid = machine['output_fluid_box']['filter'] #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html#output_fluid_box
 
     if 'mode' in machine.keys() and machine['mode']=='heat-water-inside': #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html#mode
-        machine['target_temperature'] = instance._data_raw['fluid'][output_fluid]['max_temperature'] #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html#target_temperature
+        machine['target_temperature'] = instance.data_raw['fluid'][output_fluid]['max_temperature'] #https://lua-api.factorio.com/latest/prototypes/BoilerPrototype.html#target_temperature
     
-    joules_per_unit = (machine['target_temperature'] - instance._data_raw['fluid'][output_fluid]['default_temperature']) * convert_value_to_base_units(instance._data_raw['fluid'][output_fluid]['heat_capacity'])
+    joules_per_unit = (machine['target_temperature'] - instance.data_raw['fluid'][output_fluid]['default_temperature']) * convert_value_to_base_units(instance.data_raw['fluid'][output_fluid]['heat_capacity'])
     #https://lua-api.factorio.com/latest/prototypes/FluidPrototype.html#heat_capacity
     
     units_per_second = machine['energy_source']['effectivity'] * machine['energy_consumption_raw']/joules_per_unit #https://lua-api.factorio.com/latest/types/BurnerEnergySource.html#effectivity similar for other EnergySource types
@@ -316,7 +316,7 @@ def generate_mining_drill_constructs(machine: dict, instance: FactorioInstance) 
     logging.log(5, "Generating uncompiled constructs for: %s", machine['name'])
     
     for cata in machine['resource_categories']:
-        for resource in instance._data_raw['resource-category'][cata]['resource_list']:
+        for resource in instance.data_raw['resource-category'][cata]['resource_list']:
             if 'required_fluid' in resource['minable'].keys() and not 'input_fluid_box' in machine.keys(): #drills without fluid boxes cannot mine resources requiring fluids.
                 continue
             for fuel_name, fuel_value, fuel_burnt_result in fuels_from_energy_source(machine['energy_source'], instance):
@@ -384,7 +384,7 @@ def generate_generator_constructs(machine: dict, instance: FactorioInstance) -> 
     effectivity = Fraction(machine['effectivity'] if 'effectivity' in machine.keys() else 1).limit_denominator() #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#effectivity
 
     if 'burns_fluid' in machine.keys() and machine['burns_fluid']: #https://lua-api.factorio.com/latest/prototypes/GeneratorPrototype.html#burns_fluid
-        fuel_name, fuel_value = machine['fluid_box']['filter'], instance._data_raw['fluid'][machine['fluid_box']['filter']]['fuel_value_raw']
+        fuel_name, fuel_value = machine['fluid_box']['filter'], instance.data_raw['fluid'][machine['fluid_box']['filter']]['fuel_value_raw']
 
         ident = "electric from "+machine['name']+" via "+fuel_name
 
@@ -533,7 +533,7 @@ def generate_rocket_result_construct(machine: dict, item: dict, instance: Factor
 
             vector = CompressedVector({fuel_name: -1 * (machine['energy_usage_raw'] + machine['active_energy_usage_raw']) / fuel_value,
                                        item['name']: Fraction(-1),
-                                       instance._data_raw['recipe'][machine['fixed_recipe']]['result']: Fraction(-1 * machine['rocket_parts_required'])})
+                                       instance.data_raw['recipe'][machine['fixed_recipe']]['result']: Fraction(-1 * machine['rocket_parts_required'])})
             if not fuel_burnt_result is None:
                 vector[fuel_burnt_result] = -1 * vector[fuel_name]
 
@@ -558,7 +558,7 @@ def generate_rocket_result_construct(machine: dict, item: dict, instance: Factor
                     if not fuel_burnt_result is None: #https://lua-api.factorio.com/latest/prototypes/ItemPrototype.html#burnt_result
                         effect_effects['consumption'] += [fuel_burnt_result]
             
-            max_internal_mods, allowed_modules = module_specification_calculation(machine, {'allowed_modules': list(instance._data_raw['module'].values())})
+            max_internal_mods, allowed_modules = module_specification_calculation(machine, {'allowed_modules': list(instance.data_raw['module'].values())})
 
             base_inputs = CompressedVector({item['name']: -1 * Fraction(1)})
             base_inputs[fuel_name] = (-1 * (machine['energy_usage_raw'] + machine['active_energy_usage_raw']) / fuel_value) * Fraction(3684, 60) #https://wiki.factorio.com/Rocket_silo#Conclusions
@@ -594,16 +594,16 @@ def generate_all_constructs(instance: FactorioInstance) -> tuple[UncompiledConst
 
     for building_type in ['boiler', 'burner-generator', 'offshore-pump', 'reactor', 'generator', 'furnace', 'mining-drill', 'solar-panel', 'rocket-silo', 'assembling-machine', 'lab']:
         logging.debug("Starting construct generation of machines in category: %s", building_type)
-        for machine in instance._data_raw[building_type].values():
+        for machine in instance.data_raw[building_type].values():
             logging.log(5, "Starting processing of machine: %s", machine['name'])
 
-            if not machine['name'] in instance._data_raw['recipe'].keys():
+            if not machine['name'] in instance.data_raw['recipe'].keys():
                 logging.log(5, "%s is a fake machine because you cant build it. Skipping.", machine['name'])
                 continue
 
 
             if machine['type']=='rocket-silo':
-                for item in instance._data_raw['item'].values():
+                for item in instance.data_raw['item'].values():
                     if 'rocket_launch_products' in item.keys():
                         for construct in generate_rocket_result_construct(machine, item, instance):
                             all_uncompiled_constructs.append(construct)
@@ -612,10 +612,10 @@ def generate_all_constructs(instance: FactorioInstance) -> tuple[UncompiledConst
             if machine['type']=='assembling-machine' or machine['type']=='rocket-silo' or machine['type']=='furnace': #all children of https://lua-api.factorio.com/latest/prototypes/CraftingMachinePrototype.html
                 if 'fixed-recipe' in machine.keys(): #https://lua-api.factorio.com/latest/prototypes/AssemblingMachinePrototype.html#fixed_recipe
                     logging.log(5, "%s has a fixed recipe named %s", machine['name'], machine['fixed-recipe'])
-                    for construct in generate_crafting_constructs(machine, instance._data_raw['recipe'][machine['fixed-recipe']], instance):
+                    for construct in generate_crafting_constructs(machine, instance.data_raw['recipe'][machine['fixed-recipe']], instance):
                         all_uncompiled_constructs.append(construct)
 
-                for recipe in instance._data_raw['recipe'].values():
+                for recipe in instance.data_raw['recipe'].values():
                     if valid_crafting_machine(machine, recipe, instance):
                         for construct in generate_crafting_constructs(machine, recipe, instance):
                             all_uncompiled_constructs.append(construct)
@@ -654,7 +654,7 @@ def generate_all_constructs(instance: FactorioInstance) -> tuple[UncompiledConst
 
 
             elif machine['type']=='solar-panel': #https://lua-api.factorio.com/latest/prototypes/SolarPanelPrototype.html
-                for accumulator in instance._data_raw['accumulator'].values():
+                for accumulator in instance.data_raw['accumulator'].values():
                     #For more information on these calculations see https://forums.factorio.com/viewtopic.php?f=5&t=5594
                     total_day_time = (DAYTIME_VARIABLES['daytime'] + DAYTIME_VARIABLES['nighttime'] + 2 * DAYTIME_VARIABLES['dawntime/dusktime'])
                     energy_gain_time = (DAYTIME_VARIABLES['daytime'] + DAYTIME_VARIABLES['dawntime/dusktime'])
@@ -669,7 +669,7 @@ def generate_all_constructs(instance: FactorioInstance) -> tuple[UncompiledConst
 
 
             elif machine['type']=='lab': #https://lua-api.factorio.com/latest/prototypes/LabPrototype.html
-                for technology in instance._data_raw['technology'].values():
+                for technology in instance.data_raw['technology'].values():
                     if valid_lab(machine, technology):
                         for construct in generate_lab_construct(machine, technology, instance):
                             all_uncompiled_constructs.append(construct)
@@ -694,35 +694,35 @@ def generate_manual_constructs(instance: FactorioInstance) -> tuple[ManualConstr
         All the manual constructs
     """    
     all_manual_constructs: list[ManualConstruct] = []
-    for recipe in instance._data_raw['recipe'].values():
+    for recipe in instance.data_raw['recipe'].values():
         hand_craftable = True
         if not recipe['enableable']:
             hand_craftable = False
-        if 'crafting_categories' in instance._data_raw['character'] and not recipe['category'] in instance._data_raw['character']['crafting_categories']:
+        if 'crafting_categories' in instance.data_raw['character'] and not recipe['category'] in instance.data_raw['character']['crafting_categories']:
             hand_craftable = False
         if 'hide_from_player_crafting' in recipe.keys() and recipe['hide_from_player_crafting']:
             hand_craftable = False
         for k in recipe['vector'].keys():
-            if k in instance._data_raw['fluid'].keys():
+            if k in instance.data_raw['fluid'].keys():
                 hand_craftable = False
 
         if hand_craftable:
             all_manual_constructs.append(ManualConstruct(recipe['name']+" hand-crafted", recipe['vector'], recipe['limit'], instance))
     
-    for resource in instance._data_raw['resource'].values():
+    for resource in instance.data_raw['resource'].values():
         hand_minable = True
         if 'required_fluid' in resource['minable'].keys():
             hand_minable = False
-        if 'mining_categories' in instance._data_raw['character'] and not resource['category'] in instance._data_raw['character']['mining_categories']:
+        if 'mining_categories' in instance.data_raw['character'] and not resource['category'] in instance.data_raw['character']['mining_categories']:
             hand_minable = False
         for k in resource['vector'].keys():
-            if k in instance._data_raw['fluid'].keys():
+            if k in instance.data_raw['fluid'].keys():
                 hand_minable = False
         
         if hand_minable:
             mining_speed = 1
-            if 'mining_speed' in instance._data_raw['character'].keys():
-                mining_speed = instance._data_raw['character']['mining_speed']
+            if 'mining_speed' in instance.data_raw['character'].keys():
+                mining_speed = instance.data_raw['character']['mining_speed']
             all_manual_constructs.append(ManualConstruct(resource['name']+" hand-mined", resource['vector'] * mining_speed, resource['limit'], instance))
     
     return tuple(all_manual_constructs)

@@ -132,15 +132,15 @@ class ModuleLookupTable:
         external_modules: list[dict] = []
         for module_name, internal, external in avaiable_modules:
             if internal:
-                internal_modules.append(instance._data_raw['module'][module_name])
+                internal_modules.append(instance.data_raw['module'][module_name])
             if external:
-                external_modules.append(instance._data_raw['module'][module_name])
+                external_modules.append(instance.data_raw['module'][module_name])
 
         if len(avaiable_modules)==0:
             beacon_module_designs: list[tuple[dict, str, list[tuple[Fraction, Fraction]]]] = []
         else:
             beacon_module_designs: list[tuple[dict, str, list[tuple[Fraction, Fraction]]]] = []
-            for beacon in list(instance._data_raw['beacon'].values()):
+            for beacon in list(instance.data_raw['beacon'].values()):
                 for design_name, design in beacon_designs((self.building_width, self.building_height), beacon):
                     beacon_module_designs.append((beacon, design_name, [design]))
 

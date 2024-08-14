@@ -37,7 +37,7 @@ class OptimizedFactoryResult(NamedTuple):
 class FactorioInstance():
     """Holds the information in an instance (specific game mod setup) after completing premanagment steps.
     """
-    _data_raw: dict
+    data_raw: dict
     """Whole data.raw dictonary post-premanagment"""
     tech_tree: TechnologyTree
     """Technology Tree of this instance"""
@@ -93,29 +93,29 @@ class FactorioInstance():
         assert isinstance(nobuild, bool)
         assert isinstance(raw_ore_pricing, dict) or isinstance(raw_ore_pricing, CompressedVector) or raw_ore_pricing is None
         with open(filename) as f:
-            self._data_raw = json.load(f)
+            self.data_raw = json.load(f)
         
         self.COST_MODE = COST_MODE
         self.RELEVENT_FLUID_TEMPERATURES = {}
 
-        self.tech_tree = complete_premanagement(self._data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
-        self.research_modifiers = generate_research_effect_tables(self._data_raw, self.tech_tree)
+        self.tech_tree = complete_premanagement(self.data_raw, self.RELEVENT_FLUID_TEMPERATURES, self.COST_MODE)
+        self.research_modifiers = generate_research_effect_tables(self.data_raw, self.tech_tree)
         self._uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self._uncompiled_constructs)
-        self.reference_classifications = classify_reference_list(self.reference_list, self._data_raw)
-        self._transportation_functions = {transport_type: table_function(self.reference_classifications, self.reference_list, self._data_raw) for transport_type, table_function in TRANSPORT_COST_FUNCTIONS.items()}
+        self.reference_classifications = classify_reference_list(self.reference_list, self.data_raw)
+        self._transportation_functions = {transport_type: table_function(self.reference_classifications, self.reference_list, self) for transport_type, table_function in TRANSPORT_COST_FUNCTIONS.items()}
         self.catalyst_list = determine_catalysts(self._uncompiled_constructs, self.reference_list)
-        self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self._data_raw)
+        self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)
         self._manual_constructs = generate_manual_constructs(self)
         
         self._disabled_constructs = []
 
         self.spatial_pricing = np.zeros(len(self.reference_list))
         logging.debug("Spatial pricing info:")
-        for mining_drill in self._data_raw['mining-drill'].values():
+        for mining_drill in self.data_raw['mining-drill'].values():
             self.spatial_pricing[self.reference_list.index(mining_drill['name'])] = mining_drill['tile_width'] * mining_drill['tile_height']
             logging.debug(mining_drill['name']+" point:"+str(self.reference_list.index(mining_drill['name']))+" area:"+str(mining_drill['tile_width'] * mining_drill['tile_height']))
-        for beacon in self._data_raw['beacon'].values():
+        for beacon in self.data_raw['beacon'].values():
             self.spatial_pricing[self.reference_list.index(beacon['name'])] = beacon['tile_width'] * beacon['tile_height']
             logging.debug(beacon['name']+" point:"+str(self.reference_list.index(beacon['name']))+" area:"+str(beacon['tile_width'] * beacon['tile_height']))
         self.spatial_pricing = self.spatial_pricing / np.linalg.norm(self.spatial_pricing)
@@ -125,7 +125,7 @@ class FactorioInstance():
             for k, v in raw_ore_pricing.items():
                 self.raw_ore_pricing[self.reference_list.index(k)] = v
         else:
-            for resource in self._data_raw['resource'].values():
+            for resource in self.data_raw['resource'].values():
                 if resource['category']=='basic-solid':
                     self.raw_ore_pricing[self.reference_list.index(resource['name'])] = 10
                 elif resource['category']=='basic-fluid':
@@ -363,7 +363,7 @@ class FactorioInstance():
 
         cost_function: PricedCostFunction = uncompiled_cost_function(p0_j)
 
-        transport_costs: dict[str, TransportationCompiler] = {transport_type: transport_func(p0_j, inverse_priced_indices) for 
+        transport_costs: dict[str, TransportationCompiler] = {transport_type: transport_func(p0_j, inverse_priced_indices, known_technologies) for 
                                                               transport_type, transport_func in self._transportation_functions.items()}
 
         if use_manual:
@@ -666,9 +666,9 @@ class FactorioFactory():
         previous_material = (self if isinstance(self, FactorioMaterialFactory) else self._previous_material)
 
         if isinstance(targets, CompressedVector):
-            if list(targets.keys())[0] in self._instance._data_raw['tool'].keys() or list(targets.keys())[0] in self._instance._data_raw['technology'].keys():
+            if list(targets.keys())[0] in self._instance.data_raw['tool'].keys() or list(targets.keys())[0] in self._instance.data_raw['technology'].keys():
                 factory_type = "science"
-            elif list(targets.keys())[0] in self._instance._data_raw['item'].keys() or list(targets.keys())[0] in self._instance._data_raw['fluid'].keys():
+            elif list(targets.keys())[0] in self._instance.data_raw['item'].keys() or list(targets.keys())[0] in self._instance.data_raw['fluid'].keys():
                 factory_type = "material"
         else:
             if targets is None:
@@ -677,7 +677,7 @@ class FactorioFactory():
 
         if factory_type == "science":
             for target in targets.keys():
-                assert target in self._instance._data_raw['tool'].keys() or target in self._instance._data_raw['technology'].keys(), "If a factory does science stuff is only allowed to do science stuff."
+                assert target in self._instance.data_raw['tool'].keys() or target in self._instance.data_raw['technology'].keys(), "If a factory does science stuff is only allowed to do science stuff."
             new_factory = FactorioScienceFactory(self._instance, targets, previous_material, self._current_science)
         elif factory_type == "material":
             difference: set[str] = set(targets.keys()).difference(set(previous_material._targets.keys()))
@@ -798,7 +798,7 @@ class FactorioFactory():
         optimal_factory_df = pd.DataFrame(list(self._optimal_factory.items()), columns=['construct', 'count'])
         optimal_pricing_model_df = pd.DataFrame(list(self.pricing_model.items()), columns=['item', 'value'])
         inefficient_constructs_df = pd.DataFrame(list(self._efficiency_analysis.items()), columns=['construct', 'relative value'])
-        transport_df = pd.DataFrame(list(compute_transportation_densities(self._full_pricing_model, self._instance._data_raw)), columns=['item', 'via', 'relative density'])
+        transport_df = pd.DataFrame(list(compute_transportation_densities(self._full_pricing_model, self._instance.data_raw)), columns=['item', 'via', 'relative density'])
         merged_df = pd.concat([targets_df, pd.DataFrame({}, columns=['']), 
                             optimal_factory_df, pd.DataFrame({}, columns=['']),
                             optimal_pricing_model_df, pd.DataFrame({}, columns=['']),
@@ -825,7 +825,7 @@ class FactorioMaterialFactory(FactorioFactory):
         previous_science : FactorioMaterialFactory
             Science factory to reference for known technologies
         """
-        assert len([target for target in material_targets.keys() if target in instance._data_raw['tool'].keys()])==0
+        assert len([target for target in material_targets.keys() if target in instance.data_raw['tool'].keys()])==0
         assert len([target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in material_targets.keys() if RESEARCH_SPECIAL_STRING in target])==0
 
         super().__init__(instance, material_targets, previous_material, previous_science)
@@ -868,7 +868,7 @@ class FactorioScienceFactory(FactorioFactory):
         assert isinstance(previous_material, FactorioMaterialFactory) or isinstance(previous_material, FactorioInitialFactory)
         assert isinstance(previous_science, FactorioScienceFactory) or isinstance(previous_science, FactorioInitialFactory) or isinstance(previous_science, TechnologicalLimitation)
 
-        self._clear = [target for target in science_targets.keys() if target in instance._data_raw['tool'].keys()]
+        self._clear = [target for target in science_targets.keys() if target in instance.data_raw['tool'].keys()]
         self._extra = [target[:-1 * len(RESEARCH_SPECIAL_STRING)] for target in science_targets.keys() if RESEARCH_SPECIAL_STRING in target]
         targets, covering_to, last_coverage  = _science_factory_parameters(instance, previous_science, self._clear, self._extra)
 
@@ -1230,7 +1230,7 @@ def _new_science_factory_targets(instance: FactorioInstance, valid_rows: np.ndar
         All possible tools in the valid_rows
     """    
     target_names: list[str] = []
-    for tool in instance._data_raw['tool'].keys():
+    for tool in instance.data_raw['tool'].keys():
         if valid_rows[instance.reference_list.index(tool)]:
             target_names.append(tool)
     return target_names
@@ -1291,14 +1291,14 @@ def _new_material_factory_targets(instance: FactorioInstance, valid_rows: np.nda
     for item_cata in ITEM_SUB_PROTOTYPES:
         if item_cata=='tool':
             continue #skip tools in material factories
-        for item in instance._data_raw[item_cata].keys():
+        for item in instance.data_raw[item_cata].keys():
             if not item in instance.reference_list:
                 if not item in OUTPUT_WARNING_LIST:
                     logging.warning("Detected some a weird "+item_cata+": "+item)
                     OUTPUT_WARNING_LIST.append(item)
             elif valid_rows[instance.reference_list.index(item)] and item in instance.active_list:
                 target_names.append(item)
-    for fluid in instance._data_raw['fluid'].keys():
+    for fluid in instance.data_raw['fluid'].keys():
         if fluid in instance.RELEVENT_FLUID_TEMPERATURES.keys():
             for temp in instance.RELEVENT_FLUID_TEMPERATURES[fluid].keys():
                 if not fluid+'@'+str(temp) in instance.reference_list:
