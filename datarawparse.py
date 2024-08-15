@@ -286,6 +286,12 @@ def standardize_power(data: dict) -> None:
     for inserter in data['inserter'].values():
         inserter['energy_usage_raw'] = (convert_value_to_base_units(inserter['energy_per_movement'])+convert_value_to_base_units(inserter['energy_per_rotation'])) / 2
 
+    for roboport in data['roboport'].values():
+        roboport['energy_usage_raw'] = convert_value_to_base_units(roboport["energy_usage"])+convert_value_to_base_units(roboport["charging_energy"])*roboport["charging_station_count"]
+
+    for locomotive in data['locomotive'].values():
+        locomotive['energy_usage_raw'] = convert_value_to_base_units(locomotive['max_power'])
+
 def vectorize_recipes(data: dict, RELEVENT_FLUID_TEMPERATURES: dict, COST_MODE: str) -> None:
     """Adds a base_inputs and vector component to each recipe. 
     The vector component represents how the recipe function.
@@ -520,7 +526,11 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
 
     Sets recipe crafting category to default if not set. https://lua-api.factorio.com/latest/prototypes/RecipePrototype.html#category
 
-    Sets inserter 'throughput' value to the inserter item throughput, currently doesn't account for upgrades.
+    Sets various 'throughput' values to transportation methods.
+
+    Adds 'charging_station_count' to roboports if missing.
+
+    Adds locomotive's energy_source if its labled as a burner.
 
     Parameters
     ----------
@@ -660,14 +670,20 @@ def set_defaults_and_normalize(data: dict, COST_MODE: str) -> None:
         inserter['throughput'] = .8 / inserter['rotation_speed'] 
     for belt in data['transport-belt'].values():
         belt['throughput'] = 480 * belt['speed'] #https://lua-api.factorio.com/latest/prototypes/TransportBeltConnectablePrototype.html#speed
-    for pipe in data['pipe'].values():
-        pipe['throughput'] = 1200
-    for pipe_to_ground in data['pipe-to-ground'].values():
-        pipe_to_ground['throughput'] = 1200
     for power_pole in data['electric-pole'].values():
-        power_pole['throughput'] = (2 * power_pole['supply_area_distance']) ** 2 #https://lua-api.factorio.com/latest/prototypes/ElectricPolePrototype.html#supply_area_distance
-    for heat_pipe in data['heat-pipe'].values():
-        heat_pipe['throughput'] = 1
+        power_pole['area'] = (2 * power_pole['supply_area_distance']) ** 2 #https://lua-api.factorio.com/latest/prototypes/ElectricPolePrototype.html#supply_area_distance
+        power_pole['length'] = power_pole['maximum_wire_distance'] #https://lua-api.factorio.com/latest/prototypes/ElectricPolePrototype.html#maximum_wire_distance
+
+    logging.debug("Setting roboport charging station counts.")
+    for roboport in data['roboport'].values():
+        if not 'charging_station_count' in roboport.keys():
+            roboport['charging_station_count'] = len(roboport['charging_offsets'])
+
+    logging.debug("Setting energy_source to burner for locomotives.")
+    for locomotive in data['locomotive'].values():
+        if not 'energy_source' in locomotive.keys():
+            locomotive['energy_source'] = locomotive['burner']
+            locomotive['energy_source']['type'] = 'burner'
 
 def generate_research_effect_tables(data: dict, tech_tree: TechnologyTree) -> dict[str, ResearchTable]:
     """Generates research effect tables.

@@ -11,8 +11,7 @@ _HEAT_REFERENCE_VALUE: int = 3
 _RESEARCH_REFERENCE_VALUE: int = 4
 _UNKNOWN_REFERENCE_VALUE: int = -1
 
-_TRANSPORT_TYPES = ["solid", "fluid", "electric", "heat"]
-_TRANSPORT_TYPE_REFERENCES = {
+_TRANSPORT_TYPE_REFERENCES: dict[str, int] = {
     "solid": _SOLID_REFERENCE_VALUE, 
     "fluid": _FLUID_REFERENCE_VALUE, 
     "electric": _ELECTRIC_REFERENCE_VALUE, 
@@ -63,7 +62,7 @@ class TransportationPrecompiler(Protocol):
 class TransportationMethod(Protocol):
     """Defines a transporation method
     """    
-    def __call__(self, classification_array: np.ndarray, reference_list: tuple[str, ...], instance: FactorioInstance) -> TransportationPrecompiler:     
+    def __call__(self, instance: FactorioInstance) -> TransportationPrecompiler:     
         raise NotImplementedError
 
 
@@ -104,41 +103,83 @@ def classify_reference_list(reference_list: tuple[str, ...], data: dict) -> np.n
 
 
 def transport_fuel_options(energy_usage: Fraction, energy_source: dict, instance: FactorioInstance) -> np.ndarray:
-    """Calculate fuel options
-    """    
+    """Calculate the fuel options for a transportation energy source
+
+    Parameters
+    ----------
+    energy_usage : Fraction
+        Amount of energy that is used
+    energy_source : dict
+        Energy source https://lua-api.factorio.com/stable/types/EnergySource.html
+    instance : FactorioInstance
+        Associated FactorioInstance
+    
+    Returns
+    -------
+    np.ndarray
+        A matrix where the first dimension is the fuel option and the second is the effect of that fuel
+    """
     fuel_options: list[np.ndarray] = []
     for fuel_name, energy_density, burnt_result in fuels_from_energy_source(energy_source, instance):
         fuel_option = np.zeros((1, len(instance.reference_list)))
-        fuel_option[0, instance.reference_list.index(fuel_name)] = float(energy_usage / energy_density)
+        fuel_option[0, instance.reference_list.index(fuel_name)] = float(-1 * energy_usage / energy_density)
         if burnt_result:
             fuel_option[0, instance.reference_list.index(burnt_result)] = float(energy_usage / energy_density)
         fuel_options.append(fuel_option)
 
     return np.concatenate(fuel_options, axis=0)
 
-def standard_transportation_cost(classification_array: np.ndarray, reference_list: tuple[str, ...], instance: FactorioInstance,
-                                 options: dict[str, tuple[list[str], ...]], option_scalings: dict[str, list[str]], default_densities: dict[str, np.ndarray]) -> TransportationPrecompiler:
+def standard_transportation_cost(instance: FactorioInstance, options: dict[str, tuple[list[str], ...]], option_scalings: dict[str, list[str]], 
+                                 option_type: dict[str, list[str]], default_densities: dict[str, np.ndarray]) -> TransportationPrecompiler:
+    """Standard transport cost method generator
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        Associated FactorioInstance
+    options : dict[str, tuple[list[str], ...]]
+        Transportation options avaiable
+    option_scalings : dict[str, list[str]]
+        Scaling of the transporation options
+    option_type : dict[str, list[str]]
+        What value of the transporation option to calculate with
+    default_densities : dict[str, np.ndarray]
+        Default required transporation density
+
+    Returns
+    -------
+    TransportationPrecompiler
+        A transporation precompiling function
+
+    Raises
+    ------
+    ValueError
+        Energy source errors
+    """
     
-    inverted_options: dict[str, tuple[str, int, str]] = {}
+    inverted_options: dict[str, tuple[str, int]] = {}
     for transport_type, l in options.items():
         for i in range(len(l)):
             sl = l[i]
             for e in sl:
-                inverted_options[e] = (transport_type, i, option_scalings[transport_type][i])
+                inverted_options[e] = (transport_type, i)
 
-    densities = {transport_type: np.zeros((classification_array.shape[0], len(option_scalings[transport_type]))) for transport_type in _TRANSPORT_TYPE_REFERENCES.keys()}
+    densities = {transport_type: np.zeros((len(instance.reference_list), len(option_scalings[transport_type]))) for transport_type in _TRANSPORT_TYPE_REFERENCES.keys()}
     for transport_type, transport_type_reference in _TRANSPORT_TYPE_REFERENCES.items():
-        densities[transport_type][classification_array==transport_type_reference] = default_densities[transport_type]
+        densities[transport_type][instance.reference_classifications==transport_type_reference] = default_densities[transport_type]
 
-    option_tables = {transport_type: np.zeros((classification_array.shape[0], len(option_scalings[transport_type]))) for transport_type in _TRANSPORT_TYPE_REFERENCES.keys()}
+    option_tables = {transport_type: np.zeros((len(instance.reference_list), len(option_scalings[transport_type]))) for transport_type in _TRANSPORT_TYPE_REFERENCES.keys()}
     fuel_tables: dict[str, tuple[dict[str, np.ndarray], ...]] = {transport_type: tuple([{} for _ in range(len(option_scalings[transport_type]))]) for transport_type in _TRANSPORT_TYPE_REFERENCES.keys()}
 
-    for element, (transport_type, i, scaling_type) in inverted_options.items():
+    for element, (transport_type, i) in inverted_options.items():
         for element_option in instance.data_raw[element].values():
-            #if element_option['name'] in reference_list:
-            option_tables[transport_type][reference_list.index(element_option['name']), i] = element_option['throughput']
+            #if element_option['name'] in instance.reference_list:
+            option_tables[transport_type][instance.reference_list.index(element_option['name']), i] = (element_option[option_type[transport_type][i]] if option_type[transport_type][i] in element_option.keys() else 1)
             if 'energy_source' in element_option:
-                fuel_tables[transport_type][i][element_option['name']] = transport_fuel_options(element_option['energy_usage_raw'], element_option['energy_source'], instance)
+                try:
+                    fuel_tables[transport_type][i][element_option['name']] = transport_fuel_options(element_option['energy_usage_raw'], element_option['energy_source'], instance)
+                except:
+                    raise ValueError(element_option['type'])
 
     def transport_precompiled_cost(pricing_vector: np.ndarray, inverse_priced_indices: np.ndarray, known_technologies: TechnologicalLimitation) -> TransportationCompiler:
         pricing_vector = pricing_vector.reshape(-1, 1)
@@ -154,28 +195,28 @@ def standard_transportation_cost(classification_array: np.ndarray, reference_lis
         for transport_type, transport_type_reference in _TRANSPORT_TYPE_REFERENCES.items():
             for i, best_sub_element_index in enumerate(best_tables[transport_type]):
                 if option_scalings[transport_type][i]=="scaling":
-                    scaling[classification_array==transport_type_reference, best_sub_element_index] = densities[transport_type][classification_array==transport_type_reference, i] / option_tables[transport_type][best_sub_element_index, i]
+                    scaling[instance.reference_classifications==transport_type_reference, best_sub_element_index] = densities[transport_type][instance.reference_classifications==transport_type_reference, i] / option_tables[transport_type][best_sub_element_index, i]
                 else: #elif ordinalities_placeholder_name[transport_type][i]=="static":
-                    scaling[classification_array==transport_type_reference, best_sub_element_index] = densities[transport_type][classification_array==transport_type_reference, i]
+                    scaling[instance.reference_classifications==transport_type_reference, best_sub_element_index] = densities[transport_type][instance.reference_classifications==transport_type_reference, i]
 
         static = static.T
 
         def transport_compiled_cost(dual_vector: np.ndarray | None) -> TransportCost:
 
-            static_fuel = np.zeros((classification_array.shape[0], classification_array.shape[0]))
-            scaling_fuel = np.zeros((classification_array.shape[0], classification_array.shape[0]))
+            static_fuel = np.zeros((len(instance.reference_list), len(instance.reference_list)))
+            scaling_fuel = np.zeros((len(instance.reference_list), len(instance.reference_list)))
 
             for transport_type, transport_type_reference in _TRANSPORT_TYPE_REFERENCES.items():
                 for i, best_sub_element_index in enumerate(best_tables[transport_type]):
-                    if reference_list[best_sub_element_index] in fuel_tables[transport_type][i]:
+                    if instance.reference_list[best_sub_element_index] in fuel_tables[transport_type][i]:
                         if dual_vector is None:
                             best_fuel = 0
                         else:
-                            best_fuel = int((fuel_tables[transport_type][i][reference_list[best_sub_element_index]] @ dual_vector).argmax()) #argmax might have weird results TODO
+                            best_fuel = int((fuel_tables[transport_type][i][instance.reference_list[best_sub_element_index]] @ dual_vector).argmax()) #argmax might have weird results TODO
                         if option_scalings[transport_type][i]=="scaling":
-                            scaling_fuel[classification_array==transport_type_reference] += fuel_tables[transport_type][i][reference_list[best_sub_element_index]][best_fuel]
+                            scaling_fuel[instance.reference_classifications==transport_type_reference] += fuel_tables[transport_type][i][instance.reference_list[best_sub_element_index]][best_fuel]
                         else: #elif ordinalities_placeholder_name[transport_type][i]=="static":
-                            static_fuel[classification_array==transport_type_reference] += fuel_tables[transport_type][i][reference_list[best_sub_element_index]][best_fuel]
+                            static_fuel[instance.reference_classifications==transport_type_reference] += fuel_tables[transport_type][i][instance.reference_list[best_sub_element_index]][best_fuel]
 
             if dual_vector is None:
                 return TransportCost(static, np.zeros(static_fuel.shape[0]), scaling, np.zeros(scaling_fuel.shape[0]))
@@ -186,8 +227,18 @@ def standard_transportation_cost(classification_array: np.ndarray, reference_lis
     
     return transport_precompiled_cost
 
-def belt_transportation_cost(classification_array: np.ndarray, reference_list: tuple[str, ...], instance: FactorioInstance) -> TransportationPrecompiler:
-    """numpy arrays for belt-teir density
+def belt_transportation_cost(instance: FactorioInstance) -> TransportationPrecompiler:
+    """Transporation cost method for belts
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        Associated FactorioInstance
+
+    Returns
+    -------
+    TransportationPrecompiler
+        Transporation cost precompiler for belts
     """
     options: dict[str, tuple[list[str], ...]] = {
         "solid": (["inserter"], ["transport-belt"]),
@@ -203,6 +254,13 @@ def belt_transportation_cost(classification_array: np.ndarray, reference_list: t
         "heat": ['static'],
     }
 
+    option_type: dict[str, list[str]] = {
+        "solid": ['throughput', 'throughput'],
+        "fluid": ['throughput', 'throughput'],
+        "electric": ['area'],
+        "heat": ['throughput'],
+    }
+
     default_densities: dict[str, np.ndarray] = {
         "solid": np.array([1, 1]),
         "fluid": np.array([2, 5]),
@@ -210,10 +268,96 @@ def belt_transportation_cost(classification_array: np.ndarray, reference_list: t
         "heat": np.array([3]),
     }
 
-    return standard_transportation_cost(classification_array, reference_list, instance, options, option_scalings, default_densities)
+    return standard_transportation_cost(instance, options, option_scalings, option_type, default_densities)
 
-def get_rail_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportationPrecompiler:
-    """numpy arrays for rail-teir density
+def rail_transportation_cost(instance: FactorioInstance) -> TransportationPrecompiler:
+    """Transporation cost method for rails
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        Associated FactorioInstance
+
+    Returns
+    -------
+    TransportationPrecompiler
+        Transporation cost precompiler for rails
+    """
+    options: dict[str, tuple[list[str], ...]] = {
+        "solid": (["rail-planner"], ["train-stop"], ["rail-signal"], ["rail-chain-signal"], ["locomotive"], ["cargo-wagon"]),
+        "fluid": (["rail-planner"], ["train-stop"], ["rail-signal"], ["rail-chain-signal"], ["locomotive"], ["fluid-wagon"]),
+        "electric": (["electric-pole"],),
+        "heat": tuple([]),
+    }
+
+    option_scalings: dict[str, list[str]] = {
+        "solid": ['static', 'static', 'static', 'static', 'static', 'static'],
+        "fluid": ['static', 'static', 'static', 'static', 'static', 'static'],
+        "electric": ['static'],
+        "heat": [],
+    }
+
+    option_type: dict[str, list[str]] = {
+        "solid": ['throughput', 'throughput', 'throughput', 'throughput', 'throughput', 'throughput'],
+        "fluid": ['throughput', 'throughput', 'throughput', 'throughput', 'throughput', 'throughput'],
+        "electric": ['length'],
+        "heat": [],
+    }
+
+    default_densities: dict[str, np.ndarray] = {
+        "solid": np.array([200, 2, 20, 20, 1, 4]),
+        "fluid": np.array([200, 2, 20, 20, 1, 4]),
+        "electric": np.array([1000]),
+        "heat": np.zeros(0),
+    }
+
+    return standard_transportation_cost(instance, options, option_scalings, option_type, default_densities)
+
+def logistic_transportation_cost(instance: FactorioInstance) -> TransportationPrecompiler:
+    """Transporation cost method for logistics bots
+
+    Parameters
+    ----------
+    instance : FactorioInstance
+        Associated FactorioInstance
+
+    Returns
+    -------
+    TransportationPrecompiler
+        Transporation cost precompiler for logistics bots
+    """
+    options: dict[str, tuple[list[str], ...]] = {
+        "solid": (["roboport"], ["logistic-robot"], ['logistic-container']),
+        "fluid": (),
+        "electric": (["electric-pole"],),
+        "heat": tuple([]),
+    }
+
+    option_scalings: dict[str, list[str]] = {
+        "solid": ['static', 'scaling', 'static'],
+        "fluid": [],
+        "electric": ['static'],
+        "heat": [],
+    }
+
+    option_type: dict[str, list[str]] = {
+        "solid": ['throughput', 'throughput', 'throughput'],
+        "fluid": [],
+        "electric": ['length'],
+        "heat": [],
+    }
+
+    default_densities: dict[str, np.ndarray] = {
+        "solid": np.array([1, 1, 2]),
+        "fluid": np.zeros(0),
+        "electric": np.array([1000]),
+        "heat": np.zeros(0),
+    }
+
+    return standard_transportation_cost(instance, options, option_scalings, option_type, default_densities)
+
+def get_space_platform_transport_table(instance: FactorioInstance) -> TransportationPrecompiler:
+    """numpy arrays for space-teir density
     """
     raise NotImplementedError
     return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
@@ -221,27 +365,9 @@ def get_rail_transport_table(classification_array: np.ndarray, reference_list: S
                           TransportPair(np.zeros(0), np.zeros(0)),
                           TransportPair(np.zeros(0), np.zeros(0)))
 
-def get_logistic_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportationPrecompiler:
-    """numpy arrays for rail-teir density
-    """
-    raise NotImplementedError
-    return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)))
 
-def get_space_platform_transport_table(classification_array: np.ndarray, reference_list: Sequence[str], data: dict) -> TransportationPrecompiler:
-    """numpy arrays for rail-teir density
-    """
-    raise NotImplementedError
-    return TransportTable(TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)),
-                          TransportPair(np.zeros(0), np.zeros(0)))
-
-
-TRANSPORT_COST_FUNCTIONS: dict[str, TransportationMethod] = {BELT_TRANSPORT_STRING: belt_transportation_cost,}
-                                                             #RAIL_TRANSPORT_STRING: rail_transportation_cost,
-                                                             #LOGISTIC_TRANSPORT_STRING: logistic_transportation_cost,
+TRANSPORT_COST_FUNCTIONS: dict[str, TransportationMethod] = {BELT_TRANSPORT_STRING: belt_transportation_cost,
+                                                             RAIL_TRANSPORT_STRING: rail_transportation_cost,
+                                                             LOGISTIC_TRANSPORT_STRING: logistic_transportation_cost,}
                                                              #SPACE_TRANSPORT_STRING: space_platform_transporation_cost}
 

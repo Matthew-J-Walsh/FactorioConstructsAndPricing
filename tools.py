@@ -103,7 +103,7 @@ class FactorioInstance():
         self._uncompiled_constructs = generate_all_constructs(self)
         self.reference_list = create_reference_list(self._uncompiled_constructs)
         self.reference_classifications = classify_reference_list(self.reference_list, self.data_raw)
-        self._transportation_functions = {transport_type: table_function(self.reference_classifications, self.reference_list, self) for transport_type, table_function in TRANSPORT_COST_FUNCTIONS.items()}
+        self._transportation_functions = {transport_type: table_function(self) for transport_type, table_function in TRANSPORT_COST_FUNCTIONS.items()}
         self.catalyst_list = determine_catalysts(self._uncompiled_constructs, self.reference_list)
         self.active_list = calculate_actives(self.reference_list, self.catalyst_list, self.data_raw)
         self._manual_constructs = generate_manual_constructs(self)

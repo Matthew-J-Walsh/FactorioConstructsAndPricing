@@ -21,7 +21,21 @@ Combining beacon operations together?
 
 # Misc improvements
 
-None atm
+## Rail level electricity transport uses length
+
+currently it still uses area (kinda)
+
+## Make sure transport cost stuff (rails etc.) is in active list??
+
+is this nessisary?
+
+## Robot energy costs
+
+https://lua-api.factorio.com/stable/prototypes/LogisticRobotPrototype.html
+
+also likely make them scaling because that makes more sense
+
+
 
 
 # Transport refactoring 2.0
