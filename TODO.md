@@ -27,7 +27,7 @@ currently it still uses area (kinda)
 
 ## Make sure transport cost stuff (rails etc.) is in active list??
 
-is this nessisary?
+it is nessiary, what to do if i need to downgrade tech?
 
 ## Robot energy costs
 
