@@ -1,0 +1,360 @@
+[
+    {
+        "Recipe": "Molten iron from lava",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -16.0,
+            "Stone": 10.0,
+            "Calcite": -1.0,
+            "Molten iron": 250.0,
+            "Lava": -500
+        }
+    },
+    {
+        "Recipe": "Molten copper from lava",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -16.0,
+            "Stone": 15.0,
+            "Calcite": -1.0,
+            "Molten copper": 250.0,
+            "Lava": -500
+        }
+    },
+    {
+        "Recipe": "Molten iron",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -32.0,
+            "Iron ore": -50.0,
+            "Calcite": -1.0,
+            "Molten iron": 500.0
+        }
+    },
+    {
+        "Recipe": "Molten copper",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -32.0,
+            "Copper ore": -50.0,
+            "Calcite": -1.0,
+            "Molten copper": 500.0
+        }
+    },
+    {
+        "Recipe": "Casting iron",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -3.2,
+            "Molten iron": -20.0,
+            "Iron plate": 2.0
+        }
+    },
+    {
+        "Recipe": "Casting copper",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -3.2,
+            "Molten copper": -20.0,
+            "Copper plate": 2.0
+        }
+    },
+    {
+        "Recipe": "Casting steel",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -3.2,
+            "Molten iron": -30.0,
+            "Steel plate": 1.0
+        }
+    },
+    {
+        "Recipe": "Casting iron gear wheel",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -1.0,
+            "Molten iron": -10.0,
+            "Iron gear wheel": 1.0
+        }
+    },
+    {
+        "Recipe": "Casting iron stick",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -1.0,
+            "Molten iron": -20.0,
+            "Iron stick": 4.0
+        }
+    },
+    {
+        "Recipe": "Casting low density structure",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -15.0,
+            "Molten iron": -80.0,
+            "Molten copper": -250.0,
+            "Low density structure": 1.0,
+            "Plastic": -5.0
+        }
+    },
+    {
+        "Recipe": "Concrete from molten iron",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -10.0,
+            "Molten iron": -20.0,
+            "Concrete": 10.0,
+            "Water": -100.0,
+            "Stone brick": -5.0
+        }
+    },
+    {
+        "Recipe": "Casting copper cable",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -1.0,
+            "Molten copper": -5.0,
+            "Copper cable": 2.0
+        }
+    },
+    {
+        "Recipe": "Tungsten plate",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -10.0,
+            "Tungsten ore": -4.0,
+            "Molten iron": -10.0,
+            "Tungsten plate": 1.0
+        }
+    },
+    {
+        "Recipe": "Metallurgic science pack",
+        "Building": "Foundry",
+        "Deltas": {
+            "Time": -10.0,
+            "Molten copper": -200.0,
+            "Tungsten plate": -2.0,
+            "Tungsten carbide": -3.0,
+            "Metallurgic science pack": 1.0
+        }
+    },
+    {
+        "Recipe": "Coal liquefaction",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -5.0,
+            "Coal": -10.0,
+            "Heavy oil": 65.0,
+            "Light oil": 20.0,
+            "Petroleum gas": 10.0,
+            "Steam": -50.0
+        }
+    },
+    {
+        "Recipe": "Heavy oil cracking",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -2.0,
+            "Heavy oil": -40.0,
+            "Light oil": 30.0,
+            "Water": -30.0
+        }
+    },
+    {
+        "Recipe": "Light oil cracking",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -2.0,
+            "Light oil": -30.0,
+            "Petroleum gas": 20.0,
+            "Water": -30.0
+        }
+    },
+    {
+        "Recipe": "Solid fuel",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -1.0,
+            "Light oil": -10.0,
+            "Solid fuel": 1.0
+        }
+    },
+    {
+        "Recipe": "Acid neutralization",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -5.0,
+            "Calcite": -1.0,
+            "Sulfuric acid": -1000.0,
+            "Steam": 10000.0
+        }
+    },
+    {
+        "Recipe": "Steam condensation",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -1.0,
+            "Water": 90.0,
+            "Steam": -1000.0
+        }
+    },
+    {
+        "Recipe": "Plastic bar",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -1.0,
+            "Coal": -1.0,
+            "Petroleum gas": -20.0,
+            "Plastic": 2.0
+        }
+    },
+    {
+        "Recipe": "Sulfur",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -1.0,
+            "Petroleum gas": -30.0,
+            "Water": -30.0,
+            "Sulfur": 2.0
+        }
+    },
+    {
+        "Recipe": "Battery",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -4.0,
+            "Sulfuric acid": -20.0,
+            "Iron plate": -1.0,
+            "Copper plate": -1.0,
+            "Battery": 1.0
+        }
+    },
+    {
+        "Recipe": "Carbon",
+        "Building": "Chemical Plant",
+        "Deltas": {
+            "Time": -1.0,
+            "Coal": -2.0,
+            "Sulfuric acid": -20.0,
+            "Carbon": 1.0
+        }
+    },
+    {
+        "Recipe": "Tungsten carbide",
+        "Building": "Assembling Machine",
+        "Deltas": {
+            "Time": -1.0,
+            "Tungsten ore": -2.0,
+            "Sulfuric acid": -10.0,
+            "Tungsten carbide": 1.0,
+            "Carbon": -1.0
+        }
+    },
+    {
+        "Recipe": "Rocket fuel",
+        "Building": "Assembling Machine",
+        "Deltas": {
+            "Time": -15.0,
+            "Light oil": -10.0,
+            "Solid fuel": -10.0,
+            "Rocket fuel": 1.0
+        }
+    },
+    {
+        "Recipe": "Copper cable",
+        "Building": "Electromagnetic Plant",
+        "Deltas": {
+            "Time": -0.5,
+            "Copper plate": -1.0,
+            "Copper cable": 2.0
+        }
+    },
+    {
+        "Recipe": "Electronic circuit",
+        "Building": "Electromagnetic Plant",
+        "Deltas": {
+            "Time": -0.5,
+            "Iron plate": -1.0,
+            "Copper cable": -3.0,
+            "Electronic circuit": 1.0
+        }
+    },
+    {
+        "Recipe": "Advanced circuit",
+        "Building": "Electromagnetic Plant",
+        "Deltas": {
+            "Time": -6.0,
+            "Copper cable": -4.0,
+            "Plastic": -2.0,
+            "Electronic circuit": -2.0,
+            "Advanced circuit": 1.0
+        }
+    },
+    {
+        "Recipe": "Processing unit",
+        "Building": "Electromagnetic Plant",
+        "Deltas": {
+            "Time": -10.0,
+            "Sulfuric acid": -5.0,
+            "Electronic circuit": -20.0,
+            "Advanced circuit": -2.0,
+            "Processing unit": 1.0
+        }
+    },
+    {
+        "Recipe": "Rocket part",
+        "Building": "Rocket Silo",
+        "Deltas": {
+            "Time": -3.0,
+            "Low density structure": -1.0,
+            "Processing unit": -1.0,
+            "Rocket fuel": -1.0,
+            "Rocket part": 1
+        }
+    },
+    {
+        "Recipe": "Rocket",
+        "Building": "",
+        "Deltas": {
+            "Rocket part": -50,
+            "Rocket": 1
+        }
+    },
+    {
+        "Recipe": "Automation science pack",
+        "Building": "Assembling Machine",
+        "Deltas": {
+            "Automation science pack": 1,
+            "Copper plate": -1,
+            "Iron gear wheel": -1
+        }
+    },
+    {
+        "Recipe": "Transport belt",
+        "Building": "Foundry",
+        "Deltas": {
+            "Transport belt": 2,
+            "Iron plate": -1,
+            "Iron gear wheel": -1
+        }
+    },
+    {
+        "Recipe": "Inserter",
+        "Building": "Assembling Machine",
+        "Deltas": {
+            "Inserter": 1,
+            "Electronic circuit": -1,
+            "Iron plate": -1,
+            "Iron gear wheel": -1
+        }
+    },
+    {
+        "Recipe": "Logistic science pack",
+        "Building": "Assembling Machine",
+        "Deltas": {
+            "Logistic science pack": 1,
+            "Transport belt": -1,
+            "Inserter": -1
+        }
+    }
+]
